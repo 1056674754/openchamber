@@ -17,7 +17,8 @@ import { Button } from '@/components/ui/button';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { useDeviceInfo } from '@/lib/device';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { primeTerminalInputTransport } from '@/lib/terminalApi';
+import { primeTerminalInputTransport, terminalSnapshotSize } from '@/lib/terminalApi';
+import { copyTextToClipboard } from '@/lib/clipboard';
 import { extractTerminalPreviewUrl, isTerminalPreviewUrlAvailable } from '@/lib/terminalPreview';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_ACTION_ICON_MAP, type ProjectActionIconKey } from '@/lib/projectActions';
@@ -386,7 +387,7 @@ export const TerminalView: React.FC = () => {
                                 const sequence = typeof event.sequence === 'number' ? event.sequence : 0;
                                 const snapshotData = event.data ?? '';
                                 // Empty snapshots preserve existing buffer in the store (query-only history).
-                                replaceBuffer(directory, tabId, snapshotData, sequence, serverId);
+                                replaceBuffer(directory, tabId, snapshotData, sequence, serverId, terminalSnapshotSize(event));
                                 if (event.status === 'exited') {
                                     setTabLifecycle(directory, tabId, 'exited', serverId);
                                 } else {
@@ -764,6 +765,17 @@ export const TerminalView: React.FC = () => {
         [activeServerId, effectiveDirectory, setActiveTab]
     );
 
+    // Touch hosts have no keyboard shortcut for copy, so the toolbar offers the
+    // same action the desktop gets from Cmd/Ctrl+C on a selection.
+    const handleCopySelection = React.useCallback(() => {
+        const selection = terminalControllerRef.current?.getSelection();
+        if (!selection?.text) return;
+        void copyTextToClipboard(selection.text).then((result) => {
+            if (result.ok) toast.success(t('terminalView.toast.selectionCopied'));
+            else toast.error(t('terminalView.toast.copyFailed'));
+        });
+    }, [t]);
+
     const handleCloseTab = React.useCallback(
         (tabId: string) => {
             if (!effectiveDirectory) return;
@@ -824,6 +836,14 @@ export const TerminalView: React.FC = () => {
         },
         [activeModifier, focusTerminalController, isReconnectPending, setActiveModifier, t, terminal]
     );
+
+    // The estimate only seeds the size a brand-new shell is spawned with. A
+    // running PTY keeps its size until Ghostty has fitted the viewport for
+    // real; resizing it to an estimate makes the shell redraw for a width the
+    // emulator never shows.
+    const handleProvisionalSize = React.useCallback((cols: number, rows: number) => {
+        lastViewportSizeRef.current = { cols, rows };
+    }, []);
 
     const handleViewportResize = React.useCallback(
         (cols: number, rows: number) => {
@@ -1154,6 +1174,17 @@ export const TerminalView: React.FC = () => {
                         </Button>
 
                         <div className="flex shrink-0 items-center gap-1 overflow-visible">
+                            <Button
+                                type="button"
+                                size="xs"
+                                variant="ghost"
+                                className="h-7 w-7 p-0"
+                                onClick={handleCopySelection}
+                                title={t('terminalView.actions.copySelection')}
+                                aria-label={t('terminalView.actions.copySelection')}
+                            >
+                                <Icon name="file-copy" className="h-4 w-4" />
+                            </Button>
                             {previewUrl ? (
                                 <Button
                                     type="button"
@@ -1202,7 +1233,9 @@ export const TerminalView: React.FC = () => {
                             chunks={bufferChunks}
                             onInput={handleViewportInput}
                             onResize={handleViewportResize}
+                            onProvisionalSize={handleProvisionalSize}
                             theme={xtermTheme}
+                            monoFont={monoFont}
                             fontFamily={resolvedFontStack}
                             fontSize={terminalFontSize}
                             enableTouchScroll={useTouchTerminalInput}

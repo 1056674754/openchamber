@@ -6,11 +6,20 @@ import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registr
 import { closeTerminal } from '@/lib/terminalApi';
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 
+export type TerminalChunkSize = { cols: number; rows: number };
+
 export interface TerminalChunk {
   id: number;
   data: string;
   replayData?: string;
   byteLength: number;
+  /**
+   * PTY size this chunk was drawn for. Only snapshot history carries it: the
+   * viewport replays such a chunk at this size and then re-fits, because
+   * shell output laid out for one width turns into stray fragments when it is
+   * written into an emulator of another width.
+   */
+  size?: TerminalChunkSize;
 }
 
 export type TerminalBuffer = {
@@ -77,7 +86,7 @@ interface TerminalStore {
   setTabSessionId: (directory: string, tabId: string, sessionId: string | null, serverId?: string) => void;
   setTabLifecycle: (directory: string, tabId: string, lifecycle: TerminalTabLifecycle, serverId?: string) => void;
   setConnecting: (directory: string, tabId: string, isConnecting: boolean, serverId?: string) => void;
-  replaceBuffer: (directory: string, tabId: string, content: string, sequence: number, serverId?: string) => void;
+  replaceBuffer: (directory: string, tabId: string, content: string, sequence: number, serverId?: string, size?: TerminalChunkSize) => void;
   appendToBuffer: (directory: string, tabId: string, chunk: string, serverId?: string, sequence?: number, replayData?: string) => void;
   clearBuffer: (directory: string, tabId: string, serverId?: string) => void;
   setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options?: { locked?: boolean; autoOpened?: boolean }, serverId?: string) => void;
@@ -577,7 +586,7 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        replaceBuffer: (directory: string, tabId: string, content: string, sequence: number, serverId?: string) => {
+        replaceBuffer: (directory: string, tabId: string, content: string, sequence: number, serverId?: string, size?: TerminalChunkSize) => {
           const key = makeStoreKey(directory, serverId);
           set((state) => {
             const existing = state.sessions.get(key);
@@ -605,7 +614,12 @@ export const useTerminalStore = create<TerminalStore>()(
             const chunkId = state.nextChunkId;
             const buffers = new Map(state.buffers);
             buffers.set(entryKey, {
-              chunks: retained.text ? [{ id: chunkId, data: retained.text, byteLength: retained.byteLength }] : [],
+              chunks: retained.text ? [{
+                id: chunkId,
+                data: retained.text,
+                ...(size ? { size } : {}),
+                byteLength: retained.byteLength,
+              }] : [],
               byteLength: retained.byteLength,
               lastSequence: sequence,
             });

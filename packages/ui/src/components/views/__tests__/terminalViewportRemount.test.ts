@@ -59,7 +59,6 @@ describe('terminal viewport remount guard', () => {
     test('derives the initial PTY size before Ghostty mounts', () => {
         expect(terminalViewportSource).toContain('const getProvisionalTerminalSize');
         expect(terminalViewportSource).toContain('React.useLayoutEffect(() => {');
-        expect(terminalViewportSource).toContain('resizeHandlerRef.current(size.cols, size.rows)');
-        expect(terminalViewportSource).toContain('...(provisionalSizeRef.current ?? {})');
+        expect(terminalViewportSource).toContain('(provisionalSizeCallbackRef.current ?? resizeRef.current)(size.cols, size.rows)');
     });
 });

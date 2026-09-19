@@ -49,7 +49,7 @@ export default defineConfig({
       injectRegister: false,
       manifest: false,
       injectManifest: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,otf,eot,wasm}'],
         // iOS Safari/PWA is much more reliable with a classic (non-module) SW bundle.
         rollupFormat: 'iife',
         // We already keep a custom manifest in index.html

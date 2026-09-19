@@ -74,6 +74,9 @@ export interface TerminalStreamEvent {
   data?: string;
   replayData?: string;
   sequence?: number;
+  /** PTY size the snapshot history was drawn for (snapshot events only). */
+  cols?: number;
+  rows?: number;
   status?: 'running' | 'exited';
   exitCode?: number;
   signal?: number | null;

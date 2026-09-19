@@ -35,6 +35,23 @@ describe('terminal buffer isolation', () => {
     expect(useTerminalStore.getState().getBuffer('/repo', localTab, 'default').chunks[0]?.data).toBe('local');
     expect(useTerminalStore.getState().getBuffer('/repo', remoteTab, 'remote-a').chunks[0]?.data).toBe('remote');
   });
+
+  test('snapshot chunks remember the PTY size their history was drawn for', () => {
+    const tabId = setup();
+
+    useTerminalStore.getState().replaceBuffer('/repo', tabId, 'sized\n', 1, 'default', { cols: 94, rows: 56 });
+    useTerminalStore.getState().appendToBuffer('/repo', tabId, 'live\n', 'default', 2);
+
+    const chunks = useTerminalStore.getState().getBuffer('/repo', tabId).chunks;
+    expect(chunks[0]?.size).toEqual({ cols: 94, rows: 56 });
+    // Only snapshot history carries a drawn size; live output follows the fitted grid.
+    expect(chunks[1]?.size).toBeUndefined();
+
+    useTerminalStore.getState().replaceBuffer('/repo', tabId, 'plain\n', 3);
+    const plainChunks = useTerminalStore.getState().getBuffer('/repo', tabId).chunks;
+    expect(plainChunks[0]?.data).toBe('plain\n');
+    expect(plainChunks[0]?.size).toBeUndefined();
+  });
 });
 
 describe('default terminal tab labels', () => {

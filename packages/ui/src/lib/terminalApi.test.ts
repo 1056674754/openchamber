@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import type { TerminalStreamEvent } from "./api/types";
 import { isRemoteTerminalProxyBaseUrl, TerminalTransport } from "./terminalApi";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -65,6 +66,45 @@ describe('TerminalTransport', () => {
     expect(sockets).toHaveLength(1);
     expect(sockets[0].sent.some((message) => message.t === 'detach' && message.s === 'term-1')).toBe(true);
     expect(sockets[0].sent.some((message) => message.t === 'attach' && message.s === 'term-2')).toBe(true);
+    transport.dispose();
+  });
+
+  test('carries the PTY size through snapshot projections and accepted resizes', async () => {
+    const socket = new FakeSocket();
+    const transport = new TerminalTransport('http://127.0.0.1:3000', () => socket as unknown as WebSocket);
+    const events: TerminalStreamEvent[] = [];
+
+    const unsubscribe = transport.subscribe('term-size', { onEvent: (event) => events.push(event) });
+    await tick();
+    socket.open();
+    await tick();
+
+    const frame = (message: Record<string, unknown>): ArrayBuffer => {
+      const payload = new TextEncoder().encode(JSON.stringify(message));
+      const bytes = new Uint8Array(payload.length + 1);
+      bytes[0] = 1;
+      bytes.set(payload, 1);
+      return bytes.buffer;
+    };
+
+    socket.onmessage?.({ data: frame({ t: 'snapshot', v: 3, s: 'term-size', q: 0, history: '', cols: 94, rows: 56, status: 'running' }) } as MessageEvent);
+    await tick();
+
+    const snapshot = events.find((event) => event.type === 'snapshot');
+    expect(snapshot?.cols).toBe(94);
+    expect(snapshot?.rows).toBe(56);
+
+    // A resize the server accepts updates the projection, so a later
+    // subscriber (tab switch, remount) still learns the current PTY size.
+    transport.noteResize('term-size', 120, 40);
+    const replayEvents: TerminalStreamEvent[] = [];
+    transport.subscribe('term-size', { onEvent: (event) => replayEvents.push(event) });
+    await tick();
+
+    const replay = replayEvents.find((event) => event.type === 'snapshot');
+    expect(replay?.cols).toBe(120);
+    expect(replay?.rows).toBe(40);
+    unsubscribe();
     transport.dispose();
   });
 });

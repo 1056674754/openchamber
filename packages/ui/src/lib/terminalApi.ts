@@ -8,6 +8,7 @@ import type {
   TerminalStreamEvent,
   TerminalStreamOptions,
 } from './api/types';
+import type { TerminalChunkSize } from '@/stores/useTerminalStore';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { isTerminalShell } from './terminalShell';
@@ -17,6 +18,9 @@ type Subscriber = { handlers: TerminalHandlers; lastSequence: number };
 type TerminalProjection = {
   sequence: number;
   history: string;
+  /** Current PTY size: what the server reported at attach, updated by every accepted resize. */
+  cols?: number;
+  rows?: number;
   status: TerminalStreamEvent['status'];
   exitCode?: number;
   signal?: number | null;
@@ -88,6 +92,10 @@ export const isRemoteTerminalProxyBaseUrl = (baseUrl?: string): boolean => {
 
 const terminalApiUrl = (path: string, baseUrl?: string): string => resolveApiUrl(path, baseUrl);
 
+/** The PTY size a snapshot event's history was drawn for, when the server reported one. */
+export const terminalSnapshotSize = (event: Pick<TerminalStreamEvent, 'cols' | 'rows'>): TerminalChunkSize | undefined =>
+  event.cols !== undefined && event.rows !== undefined ? { cols: event.cols, rows: event.rows } : undefined;
+
 const toWebSocketUrl = (httpUrl: string): string => {
   if (/^wss?:\/\//i.test(httpUrl)) return httpUrl;
   if (typeof window === 'undefined') {
@@ -146,6 +154,8 @@ export class TerminalTransport {
         type: 'snapshot',
         sequence: projection.sequence,
         data: projection.history,
+        cols: projection.cols,
+        rows: projection.rows,
         status: projection.status,
         exitCode: projection.exitCode,
         signal: projection.signal,
@@ -215,6 +225,17 @@ export class TerminalTransport {
 
   forget(sessionId: string): void {
     this.projections.delete(sessionId);
+  }
+
+  /**
+   * Records a resize the server accepted, so a projection snapshot replayed to
+   * a later subscriber (tab switch, remount) still names the size the
+   * terminal's current screen is drawn for.
+   */
+  noteResize(sessionId: string, cols: number, rows: number): void {
+    const projection = this.projections.get(sessionId);
+    if (!projection) return;
+    this.projections.set(sessionId, { ...projection, cols, rows });
   }
 
   private async ensureConnected(): Promise<void> {
@@ -318,6 +339,8 @@ export class TerminalTransport {
       const projection: TerminalProjection = {
         sequence: typeof message.q === 'number' ? message.q : 0,
         history: typeof message.history === 'string' ? message.history : '',
+        cols: typeof message.cols === 'number' ? message.cols : undefined,
+        rows: typeof message.rows === 'number' ? message.rows : undefined,
         status: message.status as TerminalStreamEvent['status'],
         exitCode: typeof message.exitCode === 'number' ? message.exitCode : undefined,
         signal: typeof message.signal === 'number' ? message.signal : null,
@@ -331,6 +354,8 @@ export class TerminalTransport {
           type: 'snapshot',
           sequence: projection.sequence,
           data: projection.history,
+          cols: projection.cols,
+          rows: projection.rows,
           status: projection.status,
           exitCode: projection.exitCode,
           signal: projection.signal,
@@ -388,10 +413,13 @@ export class TerminalTransport {
           signal: typeof message.signal === 'number' ? message.signal : null,
         });
       } else if (message.t === 'restarted') {
+        const projection = this.projections.get(message.s);
         sub.handlers.onEvent({
           type: 'snapshot',
           sequence: message.q,
           data: typeof message.history === 'string' ? message.history : '',
+          cols: projection?.cols,
+          rows: projection?.rows,
           status: 'running',
         });
       }
@@ -576,6 +604,7 @@ async function command(path: string, method: string, body?: unknown, baseUrl?: s
 
 export async function resizeTerminal(sessionId: string, cols: number, rows: number, baseUrl?: string): Promise<void> {
   await command(`/api/terminal/${sessionId}/resize`, 'POST', { cols, rows }, baseUrl);
+  getTransport(baseUrl).noteResize(sessionId, cols, rows);
 }
 
 export async function updateTerminalAppearance(
