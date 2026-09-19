@@ -510,6 +510,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural': '關聯 worktree 已封存。',
   'sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved': 'worktree 已封存且遠端分支已移除。',
   'sessions.sidebar.sessionDialogs.worktree.label': 'worktree',
+  'sessions.missingDirectory.movedToProject': '此工作階段的資料夾已不存在。工作階段已移至 {project}。',
   'sessions.sidebar.sessionDialogs.worktree.pathUnavailable': 'worktree 路徑無法使用。',
   'sessions.sidebar.sessionDialogs.worktree.uncommittedWarning': '未提交的變更將被捨棄。',
   'sessions.sidebar.sessionDialogs.actions.deleteRemoteBranch': '刪除遠端分支',

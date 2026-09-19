@@ -17,6 +17,7 @@ mock.module('@/lib/chatDirectories', () => ({
     deletedChatDirectories.push({ directory, serverId });
   }),
   isChatDirectoryPath: (directory) => typeof directory === 'string' && directory.includes('/.config/openchamber/chats/'),
+  isChatDirectoryForHome: (directory) => typeof directory === 'string' && directory.includes('/.config/openchamber/chats/'),
   getChatsRootFromDirectory: (directory) => {
     const marker = '/.config/openchamber/chats/';
     const index = typeof directory === 'string' ? directory.indexOf(marker) : -1;

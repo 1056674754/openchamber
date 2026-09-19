@@ -576,6 +576,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural": "Bağlı worktree'ler arşivlendi.",
   "sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved": "Worktree'ler arşivlendi ve uzak branch'ler kaldırıldı.",
   "sessions.sidebar.sessionDialogs.worktree.label": "Worktree",
+  'sessions.missingDirectory.movedToProject': 'Bu oturumun klasörü artık mevcut değil. Oturum {project} konumuna taşındı.',
   "sessions.sidebar.sessionDialogs.worktree.pathUnavailable": "Worktree yolu kullanılamıyor.",
   "sessions.sidebar.sessionDialogs.worktree.uncommittedWarning": "Commit edilmemiş değişiklikler atılacak.",
   "sessions.sidebar.sessionDialogs.actions.deleteRemoteBranch": "Uzak branch'i sil",

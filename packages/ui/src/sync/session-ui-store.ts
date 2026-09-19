@@ -67,6 +67,8 @@ import {
   optimisticSend,
   materializeReturnedMessage,
   refetchSessionMessages,
+  relocateSessionFromMissingDirectory,
+  type MissingDirectoryRelocation,
   type SendDeliveryMode,
 } from "./session-actions"
 import { setSessionRoutingContextGetters } from "./session-routing"
@@ -107,6 +109,7 @@ import {
   createChatDirectory,
   deleteChatDirectory,
   getChatsRootFromDirectory,
+  isChatDirectoryForHome,
   isChatDirectoryPath,
   warmChatsRootDirectory,
 } from "@/lib/chatDirectories"
@@ -385,6 +388,12 @@ export type SessionUIState = {
     directoryHint?: string | null,
     options?: { syncDirectory?: boolean; serverId?: string },
   ) => void
+  /**
+   * Probe whether the session's worktree directory still exists and move the
+   * session (and its stranded subtree) back to the project directory when it
+   * is confirmed gone. No-op for available or unknown directories.
+   */
+  recoverMissingSessionDirectory: (sessionId: string) => Promise<MissingDirectoryRelocation>
   _pendingNavigationSessionId: string | null
   navigateToSession: (sessionId: string, directory: string, projectId: string) => void
   consumeNavigationIntent: () => string | null
@@ -600,6 +609,25 @@ const resolveCreatableDraftDirectory = async (
     return { status: "ok", directory: fallbackDirectory, project: fallbackProject }
   }
   return { status: "ok", directory, project: fallbackProject }
+}
+
+const pendingDirectoryRecoveries = new Map<string, Promise<MissingDirectoryRelocation>>()
+
+/**
+ * Only a directory that is neither a registered project root nor a managed
+ * chat directory can be a deleted worktree. Project roots and chat directories
+ * have nowhere to relocate to, so they are never probed.
+ */
+const isRelocatableSessionDirectory = (directory: string, projects: readonly { path: string }[]): boolean => {
+  if (isChatDirectoryForHome(directory, useDirectoryStore.getState().homeDirectory)) return false
+  return !projects.some((project) => normalizePath(project.path) === directory)
+}
+
+const notifySessionRelocated = async (destinationDirectory: string): Promise<void> => {
+  const project = useProjectsStore.getState().projects.find((entry) => normalizePath(entry.path) === destinationDirectory)
+  toast.info(formatMessage(useI18nStore.getState().dictionary, "sessions.missingDirectory.movedToProject", {
+    project: project?.label ?? destinationDirectory,
+  }))
 }
 
 const recoverStaleDraftDirectory = async (openedDraft: NewSessionDraftState): Promise<void> => {
@@ -1028,6 +1056,16 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       console.warn("Failed to set OpenCode directory for session switch:", e)
     }
 
+    // A worktree session may have lost its directory while it was in the
+    // background. Probe on activation, the same way a reopened draft probes
+    // its inherited directory, so the session is relocated before its tabs
+    // and prompts run against a path that is gone. VS Code registers no
+    // worktrees, so every session there is its workspace root.
+    if (id && resolvedDir && !isVSCodeRuntime()
+      && isRelocatableSessionDirectory(resolvedDir, useProjectsStore.getState().projects)) {
+      void get().recoverMissingSessionDirectory(id)
+    }
+
     // Defer viewport anchor save for previous session — not needed for the
     // skeleton to render and reads messages which can be expensive.
     if (previousSessionId && previousSessionId !== id) {
@@ -1076,6 +1114,40 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       set({ _pendingNavigationSessionId: null })
     }
     return id
+  },
+
+  recoverMissingSessionDirectory: (sessionId) => {
+    const runtimeKey = getRuntimeKey()
+    const key = `${runtimeKey}:${sessionId}`
+    const pending = pendingDirectoryRecoveries.get(key)
+    if (pending) return pending
+
+    const recovery = relocateSessionFromMissingDirectory(sessionId, runtimeKey)
+      .then(async (result) => {
+        if (result.status !== "moved" && result.status !== "failed") return result
+        // The worktree hint was the first thing every directory lookup read;
+        // with the worktree gone it would keep routing tabs to the dead path.
+        for (const movedId of result.movedSessionIds) {
+          get().setWorktreeMetadata(movedId, null)
+        }
+        if (result.status !== "moved") return result
+        if (get().currentSessionId === sessionId) {
+          // Re-select through the normal path so the active directory, project,
+          // and OpenCode client all follow the session to its new home.
+          get().setCurrentSession(sessionId, result.destinationDirectory)
+        }
+        // The server just confirmed a worktree directory is gone; the sidebar's
+        // worktree topology for that project is stale, so let it rediscover.
+        const { notifyWorktreeTopologyChanged } = await import("@/lib/worktrees/worktreeManager")
+        notifyWorktreeTopologyChanged(result.destinationDirectory)
+        await notifySessionRelocated(result.destinationDirectory)
+        return result
+      })
+      .finally(() => {
+        pendingDirectoryRecoveries.delete(key)
+      })
+    pendingDirectoryRecoveries.set(key, recovery)
+    return recovery
   },
 
   // ---------------------------------------------------------------------------

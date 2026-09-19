@@ -568,6 +568,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.sessionDialogs.worktree.attachedArchivedPlural": "Worktrees adjuntos archivados.",
   "sessions.sidebar.sessionDialogs.worktree.archivedAndRemoteRemoved": "Worktrees archivados y ramas remotas eliminadas.",
   "sessions.sidebar.sessionDialogs.worktree.label": "Worktree",
+  "sessions.missingDirectory.movedToProject": "La carpeta de esta sesión ya no existe. La sesión se movió a {project}.",
   "sessions.sidebar.sessionDialogs.worktree.pathUnavailable": "Ruta de worktree no disponible.",
   "sessions.sidebar.sessionDialogs.worktree.uncommittedWarning": "Los cambios sin commit se perderán.",
   "sessions.sidebar.sessionDialogs.actions.deleteRemoteBranch": "Eliminar rama remota",

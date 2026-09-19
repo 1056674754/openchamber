@@ -52,6 +52,8 @@ import { requestSessionArchiveBatch } from "./session-archive-batch"
 import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
 import { isReviewSession } from '@/lib/sessionReviewMetadata'
 import { isBtwSession, getBtwSessionID } from '@/lib/sessionBtwMetadata'
+import { normalizePath } from '@/lib/pathNormalization'
+import { probeWorkspaceDirectoryAvailability } from '@/lib/directoryAvailability'
 
 export {
   resolveApiUrl,
@@ -809,6 +811,7 @@ export async function moveSessionToDirectory(
   sourceDirectory: string,
   destinationDirectory: string,
   moveChanges = true,
+  expectedRuntimeKey?: string,
 ): Promise<void> {
   const client = sdkForSession(session.id, sourceDirectory)
   const controlPlane = client.experimental?.controlPlane
@@ -847,8 +850,151 @@ export async function moveSessionToDirectory(
 
   const moved = reconcileSessionMove(session, sourceDirectory, destinationDirectory)
 
+  // If the runtime changed during the control-plane request, the server move
+  // already happened, but we must not publish stale local state to the UI/stores.
+  if (isStaleRuntime(expectedRuntimeKey)) return
+
   registerSessionDirectory(session.id, destinationDirectory)
   useGlobalSessionsStore.getState().upsertSession(moved)
+}
+
+async function getProjectPrimaryDirectory(sessionId: string, projectID?: string): Promise<string | null> {
+  if (!projectID) return null
+
+  try {
+    const result = await sdkForSession(sessionId).project.list()
+    const projects = (result as { data?: Array<{ id?: string; worktree?: string | null }> } | null)?.data ?? []
+    const projectDirectory = projects.find((candidate) => candidate.id === projectID)?.worktree?.trim()
+    return projectDirectory ? normalizePath(projectDirectory) ?? projectDirectory : null
+  } catch {
+    return null
+  }
+}
+
+type MissingWorktreeRelocation = { sourceDirectory: string; destinationDirectory: string }
+
+const isFilesystemRoot = (directory: string): boolean => directory === "/" || /^[A-Za-z]:\/?$/.test(directory)
+
+const resolveSessionOwnedDirectory = (session: Session): string | null => {
+  const record = session as Session & { directory?: string | null }
+  return normalizePath(record.directory ?? null)
+}
+
+async function resolveMissingWorktreeRelocation(
+  session: Session & { project?: { worktree?: string | null } | null },
+): Promise<MissingWorktreeRelocation | null> {
+  const ownedDirectory = resolveSessionOwnedDirectory(session)
+  const projectWorktree = session.project?.worktree?.trim()
+  if (!ownedDirectory || !projectWorktree) return null
+
+  let availability: 'available' | 'missing' | 'unknown'
+  try {
+    availability = await probeWorkspaceDirectoryAvailability({
+      directory: ownedDirectory,
+      serverBaseUrl: resolveBaseUrl(ownedDirectory) ?? '',
+    })
+  } catch {
+    return null
+  }
+  if (availability !== 'missing') return null
+
+  const projectDirectory = await getProjectPrimaryDirectory(session.id, session.projectID)
+  if (!projectDirectory || projectDirectory === ownedDirectory) return null
+  // OpenCode files a directory outside any Git repository under its global
+  // project, whose "worktree" is the filesystem root. That is not a home for
+  // a session; a managed chat whose directory vanished stays where it is.
+  if (isFilesystemRoot(projectDirectory)) return null
+  return { sourceDirectory: ownedDirectory, destinationDirectory: projectDirectory }
+}
+
+type OwnedSubtreeEntry = { session: Session; ownedDirectory: string | null }
+
+/**
+ * The root's subtree as the global cache knows it, root first. Drawn from the
+ * global cache rather than a live child store so archived descendants that
+ * never materialized in a directory store are still included.
+ */
+function getGlobalSubtree(rootSession: Session): OwnedSubtreeEntry[] {
+  const global = useGlobalSessionsStore.getState()
+  const sessionsById = new Map<string, Session>()
+
+  for (const session of [...global.activeSessions, ...global.archivedSessions]) {
+    const current = sessionsById.get(session.id)
+    if (!current || Boolean(session.time?.archived)) sessionsById.set(session.id, session)
+  }
+  sessionsById.set(rootSession.id, rootSession)
+
+  const subtreeIds = new Set<string>([rootSession.id])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const session of sessionsById.values()) {
+      const parentID = (session as Session & { parentID?: string | null }).parentID ?? null
+      if (parentID && subtreeIds.has(parentID) && !subtreeIds.has(session.id)) {
+        subtreeIds.add(session.id)
+        changed = true
+      }
+    }
+  }
+
+  return [...subtreeIds]
+    .map((id) => sessionsById.get(id))
+    .filter((session): session is Session => Boolean(session))
+    .map((session) => ({ session, ownedDirectory: resolveSessionOwnedDirectory(session) }))
+}
+
+export type MissingDirectoryRelocation =
+  /** The session's directory is gone; its subtree now lives in the project directory. */
+  | { status: "moved"; sourceDirectory: string; destinationDirectory: string; movedSessionIds: string[] }
+  /** The directory is available, its state is unknown, or the session has no project to move to. */
+  | { status: "unchanged" }
+  /** The runtime changed while the relocation was in flight; nothing local was published. */
+  | { status: "stale" }
+  /** A control-plane move failed; `movedSessionIds` already live in the destination. */
+  | { status: "failed"; movedSessionIds: string[]; error: unknown }
+
+/**
+ * Move an active session whose worktree no longer exists into its project's
+ * primary directory.
+ *
+ * Only a server-confirmed `missing` directory qualifies, the destination is
+ * the OpenCode project the session belongs to, and `available`, `unknown`,
+ * probe failures, and sessions without a project leave everything untouched.
+ * Every session of the root's subtree still stranded in that directory moves
+ * with it, root first, so the session the user is looking at is usable even
+ * if a descendant move fails. Moves carry no changes (`moveChanges: false`):
+ * the directory is gone, so there is nothing to carry.
+ */
+export async function relocateSessionFromMissingDirectory(
+  sessionId: string,
+  expectedRuntimeKey: string = getRuntimeKey(),
+): Promise<MissingDirectoryRelocation> {
+  if (isStaleRuntime(expectedRuntimeKey)) return { status: "stale" }
+  const global = useGlobalSessionsStore.getState()
+  const rootSession = global.activeSessions.find((session) => session.id === sessionId)
+    ?? global.archivedSessions.find((session) => session.id === sessionId)
+    ?? null
+  if (!rootSession) return { status: "unchanged" }
+
+  const relocation = await resolveMissingWorktreeRelocation(rootSession)
+  if (isStaleRuntime(expectedRuntimeKey)) return { status: "stale" }
+  if (!relocation) return { status: "unchanged" }
+
+  const stranded = getGlobalSubtree(rootSession)
+    .filter((entry) => entry.ownedDirectory === relocation.sourceDirectory)
+    .map((entry) => entry.session)
+  const movedSessionIds: string[] = []
+  for (const session of stranded) {
+    try {
+      await moveSessionToDirectory(session, relocation.sourceDirectory, relocation.destinationDirectory, false, expectedRuntimeKey)
+    } catch (error) {
+      console.error("[session-actions] relocateSessionFromMissingDirectory failed", error)
+      return { status: "failed", movedSessionIds, error }
+    }
+    if (isStaleRuntime(expectedRuntimeKey)) return { status: "stale" }
+    movedSessionIds.push(session.id)
+  }
+  return { status: "moved", ...relocation, movedSessionIds }
 }
 
 // ---------------------------------------------------------------------------
