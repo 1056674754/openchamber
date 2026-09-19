@@ -128,7 +128,7 @@ const computeProjectRoot = async (directory: string, baseUrl?: string): Promise<
   return directory;
 };
 
-const resolveProjectRoot = async (directory: string, baseUrl?: string): Promise<string> => {
+export const resolveProjectRoot = async (directory: string, baseUrl?: string): Promise<string> => {
   const key = resolvedRootCacheKey(directory, baseUrl);
   const cached = resolvedRootCache.get(key);
   if (cached && Date.now() - cached.resolvedAt < RESOLVED_ROOT_TTL_MS) {

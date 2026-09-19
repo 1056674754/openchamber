@@ -1015,3 +1015,116 @@ describe('getUnpushedBranchCounts', () => {
     await expect(getUnpushedBranchCounts(repository, ['main'])).resolves.toEqual({ counts: {} });
   });
 });
+
+describe('createWorktree remote source refs', () => {
+  const withDataHome = async (test) => {
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+    try {
+      await test();
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  };
+
+  const createRepositoryWithRemote = ({ defaultBranch = 'main' } = {}) => {
+    const remote = createTempDir();
+    runGit(remote, ['init', '--bare', `-b${defaultBranch}`]);
+    const repository = createTempDir();
+    runGit(repository, ['init', '-b', defaultBranch]);
+    runGit(repository, ['config', 'user.email', 'test@example.com']);
+    runGit(repository, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+    runGit(repository, ['add', 'README.md']);
+    runGit(repository, ['commit', '-m', 'Initial commit']);
+    runGit(repository, ['remote', 'add', 'origin', remote]);
+    runGit(repository, ['push', 'origin', defaultBranch]);
+    runGit(repository, ['update-ref', `refs/remotes/origin/${defaultBranch}`, `refs/heads/${defaultBranch}`]);
+    return repository;
+  };
+
+  const readBranchConfig = (cwd, branch, key) => {
+    try {
+      return runGit(cwd, ['config', '--get', `branch.${branch}.${key}`]).trim();
+    } catch {
+      return '';
+    }
+  };
+
+  const waitForBootstrap = async (directory) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await getWorktreeBootstrapStatus(directory);
+      if (status.status === 'ready' || status.status === 'failed') {
+        return status;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error('Timed out waiting for worktree bootstrap');
+  };
+
+  it('does not auto-track the remote start ref when creating a new branch from it with explicit keys', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const repository = createRepositoryWithRemote({ defaultBranch: 'main' });
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/feature',
+        worktreeName: 'feature-wt',
+        startRef: 'remotes/origin/main',
+        setUpstream: true,
+        upstreamRemote: 'origin',
+        upstreamBranch: 'openchamber/feature',
+      });
+
+      expect(created.branch).toBe('openchamber/feature');
+      await waitForBootstrap(created.path);
+      expect(readBranchConfig(created.path, 'openchamber/feature', 'remote')).toBe('');
+      expect(readBranchConfig(created.path, 'openchamber/feature', 'merge')).toBe('');
+    });
+  }, 30_000);
+
+  it('falls back to the tracked local branch when the source fetch fails', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const repository = createRepositoryWithRemote({ defaultBranch: 'main' });
+      runGit(repository, ['branch', '--set-upstream-to=origin/main', 'main']);
+      runGit(repository, ['remote', 'set-url', 'origin', '/nonexistent/openchamber-unreachable.git']);
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/stale-ref-wt',
+        worktreeName: 'stale-ref-wt',
+        startRef: 'remotes/origin/main',
+      });
+
+      expect(created.branch).toBe('openchamber/stale-ref-wt');
+      expect(created.sourceFetchFailed).toBe(true);
+      const expectedHead = runGit(repository, ['rev-parse', 'main']).trim();
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(expectedHead);
+    });
+  }, 30_000);
+
+  it('rejects creation from a remote start ref that was never fetched and cannot be fetched', async () => {
+    if (!canRunGit()) return;
+
+    await withDataHome(async () => {
+      const repository = createRepositoryWithRemote({ defaultBranch: 'main' });
+      runGit(repository, ['update-ref', '-d', 'refs/remotes/origin/main']);
+      runGit(repository, ['remote', 'set-url', 'origin', '/nonexistent/openchamber-unreachable.git']);
+
+      await expect(createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/never-fetched-wt',
+        worktreeName: 'never-fetched-wt',
+        startRef: 'remotes/origin/main',
+      })).rejects.toThrow(/does not appear to be a git repository|Could not read from remote repository|Failed to fetch/i);
+    });
+  }, 30_000);
+});

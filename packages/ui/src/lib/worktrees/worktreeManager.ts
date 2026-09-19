@@ -1,4 +1,6 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { toast } from '@/components/ui';
+import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { execCommand } from '@/lib/execCommands';
 import {
@@ -429,6 +431,11 @@ export async function createWorktree(project: ProjectRef, args: CreateWorktreeAr
   const created = baseUrl
     ? await gitHttp.createGitWorktree(projectDirectory, payload, baseUrl)
     : await git.worktree.create(projectDirectory, payload);
+  if (created?.sourceFetchFailed) {
+    toast.warning(
+      formatMessage(useI18nStore.getState().dictionary, 'session.newWorktree.toast.fetchSourceFailed'),
+    );
+  }
   const returnedName = typeof created?.name === 'string' ? created.name : '';
   const returnedBranch = typeof created?.branch === 'string' ? created.branch : '';
   const returnedPath = typeof created?.path === 'string' ? created.path : '';

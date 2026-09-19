@@ -416,6 +416,8 @@ export interface GitWorktreeCreateResult {
   path: string;
   bootstrapStatus?: GitWorktreeBootstrapStatus;
   directoryCreated?: boolean;
+  /** The remote source ref could not be refreshed; the worktree was created from local state instead. */
+  sourceFetchFailed?: boolean;
 }
 
 export interface RemoveGitWorktreePayload {

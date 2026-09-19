@@ -3438,16 +3438,67 @@ export async function previewWorktreeCreate(directory, input = {}) {
   };
 }
 
+const prepareWorktreeCreateSource = async (context, input = {}) => {
+  if (input?.mode === 'existing') {
+    return { input, sourceFetchFailed: false };
+  }
+
+  const startRef = normalizeStartRef(input?.startRef);
+  const remoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
+  if (!remoteStartRef) {
+    return { input, sourceFetchFailed: false };
+  }
+
+  const status = await getStatus(context.primaryWorktree, { mode: 'light' }).catch(() => null);
+  const trackingRef = status?.tracking
+    ? await resolveRemoteBranchRef(context.primaryWorktree, status.tracking)
+    : null;
+  const canFallbackToLocal = Boolean(
+    status?.current
+    && status.ahead === 0
+    && trackingRef?.fullRef === remoteStartRef.fullRef
+  );
+
+  try {
+    await fetchRemoteBranchRef(context.primaryWorktree, remoteStartRef.remote, remoteStartRef.branch);
+    return { input, sourceFetchFailed: false };
+  } catch (error) {
+    if (canFallbackToLocal) {
+      return {
+        input: { ...input, startRef: status.current },
+        sourceFetchFailed: true,
+      };
+    }
+
+    const refExists = await runGitCommand(
+      context.primaryWorktree,
+      ['show-ref', '--verify', '--quiet', remoteStartRef.fullRef]
+    );
+    if (!refExists.success) {
+      throw error;
+    }
+    console.warn(`Worktree create: failed to refresh ${remoteStartRef.remote}/${remoteStartRef.branch}, proceeding with the existing remote-tracking ref`);
+    return { input, sourceFetchFailed: false };
+  }
+};
+
 export async function createWorktree(directory, input = {}) {
   const mode = input?.mode === 'existing' ? 'existing' : 'new';
   const context = await resolveWorktreeProjectContext(directory);
-  await fsp.mkdir(context.worktreeRoot, { recursive: true });
 
-  const preferredName = String(input?.worktreeName || input?.name || '').trim();
-  const preferredBranchName = cleanBranchName(String(input?.branchName || '').trim());
-  const startRef = normalizeStartRef(input?.startRef);
   const ensureRemoteName = String(input?.ensureRemoteName || '').trim();
   const ensureRemoteUrl = String(input?.ensureRemoteUrl || '').trim();
+  if (ensureRemoteName && ensureRemoteUrl) {
+    await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
+  }
+  const prepared = await prepareWorktreeCreateSource(context, input);
+  const preparedInput = prepared.input;
+
+  await fsp.mkdir(context.worktreeRoot, { recursive: true });
+
+  const preferredName = String(preparedInput?.worktreeName || preparedInput?.name || '').trim();
+  const preferredBranchName = cleanBranchName(String(preparedInput?.branchName || '').trim());
+  const startRef = normalizeStartRef(preparedInput?.startRef);
 
   const candidate = await resolveCandidateDirectory(
     context.worktreeRoot,
@@ -3505,21 +3556,14 @@ export async function createWorktree(directory, input = {}) {
 
     const parsedRemoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
     if (parsedRemoteStartRef) {
+      // Creating a new branch from a remote start ref must not auto-track it:
+      // the branch's own upstream (explicit keys or the bootstrap step) decides
+      // where it pushes, not the ref it happened to start from.
+      worktreeAddArgs.splice(2, 0, '--no-track');
       inferredUpstream = {
         remote: parsedRemoteStartRef.remote,
         branch: parsedRemoteStartRef.branch,
       };
-    }
-  }
-
-  if (ensureRemoteName && ensureRemoteUrl) {
-    await ensureRemoteWithUrl(context.primaryWorktree, ensureRemoteName, ensureRemoteUrl);
-  }
-
-  if (mode === 'new') {
-    const parsedRemoteStartRef = await resolveRemoteBranchRef(context.primaryWorktree, startRef);
-    if (parsedRemoteStartRef) {
-      await fetchRemoteBranchRef(context.primaryWorktree, parsedRemoteStartRef.remote, parsedRemoteStartRef.branch);
     }
   }
 
@@ -3532,10 +3576,10 @@ export async function createWorktree(directory, input = {}) {
   }
 
   const upstreamRemote = shouldSetUpstream
-    ? String(inferredUpstream?.remote || input?.upstreamRemote || '').trim()
+    ? String(preparedInput?.upstreamRemote || inferredUpstream?.remote || '').trim()
     : '';
   const upstreamBranch = shouldSetUpstream
-    ? String(inferredUpstream?.branch || input?.upstreamBranch || '').trim()
+    ? String(preparedInput?.upstreamBranch || inferredUpstream?.branch || '').trim()
     : '';
 
   const bootstrapStatus = setWorktreeBootstrapState(
@@ -3560,7 +3604,7 @@ export async function createWorktree(directory, input = {}) {
   const headResult = await runGitCommand(candidate.directory, ['rev-parse', 'HEAD']);
   const head = String(headResult.stdout || '').trim();
 
-  return {
+  const result = {
     head,
     name: candidate.name,
     branch: localBranch,
@@ -3568,6 +3612,10 @@ export async function createWorktree(directory, input = {}) {
     bootstrapStatus,
     directoryCreated: true,
   };
+  if (prepared.sourceFetchFailed) {
+    result.sourceFetchFailed = true;
+  }
+  return result;
 }
 
 export async function getWorktreeBootstrapStatus(directory) {
