@@ -36,7 +36,7 @@ import { useContextStore } from '@/stores/contextStore';
 import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
 import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
-import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
+import { resolveWorktreeSetupCommands } from '@/lib/sharedTrustConfirmation';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
 import { generateBranchSlug } from '@/lib/git/branchNameGenerator';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -935,7 +935,7 @@ export function NewWorktreeDialog({
     setIsCreating(true);
     
     try {
-      const setupCommands = await getWorktreeSetupCommands(projectRef);
+      const setupCommands = await resolveWorktreeSetupCommands(projectRef);
       const linkedPr = mode === 'new-branch' ? newBranchState.linkedPr : null;
       const sourceBranch = newBranchState.sourceBranch;
 

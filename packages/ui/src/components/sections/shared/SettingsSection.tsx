@@ -9,11 +9,15 @@ interface SettingsSectionProps {
   /** Optional section description */
   description?: string;
   /** Alias of `description` used by ported upstream sections. */
-  info?: string;
+  info?: React.ReactNode;
   /** If true, adds a top border divider */
   divider?: boolean;
   /** Stable settings-navigation anchor id. */
   settingsItem?: string;
+  /** Content rendered next to the title (e.g. a switch). */
+  titleAccessory?: React.ReactNode;
+  /** Action button(s) rendered at the end of the header row. */
+  headerAction?: React.ReactNode;
   /** Class applied to the content wrapper. */
   contentClassName?: string;
   /** Additional className */
@@ -41,6 +45,8 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
   info,
   divider = false,
   settingsItem,
+  titleAccessory,
+  headerAction,
   contentClassName,
   className,
 }) => {
@@ -53,18 +59,26 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
         className
       )}
     >
-      {(title || sectionDescription) && (
-        <div className="mb-4 space-y-1">
+      {(title || sectionDescription || titleAccessory != null || headerAction != null) && (
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div className="min-w-0 space-y-1">
           {title && (
             <h3 className="typography-ui-header font-semibold text-foreground">
               {title}
             </h3>
           )}
-          {sectionDescription && (
-            <p className="typography-meta text-muted-foreground">
-              {sectionDescription}
-            </p>
-          )}
+            {sectionDescription && (
+              <p className="typography-meta text-muted-foreground">
+                {sectionDescription}
+              </p>
+            )}
+          </div>
+          {titleAccessory != null || headerAction != null ? (
+            <div className="flex shrink-0 items-center gap-2">
+              {titleAccessory}
+              {headerAction}
+            </div>
+          ) : null}
         </div>
       )}
       <div className={contentClassName}>{children}</div>
