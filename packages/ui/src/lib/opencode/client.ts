@@ -19,6 +19,7 @@ import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-routing";
 import { resolveApiUrl, resolveOpenCodeProxyApiUrl } from "@/lib/api/serverUrl";
 import { buildOpenCodeHealthUrl } from "./health-url";
+import { hostSessionStatusSnapshotSchema, type HostSessionStatusSnapshot } from "./session-status";
 import { createDirectoryListError } from "./directory-list-error";
 import { FilesystemError, parseFilesystemErrorReason } from '@/lib/api/files-errors';
 import {
@@ -1238,6 +1239,28 @@ class OpencodeService {
     Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }>
   > {
     return (await this.getSessionStatusForDirectory(null)) ?? {};
+  }
+
+  /**
+   * Cross-project busy/retry/idle map kept by the OpenChamber host from the
+   * single upstream event stream. One request that creates no OpenCode
+   * instance, unlike `/session/status?directory=`. `null` means the fetch
+   * failed; callers must preserve their current state.
+   */
+  async getHostSessionStatusSnapshot(): Promise<HostSessionStatusSnapshot | null> {
+    try {
+      const response = await fetch('/api/sessions/status', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) {
+        return null;
+      }
+      const parsed = hostSessionStatusSnapshotSchema.safeParse(await response.json().catch(() => null));
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

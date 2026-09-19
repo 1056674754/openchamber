@@ -12,6 +12,8 @@ import { isOhosApp } from "@/lib/platform"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent } from "./event-reducer"
 import { useGlobalSyncStore, type GlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
+import { applyGlobalSessionStatusEvent } from "./global-session-status"
+import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
 import {
   aggregateLiveSessions,
   aggregateLiveSessionStatuses,
@@ -1352,6 +1354,14 @@ function handleEvent(
 ) {
   const directory = resolveDirectoryFromRoutingIndex(routingIndex, rawDirectory, payload, childStores)
   let shouldMaterializeColdDirectory = false
+
+  // Cross-directory indexes cover unopened directories and list/status races.
+  // They ignore event types they do not track, so every directory event feeds
+  // them regardless of whether a child store also consumes it.
+  if (directory && directory !== "global") {
+    applyGlobalSessionStatusEvent(directory, payload)
+    applyGlobalBlockingRequestEvents(directory, [payload])
+  }
 
   // A batch archive already reconciled the stores from the server's own batch
   // response; the per-session SSE echo of the same write is redundant and is

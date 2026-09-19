@@ -4,6 +4,7 @@ import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive, li
 import { desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { getSyncChildStores, getAllSyncSessions } from '@/sync/sync-refs';
 import { getAllSyncStores, subscribeSyncStoresRegistry } from '@/sync/multi-server-registry';
+import { seedGlobalSessionStatusFromHost } from '@/sync/host-session-status-seed';
 import { useNotificationStore } from '@/sync/notification-store';
 import { respondToPermission } from '@/sync/session-actions';
 import {
@@ -443,9 +444,13 @@ export const useTraySync = (): void => {
     });
 
     const refreshGlobalStatus = async () => {
+      // The host's own cross-project map answers in one request and creates
+      // no OpenCode instance, so the default server never gets a
+      // per-directory `/session/status` fan-out from here.
+      void seedGlobalSessionStatusFromHost();
       const directories = collectStatusPollDirectories();
       if (directories.length === 0) return;
-      await useGlobalSessionsStore.getState().batchLoadStatuses(directories);
+      await useGlobalSessionsStore.getState().batchLoadStatuses(directories, { excludeServerId: DEFAULT_SERVER_ID });
     };
 
     const storeUnsubs = new Map<string, () => void>();

@@ -76,7 +76,7 @@ type GlobalSessionsState = {
   archiveSessions: (ids: Iterable<string>, archivedAt?: number) => void;
   upsertStatus: (sessionId: string, status: SessionStatus) => void;
   removeStatuses: (ids: Iterable<string>) => void;
-  batchLoadStatuses: (directories: string[]) => Promise<void>;
+  batchLoadStatuses: (directories: string[], options?: { excludeServerId?: string }) => Promise<void>;
 };
 
 const PAGE_SIZE = 200;
@@ -841,6 +841,14 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       };
     })();
 
+    void inflightLoad.then(() => {
+      // A fresh catalog lets the host map resolve directories for sessions
+      // this client never observed; seed their live status additively.
+      void import('../sync/host-session-status-seed')
+        .then(({ seedGlobalSessionStatusFromHost }) => seedGlobalSessionStatusFromHost())
+        .catch(() => undefined);
+    }).catch(() => undefined);
+
     return inflightLoad;
   },
 
@@ -1155,11 +1163,12 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     });
   },
 
-  batchLoadStatuses: async (directories) => {
+  batchLoadStatuses: async (directories, options) => {
     if (directories.length === 0) {
       return;
     }
 
+    const excludedServerId = options?.excludeServerId;
     const now = Date.now();
     const targets: StatusTarget[] = [];
     const seenDirectories = new Set<string>();
@@ -1176,6 +1185,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         if (sessionServerId) serverIds.add(sessionServerId);
       }
       for (const serverId of serverIds) {
+        if (excludedServerId && serverId === excludedServerId) continue;
         const key = `${serverId}\n${normalized}`;
         const lastLoadedAt = statusLoadedAtByDirectory.get(key) ?? 0;
         if (now - lastLoadedAt < STATUS_BATCH_TTL_MS) continue;
