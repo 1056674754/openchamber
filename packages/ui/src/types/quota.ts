@@ -19,6 +19,8 @@ export type QuotaProviderId =
   | 'opencode-go'
   | 'crof'
   | 'exe-dev'
+  | 'cline-pass'
+  | 'hyper'
   | 'neuralwatt'
   | 'xai';
 

@@ -18,12 +18,14 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 | Provider ID | Display name | Module | Auth aliases/keys |
 | --- | --- | --- | --- |
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain / credentials file, then `anthropic` / `claude` OpenCode auth, then `CLAUDE_CODE_OAUTH_TOKEN` |
+| `cline-pass` | ClinePass | `providers/cline-pass.js` | `cline-pass` (API key under `key` or `token`) |
 | `codex` | Codex | `providers/codex.js` | `openai`, `codex`, `chatgpt` |
 | `command-code` | Command Code | `providers/command-code.js` | `command-code` auth entry or `COMMAND_CODE_API_KEY` |
 | `crof` | CrofAI | `providers/crof.js` | `crof` |
 | `cursor` | Cursor | `providers/cursor.js` | `CURSOR_TOKEN` / `CURSOR_ACCESS_TOKEN`, `CURSOR_REFRESH_TOKEN`, optional token files, or Cursor desktop SQLite DB |
 | `deepseek` | DeepSeek | `providers/deepseek.js` | `deepseek` |
 | `google` | Google | `providers/google/index.js` | `google`, `google.oauth`, Antigravity accounts file |
+| `hyper` | Charm Hyper | `providers/hyper.js` | `hyper` (API key under `key` or `token`) |
 | `github-copilot` | GitHub Copilot | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `github-copilot-addon` | GitHub Copilot Add-on | `providers/copilot.js` | `github-copilot`, `copilot` |
 | `kimi-for-coding` | Kimi for Coding | `providers/kimi.js` | `kimi-for-coding`, `kimi` |
@@ -41,6 +43,22 @@ These provider IDs are currently dispatchable via `fetchQuotaForProvider(provide
 
 ## Internal-only provider module
 - `providers/openai.js` exists for logic parity/reuse but is intentionally not registered for dispatcher ID routing.
+
+## ClinePass quota semantics
+
+ClinePass reads `data.limits` from its usage-limits endpoint. Web/Electron and
+VS Code accept only known window types with finite numeric or non-empty numeric
+string percentages. Invalid windows are skipped independently; no usable windows
+is a failed refresh, not zero usage. Both implementations choose a non-empty
+`key`, then `token`, and expose auth/fetch dependencies for focused tests.
+Saved UI provider-visibility lists remain authoritative; installations without a
+saved list include ClinePass through the provider registry.
+
+## Charm Hyper balance semantics
+
+`GET https://hyper.charm.land/v1/credits` returns a team's current Hypercredit balance, not a percentage or reset timestamp. The [Hyper FAQ](https://hyper.charm.land/faq) defines one Hypercredit as $0.05. Both runtimes expose `credits_balance` in dollars and `credits` as a numeric label under the UI's localized window title. Keep English unit text out of that numeric label.
+
+Web and VS Code accept finite numeric balances and non-empty numeric strings. Missing, blank, or malformed balances remain explicit failures; zero is valid. Credential lookup uses a non-empty string `key`, then `token`, so malformed or blank keys cannot mark the provider configured or hide a valid fallback token. Hyper fetchers accept `readAuth` and `fetchImpl` dependencies for tests without replacing filesystem or auth modules.
 
 ## OpenCode Go credentials
 

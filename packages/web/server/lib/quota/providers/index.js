@@ -8,6 +8,7 @@
 import { buildResult } from '../utils/index.js';
 
 import * as claude from './claude/index.js';
+import * as clinePass from './cline-pass.js';
 import * as codex from './codex.js';
 import * as commandCode from './command-code.js';
 import * as copilot from './copilot.js';
@@ -16,6 +17,7 @@ import * as cursor from './cursor.js';
 import * as deepseek from './deepseek.js';
 import * as exeDev from './exe-dev.js';
 import * as google from './google/index.js';
+import * as hyper from './hyper.js';
 import * as kimi from './kimi.js';
 import * as nanogpt from './nanogpt.js';
 import * as openai from './openai.js';
@@ -43,6 +45,12 @@ const registry = {
     isConfigured: claude.isConfigured,
     fetchQuota: claude.fetchQuota
   },
+  'cline-pass': {
+    providerId: clinePass.providerId,
+    providerName: clinePass.providerName,
+    isConfigured: clinePass.isConfigured,
+    fetchQuota: clinePass.fetchQuota
+  },
   codex: {
     providerId: codex.providerId,
     providerName: codex.providerName,
@@ -66,6 +74,12 @@ const registry = {
     providerName: deepseek.providerName,
     isConfigured: deepseek.isConfigured,
     fetchQuota: deepseek.fetchQuota
+  },
+  hyper: {
+    providerId: hyper.providerId,
+    providerName: hyper.providerName,
+    isConfigured: hyper.isConfigured,
+    fetchQuota: hyper.fetchQuota
   },
   google: {
     providerId: google.providerId,
@@ -238,4 +252,5 @@ export const fetchMinimaxCnCodingPlanQuota = minimaxCnCodingPlan.fetchQuota;
 export const fetchOllamaCloudQuota = ollamaCloud.fetchQuota;
 export const fetchWaferQuota = wafer.fetchQuota;
 export const fetchOpenCodeGoQuota = opencodeGo.fetchQuota;
+export const fetchHyperQuota = hyper.fetchQuota;
 export const fetchZhipuaiQuota = zhipuaiCodingPlan.fetchQuota;
