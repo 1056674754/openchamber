@@ -572,3 +572,47 @@ describe('new-session draft permission intent', () => {
     }
   });
 });
+
+describe('new session remembers the last used side', () => {
+  const CHAT_DRAFT_PROJECT_ID = 'openchamber:chats';
+
+  const seedProjectSide = () => {
+    // An explicit project open records the "project" side unconditionally.
+    useSessionUIStore.getState().openNewSessionDraft({ target: 'project' });
+    useSessionUIStore.getState().closeNewSessionDraft();
+  };
+
+  beforeEach(() => {
+    useSessionUIStore.getState().closeNewSessionDraft();
+    seedProjectSide();
+  });
+
+  test('a plain new session reopens on the Chat side after the user last picked Chat', () => {
+    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().setNewSessionDraftTarget({ projectId: CHAT_DRAFT_PROJECT_ID });
+    useSessionUIStore.getState().closeNewSessionDraft();
+
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({
+      open: true,
+      target: 'chat',
+      selectedProjectId: CHAT_DRAFT_PROJECT_ID,
+    });
+    useSessionUIStore.getState().closeNewSessionDraft();
+  });
+
+  test('a plain new session stays on the Project side after the user last picked Project', () => {
+    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().setNewSessionDraftTarget({ projectId: 'project' });
+    useSessionUIStore.getState().closeNewSessionDraft();
+
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({
+      open: true,
+      target: 'project',
+    });
+    useSessionUIStore.getState().closeNewSessionDraft();
+  });
+});
