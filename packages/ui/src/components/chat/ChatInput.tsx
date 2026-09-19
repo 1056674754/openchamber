@@ -5,7 +5,10 @@ import { useBrowserVoice } from '@/hooks/useBrowserVoice';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useMessageQueueStore, type QueuedContextPart, type QueuedMessage } from '@/stores/messageQueueStore';
+import { isServerOwnedMessageQueue, queuedContextToMessageParts, useMessageQueueStore, type QueuedContextPart, type QueuedMessage } from '@/stores/messageQueueStore';
+import { buildChatInputHistorySubmissions, mergeSessionInputHistory } from './inputHistory';
+import { createInputHistoryIdentity, selectInputHistoryEntries, useInputHistoryStore } from '@/stores/useInputHistoryStore';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useSessionUIStore, type SendMessageTarget } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { resolveAttachmentSessionKey, useInputStore } from '@/sync/input-store';
@@ -1647,7 +1650,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     // User message history for up/down arrow navigation.
     // Keep this on a narrow hook instead of full session message records.
-    const userMessageHistory = useUserMessageHistory(currentSessionId ?? "");
+    // The persisted input-history store makes prompts survive a reload: the
+    // transcript covers what the server still lists, the persisted bucket adds
+    // what it no longer does (and will carry restorable attachments later).
+    const transcriptMessageHistory = useUserMessageHistory(currentSessionId ?? "");
+    const recallHistoryIdentity = React.useMemo(
+        () => createInputHistoryIdentity(getRuntimeKey(), composerDirectoryContext ?? '', currentSessionId ?? ''),
+        [composerDirectoryContext, currentSessionId]
+    );
+    const persistedHistoryEntries = useInputHistoryStore(
+        React.useCallback(
+            (state) => selectInputHistoryEntries(state, recallHistoryIdentity),
+            [recallHistoryIdentity]
+        )
+    );
+    const userMessageHistory = React.useMemo(
+        () => mergeSessionInputHistory(
+            transcriptMessageHistory.map((text, index) => ({ text, createdAt: transcriptMessageHistory.length - index })),
+            persistedHistoryEntries,
+        ).map((value) => value.text).reverse(),
+        [transcriptMessageHistory, persistedHistoryEntries]
+    );
 
     // Keep messageRef in sync with message state
     React.useEffect(() => {
@@ -2067,9 +2090,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         };
         const submittedDraftText = !queuedOnly ? inputSnapshot.message : '';
         const confirmedMentionsSnapshot = new Set(confirmedMentionsRef.current);
-        const queuedMessagesToSend = queuedMessageId
+        let queuedMessagesToSend = queuedMessageId
             ? queuedMessages.filter((message) => message.id === queuedMessageId)
             : queuedMessages;
+        // Server-owned queue: take before sending so the composer and the
+        // server's dispatch loop cannot deliver the same message twice.
+        let tookFromServerQueue = false;
+        if (isServerOwnedMessageQueue() && currentSessionId && queuedMessagesToSend.length > 0) {
+            try {
+                queuedMessagesToSend = await useMessageQueueStore.getState().takeForSend(currentSessionId, queuedMessageId);
+                tookFromServerQueue = true;
+            } catch (error) {
+                console.warn('[queue] failed to take queued messages for sending:', error);
+                toast.error(t('chat.chatInput.toast.messageSendFailed'), {
+                    description: 'Failed to take queued messages',
+                });
+                return;
+            }
+            if (queuedOnly && queuedMessagesToSend.length === 0) return;
+        }
 
         if (queuedOnly) {
             if (queuedMessagesToSend.length === 0 || !currentSessionId) return;
@@ -2153,7 +2192,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         // Process queued messages first
         const queuedMessagesSnapshot = currentSessionId && queuedMessagesToSend.length > 0
-            ? [...queuedMessages]
+            ? [...queuedMessagesToSend]
             : [];
         const queueSessionId = currentSessionId;
         for (let i = 0; i < queuedMessagesToSend.length; i++) {
@@ -2165,6 +2204,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             // Use agent mention from first message that has one
             if (!agentMentionName && mention?.name) {
                 agentMentionName = mention.name;
+            }
+
+            // Context captured with the queued message follows it (its own
+            // synthetic text parts, instructions first).
+            for (const contextPart of queuedContextToMessageParts(queuedMsg.context ?? [])) {
+                additionalParts.push({ text: contextPart.text, synthetic: true });
             }
 
             if (i === 0) {
@@ -2185,6 +2230,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         // Add current input (skip for queued-only auto-send)
+        let composerHistoryText = '';
         if (!queuedOnly && inputSnapshot.hasContent) {
             const messageToSend = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
             const { sanitizedText, mention } = parseAgentMentions(messageToSend, agents);
@@ -2192,6 +2238,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             const attachmentsToSend = sanitizeAttachmentsForSend(sendableAttachedFiles);
             composerAttachmentsSnapshot = attachmentsToSend;
             addMentionedSkills(messageText);
+            composerHistoryText = messageToSend;
 
             if (!agentMentionName && mention?.name) {
                 agentMentionName = mention.name;
@@ -2302,7 +2349,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
         // Clear queue and input optimistically. Failure recovery below restores
         // these snapshots so a disconnected WS/SSE stream cannot swallow input.
-        if (currentSessionId && queuedMessagesToSend.length > 0) {
+        // (A server-owned queue was already taken above — removing again would
+        // clear messages queued from another device meanwhile.)
+        if (!tookFromServerQueue && currentSessionId && queuedMessagesToSend.length > 0) {
             if (queuedMessageId) {
                 removeFromQueue(currentSessionId, queuedMessageId);
             } else {
@@ -2643,6 +2692,28 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         void sendPromise.then(() => {
+            // Record the prompts that just went out so they still recall after
+            // a reload (queued items are recorded by the queue store itself on
+            // server acceptance; VS Code delivery records them here).
+            const historyIdentity = createInputHistoryIdentity(
+                getRuntimeKey(),
+                submittedDirectory ?? '',
+                submittedSessionId ?? '',
+            );
+            if (historyIdentity) {
+                const historySubmissions = buildChatInputHistorySubmissions({
+                    inputMode,
+                    // Server-owned items were recorded on queue acceptance.
+                    queuedMessages: isServerOwnedMessageQueue() ? [] : queuedMessagesSnapshot,
+                    composerText: composerHistoryText,
+                    composerAttachments: composerAttachmentsSnapshot,
+                    includeComposer: composerHistoryText.length > 0,
+                });
+                if (historySubmissions?.length) {
+                    useInputHistoryStore.getState().appendSubmissions(historyIdentity, historySubmissions);
+                }
+            }
+
             // Clear linked issue after successful message send
             if (linkedIssue) {
                 setLinkedIssue(null);

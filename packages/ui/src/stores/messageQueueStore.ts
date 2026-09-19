@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { z } from 'zod';
 import type { Event } from '@opencode-ai/sdk/v2';
+import { createInputHistoryIdentity, createInputHistorySubmission, useInputHistoryStore } from './useInputHistoryStore';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { contextPartMetadataSchema, type ContextPartMetadata } from '@/lib/messages/contextParts';
@@ -579,6 +580,14 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                             // The optimistic entry is replaced by the server's copy of the queue.
                             set((state) => removeMessageLocally(state, sessionId, id));
                             applyServerSession(result.session, result.revision);
+                            // Queue acceptance records the prompt so it still recalls
+                            // after the server delivers it without this UI.
+                            const historyIdentity = createInputHistoryIdentity(getRuntimeKey(), directory ?? '', sessionId);
+                            if (historyIdentity) {
+                                useInputHistoryStore.getState().appendSubmissions(historyIdentity, [
+                                    createInputHistorySubmission(message.content, message.attachments ?? []),
+                                ]);
+                            }
                         } catch (error) {
                             set((state) => removeMessageLocally(state, sessionId, id));
                             throw error;
