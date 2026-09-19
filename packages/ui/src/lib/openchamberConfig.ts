@@ -4,6 +4,8 @@
  * Migrates from legacy <project>/.openchamber/openchamber.json.
  */
 
+import { z } from 'zod';
+
 import type { FilesAPI, RuntimeAPIs } from './api/types';
 import { resolveApiUrl as resolveServerApiUrl } from './api/serverUrl';
 import { getDesktopHomeDirectory } from './desktop';
@@ -11,6 +13,7 @@ import { isVSCodeRuntime } from './desktop';
 import { DEFAULT_SERVER_ID, serverRegistry } from './opencode/server-registry';
 import { registerRemoteInstanceProxy } from './remote-instances/registry';
 import { createProjectIdFromPath } from './projectId';
+import { runtimeFetch } from './runtime-fetch';
 import { sanitizeStarterRefs, type DraftStarterRef } from './draftStarters';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveBaseUrl as resolveDirectoryBaseUrl } from '@/sync/session-actions';
@@ -58,6 +61,9 @@ export interface OpenChamberProjectAction {
   name: string;
   command: string;
   icon?: string | null;
+  runIn?: 'parent';
+  /** Present on merged entries only. */
+  source?: ProjectSetupSource;
   platforms?: OpenChamberProjectActionPlatform[];
   autoOpenUrl?: boolean;
   openUrl?: string;
@@ -789,13 +795,14 @@ export async function saveWorktreeSetupCommands(project: ProjectRef, commands: s
   return updateOpenChamberConfig(project, { 'setup-worktree': filtered });
 }
 
-export async function getProjectDraftStarters(project: ProjectRef): Promise<DraftStarterRef[]> {
-  const config = await readOpenChamberConfig(project);
-  return sanitizeStarterRefs(config?.draftStarters);
+// Upstream 82a0ee757: project starters come from the merged setup view
+// (shared ones first), not from a direct read of the personal file.
+export async function getProjectDraftStarters(project: ProjectRef): Promise<ProjectDraftStarter[]> {
+  return (await getProjectSetup(project)).draftStarters;
 }
 
 export async function saveProjectDraftStarters(project: ProjectRef, starters: DraftStarterRef[]): Promise<boolean> {
-  return updateOpenChamberConfig(project, { draftStarters: sanitizeStarterRefs(starters) });
+  return updateProjectSetup(project, { draftStarters: sanitizeStarterRefs(starters) });
 }
 
 export async function getProjectNotesAndTodos(project: ProjectRef): Promise<OpenChamberProjectNotesTodos> {
@@ -1044,3 +1051,218 @@ async function deleteLegacyOpenChamberConfig(
     // ignored
   }
 }
+
+
+// ── Project setup (upstream 82a0ee757) ─────────────────────────────────────
+// The client view of the project's setup: the personal config file merged with
+// the team's optional `.openchamber/project.json` in the checkout. The server
+// (or the VS Code bridge) sanitizes; the client only checks the shape.
+
+/** Where a merged entry came from: the repo's shared file or the user's own file. */
+export type ProjectSetupSource = 'shared' | 'personal';
+
+const sourceSchema = z.enum(['shared', 'personal']);
+
+const projectActionSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  command: z.string().min(1),
+  icon: z.string().nullable().optional(),
+  runIn: z.literal('parent').optional(),
+  platforms: z.array(z.enum(['macos', 'linux', 'windows'])).optional(),
+  autoOpenUrl: z.literal(true).optional(),
+  openUrl: z.string().optional(),
+  desktopOpenSshForward: z.string().optional(),
+});
+
+const starterRefsSchema = z.unknown().transform((value) => sanitizeStarterRefs(value));
+
+const sourcedStartersSchema = z.array(z.object({
+  type: z.enum(['command', 'skill']),
+  name: z.string().min(1),
+  source: sourceSchema,
+}));
+
+const sharedSchema = z.object({
+  status: z.enum(['missing', 'ok', 'invalid']),
+  reason: z.string().optional(),
+  path: z.string(),
+  setupWorktree: z.array(z.string()),
+  setupWorktreeWait: z.boolean().nullable(),
+  projectActions: z.array(projectActionSchema),
+  draftStarters: starterRefsSchema,
+  plansDir: z.string().nullable(),
+});
+
+const personalSchema = z.object({
+  setupWorktree: z.array(z.string()),
+  setupWorktreeWait: z.boolean().nullable(),
+  setupWorktreeMode: z.enum(['append', 'replace']),
+  projectActions: z.array(projectActionSchema),
+  projectActionsPrimaryId: z.string().nullable(),
+  draftStarters: starterRefsSchema,
+  hiddenSharedActionIds: z.array(z.string()),
+  sharedTrust: z.object({ hash: z.string(), trustedAt: z.number() }).nullable(),
+});
+
+const projectSetupSchema = z.object({
+  /** Nothing to trust when `hash` is null; otherwise trusted only for the recorded hash. */
+  trust: z.object({ hash: z.string().nullable(), trusted: z.boolean() }),
+  setupWorktree: z.array(z.string()),
+  setupWorktreeWait: z.boolean(),
+  projectActions: z.array(projectActionSchema.extend({ source: sourceSchema })),
+  projectActionsPrimaryId: z.string().nullable(),
+  draftStarters: sourcedStartersSchema,
+  shared: sharedSchema,
+  personal: personalSchema,
+});
+
+export type ProjectSetup = z.infer<typeof projectSetupSchema>;
+
+/** The starters pinned for this project, shared ones first, each marked with its source. */
+export type ProjectDraftStarter = DraftStarterRef & { source: ProjectSetupSource };
+
+/** What a client may change: the personal file only. */
+export type ProjectSetupPatch = Partial<{
+  setupWorktree: string[];
+  setupWorktreeWait: boolean;
+  setupWorktreeMode: 'append' | 'replace';
+  projectActions: OpenChamberProjectAction[];
+  projectActionsPrimaryId: string | null;
+  draftStarters: DraftStarterRef[];
+  hiddenSharedActionIds: string[];
+  /** The trust answer for the shared commands with this hash; `null` forgets it. */
+  sharedTrustHash: string | null;
+}>;
+
+const EMPTY_PROJECT_SETUP: ProjectSetup = {
+  trust: { hash: null, trusted: true },
+  setupWorktree: [],
+  setupWorktreeWait: false,
+  projectActions: [],
+  projectActionsPrimaryId: null,
+  draftStarters: [],
+  shared: {
+    status: 'missing',
+    path: '.openchamber/project.json',
+    setupWorktree: [],
+    setupWorktreeWait: null,
+    projectActions: [],
+    draftStarters: [],
+    plansDir: null,
+  },
+  personal: {
+    setupWorktree: [],
+    setupWorktreeWait: null,
+    setupWorktreeMode: 'append',
+    projectActions: [],
+    projectActionsPrimaryId: null,
+    draftStarters: [],
+    hiddenSharedActionIds: [],
+    sharedTrust: null,
+  },
+};
+
+/**
+ * The storage id is derived from the project path, not from `project.id`:
+ * project ids in settings have churned across versions, and the path-derived
+ * id is what names the config file on disk and locates the checkout.
+ */
+const resolveProjectSetupId = (project: ProjectRef): string => {
+  const projectPath = typeof project?.path === 'string' ? project.path.trim() : '';
+  return projectPath ? createProjectIdFromPath(projectPath) : '';
+};
+
+const projectSetupEndpointFor = (projectId: string): string => `/api/projects/${encodeURIComponent(projectId)}/config`;
+
+const parseSetupResponse = async (response: Response): Promise<ProjectSetup> => {
+  const parsed = projectSetupSchema.safeParse(await response.json());
+  if (!parsed.success) {
+    throw new Error('Project config response has an unexpected shape');
+  }
+  return parsed.data;
+};
+
+/** The project's merged setup, or the empty setup when it cannot be read. */
+export async function getProjectSetup(project: ProjectRef): Promise<ProjectSetup> {
+  const projectId = resolveProjectSetupId(project);
+  if (!projectId) return EMPTY_PROJECT_SETUP;
+  try {
+    const response = await runtimeFetch(projectSetupEndpointFor(projectId), {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await parseSetupResponse(response);
+  } catch (error) {
+    console.warn('Failed to read project config:', error);
+    return EMPTY_PROJECT_SETUP;
+  }
+}
+
+/** Change the personal part of the project's setup. */
+export async function updateProjectSetup(project: ProjectRef, patch: ProjectSetupPatch): Promise<boolean> {
+  const projectId = resolveProjectSetupId(project);
+  if (!projectId) return false;
+  try {
+    const response = await runtimeFetch(projectSetupEndpointFor(projectId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ ...patch, projectPath: project.path.trim() }),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    await parseSetupResponse(response);
+    return true;
+  } catch (error) {
+    console.warn('Failed to save project config:', error);
+    return false;
+  }
+}
+
+/** The source mark is the server's to add; it never travels back in a write. */
+const withoutSource = (action: OpenChamberProjectAction): OpenChamberProjectAction => {
+  const { source: _source, ...rest } = action as OpenChamberProjectAction & { source?: ProjectSetupSource };
+  return rest;
+};
+
+/** What a client may change in the team's shared file; every named key replaces the current value. */
+export type SharedProjectSetupPatch = Partial<{
+  setupWorktree: string[];
+  setupWorktreeWait: boolean | null;
+  projectActions: OpenChamberProjectAction[];
+  draftStarters: DraftStarterRef[];
+  plansDir: string | null;
+}>;
+
+/**
+ * Change the team's shared file in the checkout (`<repo>/.openchamber/project.json`).
+ * The server removes the file when nothing is left in it, and records trust
+ * for the commands this instance just shared. Resolves the merged view, or
+ * `null` on failure so a caller can tell "saved nothing" from "saved and empty".
+ */
+export async function updateSharedProjectSetup(project: ProjectRef, patch: SharedProjectSetupPatch): Promise<ProjectSetup | null> {
+  const projectId = resolveProjectSetupId(project);
+  if (!projectId) return null;
+  const body: SharedProjectSetupPatch = { ...patch };
+  if (patch.projectActions) body.projectActions = patch.projectActions.map(withoutSource);
+  try {
+    const response = await runtimeFetch(`${projectSetupEndpointFor(projectId)}/shared`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await parseSetupResponse(response);
+  } catch (error) {
+    console.warn('Failed to save the shared project config:', error);
+    return null;
+  }
+}
+// ── end project setup ──────────────────────────────────────────────────────

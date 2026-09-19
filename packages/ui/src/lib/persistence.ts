@@ -1536,6 +1536,13 @@ const fetchWebSettings = async (): Promise<DesktopSettings | null> => {
 };
 
 /**
+ * The shared read path (upstream 82a0ee757): one cached, deduped read of the
+ * settings document, whatever the runtime. New consumers load settings through
+ * this instead of fetching `/api/config/settings` by hand.
+ */
+export const loadDesktopSettings = fetchWebSettings;
+
+/**
  * Real GET bypassing cache + in-flight dedup. Deliberately does not touch
  * `_settingsInflight` so it cannot cancel a concurrent background read.
  */
