@@ -39,6 +39,14 @@ describe('OpenCode runtime providers', () => {
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Basic test');
   });
 
+  it('parses per-model endpoints and wire adapters into a models map', async () => {
+    const provider = await getRuntimeProvider('opencode');
+    expect(provider.models.get('free')).toEqual({
+      api: { url: 'https://opencode.ai/zen/v1', npm: null },
+    });
+    expect(provider.baseURL).toBe('https://opencode.ai/zen/v1');
+  });
+
   it('refuses the anonymous Zen sentinel and uses model endpoint fallback', async () => {
     await expect(getRuntimeProvider('opencode')).resolves.toMatchObject({ apiKey: null, anonymousZen: true });
     await expect(getRuntimeProvider('fallback')).resolves.toMatchObject({ baseURL: 'https://fallback.test/v1' });

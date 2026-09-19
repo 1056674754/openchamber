@@ -604,10 +604,13 @@ export async function resolveProviderLogin({ auth, workingDirectory, providerID 
     || null;
 }
 
+const getRuntimeModel = (runtimeProvider, modelID) => runtimeProvider?.models?.get(modelID) ?? null;
+
 export async function callSmallModel({ auth, catalog, workingDirectory, providerID, modelID, prompt, system, maxOutputTokens, responseSchema, timeoutMs, signal }) {
   const tokens = Number(maxOutputTokens) > 0 ? Number(maxOutputTokens) : DEFAULT_MAX_OUTPUT_TOKENS;
   const providerConfig = readProviderConfig(workingDirectory, providerID);
   const runtimeProvider = await getRuntimeProvider(providerID);
+  const runtimeModel = getRuntimeModel(runtimeProvider, modelID);
   // Match OpenCode's resolveSDK precedence:
   // config provider.<id>.options.apiKey wins; the auth.json entry is only a fallback.
   const entry = providerConfig?.auth
@@ -722,7 +725,8 @@ export async function callSmallModel({ auth, catalog, workingDirectory, provider
     ? providerConfigUrl
     : providerID === 'openai'
       ? defaultOpenaiUrl
-      : runtimeProvider?.baseURL
+      : runtimeModel?.api?.url
+        ?? runtimeProvider?.baseURL
         ?? (typeof provider?.api === 'string' && provider.api
           ? provider.api
           : null);

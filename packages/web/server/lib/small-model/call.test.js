@@ -91,6 +91,39 @@ describe('callSmallModel — custom provider config', () => {
     expect(lastCall(fetchMock).init.headers.Authorization).toBe('Bearer runtime-key');
   });
 
+  it('uses the selected runtime model endpoint over the provider-level one', async () => {
+    readConfig.mockReturnValue({});
+    configureOpenCodeRuntimeProviders({
+      buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic test' }),
+    });
+    fetchMock.mockImplementation(async (url) => {
+      if (String(url).endsWith('/provider')) {
+        return Response.json({
+          all: [{
+            id: 'runtime-provider',
+            options: { apiKey: 'plugin-key', baseURL: 'https://runtime-provider/v1beta' },
+            models: {
+              'first-model': { api: { url: 'https://runtime-provider/v1beta', npm: '@ai-sdk/google' } },
+              'selected-model': { api: { url: 'https://runtime-provider/v1', npm: '@ai-sdk/openai' } },
+            },
+          }],
+          connected: ['runtime-provider'],
+        });
+      }
+      return ok('done');
+    });
+
+    await callSmallModel({
+      auth: {}, catalog: {}, workingDirectory: '/proj', providerID: 'runtime-provider', modelID: 'selected-model', prompt: 'hi',
+    });
+
+    const { url, init } = lastCall(fetchMock);
+    expect(url).toBe('https://runtime-provider/v1/chat/completions');
+    expect(url).not.toContain('/v1beta');
+    expect(JSON.parse(init.body).model).toBe('selected-model');
+  });
+
   describe('config-supplied credentials (no auth.json entry)', () => {
     it('resolves an OpenCode file variable before sending the API key', async () => {
       const secretPath = path.join(os.homedir(), '.secret');
