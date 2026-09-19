@@ -325,7 +325,7 @@ export const ReasoningTimelineBlock: React.FC<ReasoningTimelineBlockProps> = ({
                     {!isStreaming && !isExpanded && summary ? (
                         <span
                             className="min-w-0 truncate typography-meta"
-                            style={{ color: 'var(--tools-description)', opacity: 0.8 }}
+                            style={{ color: 'var(--tools-description)' }}
                             title={summary}
                         >
                             {summary}
