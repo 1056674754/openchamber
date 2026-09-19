@@ -27,6 +27,7 @@ type WorktreeListEntry = {
   branch?: string;
   head?: string;
   name?: string;
+  prunable?: boolean;
 };
 
 const deriveHeadStateFromWorktreeEntry = (entry: WorktreeListEntry): 'branch' | 'detached' | 'unborn' => {
@@ -45,7 +46,11 @@ const deriveCanonicalWorktreeFields = (
 ): Pick<WorktreeMetadata, 'worktreeRoot' | 'worktreeStatus' | 'headState' | 'worktreeSource'> => {
   return {
     worktreeRoot: worktreePath,
-    worktreeStatus: 'ready',
+    // A prunable worktree is still registered by git but its directory is
+    // gone. It stays in the topology as `missing` so the sessions that lived
+    // there keep their group in the sidebar and can be opened and relocated;
+    // dropping it would hide those sessions with no way back.
+    worktreeStatus: entry.prunable === true ? 'missing' : 'ready',
     headState: deriveHeadStateFromWorktreeEntry(entry),
     worktreeSource: 'existing',
   };
@@ -72,6 +77,10 @@ export const getLatestWorktreeMetadata = (metadata: WorktreeMetadata): WorktreeM
   }
   return metadata;
 };
+
+/** The name the sidebar shows for a worktree, used in worktree-scoped toasts. */
+export const getWorktreeDisplayName = (worktree: WorktreeMetadata): string =>
+  worktree.branch || worktree.label || worktree.path;
 
 const toAbsolutePath = (baseDir: string, maybeRelativePath: string): string => {
   const normalizedBase = normalizePath(baseDir);
@@ -249,6 +258,31 @@ const getWorktreeListGeneration = (cacheKey: string): number => _worktreeListGen
 const invalidateWorktreeList = (cacheKey: string): void => {
   _worktreeListGeneration.set(cacheKey, getWorktreeListGeneration(cacheKey) + 1);
   _worktreeListCache.delete(cacheKey);
+};
+
+type WorktreeTopologyListener = (projectDirectory: string) => void;
+const worktreeTopologyListeners = new Set<WorktreeTopologyListener>();
+
+/**
+ * Subscribe to in-app evidence that a project's worktree topology changed
+ * outside the flows that publish it themselves (a session relocated out of a
+ * directory the server confirmed missing). The sidebar rediscovers on this
+ * signal the same way it does for the server's `session-created` event, so
+ * the topology stays event-driven with no idle polling.
+ */
+export const subscribeWorktreeTopologyChanged = (listener: WorktreeTopologyListener): (() => void) => {
+  worktreeTopologyListeners.add(listener);
+  return () => {
+    worktreeTopologyListeners.delete(listener);
+  };
+};
+
+export const notifyWorktreeTopologyChanged = (projectDirectory: string): void => {
+  const normalized = normalizePath(projectDirectory);
+  for (const [key] of _worktreeListCache) {
+    invalidateWorktreeList(key);
+  }
+  for (const listener of worktreeTopologyListeners) listener(normalized);
 };
 
 export async function listProjectWorktrees(project: ProjectRef, options?: { force?: boolean }): Promise<WorktreeMetadata[]> {
@@ -519,30 +553,42 @@ export async function removeProjectWorktree(project: ProjectRef, worktree: Workt
   invalidateWorktreeList(getProjectWorktreeKey(project.path, project.serverId));
   invalidateResolvedProjectRootCache();
 
-  // Update sidebar store so removed worktree disappears immediately
+  // Update sidebar store so removed worktree disappears immediately. The
+  // entry may be filed under a different registered project than the one the
+  // removal was requested from, so every project group is cleaned — but only
+  // within the removed worktree's server scope.
   const normalizedWorktreePath = normalizePath(worktree.path);
-  const sidebarProjectKey = getProjectWorktreeKey(projectDirectory, project.serverId);
+  const removedServerId = project.serverId?.trim() || worktree.serverId?.trim() || '';
   const currentByProject = useSessionUIStore.getState().availableWorktreesByProject;
   const updatedByProject = new Map(currentByProject);
-  const projectWorktrees = getWorktreesForProject(updatedByProject, projectDirectory, project.serverId);
-  updatedByProject.set(
-    sidebarProjectKey,
-    projectWorktrees.filter((w) => normalizePath(w.path) !== normalizedWorktreePath),
-  );
+  for (const [projectKey, projectWorktrees] of currentByProject) {
+    const remainingWorktrees = projectWorktrees.filter((candidate) => {
+      if (normalizePath(candidate.path) !== normalizedWorktreePath) return true;
+      const candidateServerId = candidate.serverId?.trim() || '';
+      return candidateServerId !== removedServerId;
+    });
+    if (remainingWorktrees.length !== projectWorktrees.length) {
+      updatedByProject.set(projectKey, remainingWorktrees);
+    }
+  }
 
   // Clean up worktreeMetadata for sessions in the removed worktree
   const currentMetadata = useSessionUIStore.getState().worktreeMetadata;
   const updatedMetadata = new Map(currentMetadata);
   for (const [sid, meta] of currentMetadata.entries()) {
     if (meta && normalizePath(meta.path) === normalizedWorktreePath) {
-      updatedMetadata.delete(sid);
+      const metaServerId = meta.serverId?.trim() || '';
+      if (metaServerId === removedServerId) {
+        updatedMetadata.delete(sid);
+      }
     }
   }
 
   useSessionUIStore.setState({
     availableWorktreesByProject: updatedByProject,
     availableWorktrees: useSessionUIStore.getState().availableWorktrees.filter(
-      (w) => normalizePath(w.path) !== normalizedWorktreePath,
+      (w) => normalizePath(w.path) !== normalizedWorktreePath
+        || (w.serverId?.trim() || '') !== removedServerId,
     ),
     worktreeMetadata: updatedMetadata,
   });

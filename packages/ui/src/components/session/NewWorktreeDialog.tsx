@@ -33,8 +33,8 @@ import { useSelectionStore } from '@/sync/selection-store';
 import * as sessionActions from '@/sync/session-actions';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useContextStore } from '@/stores/contextStore';
-import { validateWorktreeCreate, createWorktree } from '@/lib/worktrees/worktreeManager';
-import { withWorktreeUpstreamDefaults } from '@/lib/worktrees/worktreeCreate';
+import { validateWorktreeCreate } from '@/lib/worktrees/worktreeManager';
+import { createWorktreeWithDefaults } from '@/lib/worktrees/worktreeCreate';
 import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 import { getWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { getRootBranch } from '@/lib/worktrees/worktreeStatus';
@@ -971,8 +971,7 @@ export function NewWorktreeDialog({
         };
       })();
       
-      const resolvedArgs = await withWorktreeUpstreamDefaults(projectDirectory, args);
-      const metadata = await createWorktree(projectRef, resolvedArgs);
+      const metadata = await createWorktreeWithDefaults(projectRef, args);
 
       const linkedIssue = mode === 'new-branch' ? newBranchState.linkedIssue : null;
       const linkedLinearIssueState = mode === 'new-branch' ? newBranchState.linkedLinearIssue : null;

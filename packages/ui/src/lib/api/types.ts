@@ -357,6 +357,8 @@ export interface GitWorktreeInfo {
   name: string;
   branch: string;
   path: string;
+  /** The worktree directory is gone; git keeps it registered until pruned. */
+  prunable?: boolean;
 }
 
 export interface GitWorktreeValidationError {
