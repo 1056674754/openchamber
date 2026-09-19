@@ -1841,28 +1841,28 @@ export const Header: React.FC<HeaderProps> = ({
     return (
       <>
         <DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = true; }}>
-          <Icon name="pencil-ai" className="mr-2 size-4" />
+          <Icon name="pencil-ai" className="mr-1 size-4" />
           {t('sessions.sidebar.session.menu.rename')}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={copyCurrentSessionId}>
-          <Icon name="file-copy" className="mr-2 size-4" />
+          <Icon name="file-copy" className="mr-1 size-4" />
           {t('sessions.sidebar.session.menu.copyId')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => closeOtherTabs()}>
-          <Icon name="close-circle" className="mr-2 size-4" />
+          <Icon name="close-circle" className="mr-1 size-4" />
           {t('header.sessionTabs.closeOtherTabs')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => beginHeaderRetentionAction('archive')}>
-          <Icon name="inbox-archive" className="mr-2 size-4" />
+          <Icon name="inbox-archive" className="mr-1 size-4" />
           {t('sessions.sidebar.bulkActions.archive')}
         </DropdownMenuItem>
         <DropdownMenuItem
           className="text-destructive focus:text-destructive"
           onClick={() => beginHeaderRetentionAction('delete')}
         >
-          <Icon name="delete-bin" className="mr-2 size-4" />
+          <Icon name="delete-bin" className="mr-1 size-4" />
           {t('sessions.sidebar.bulkActions.delete')}
         </DropdownMenuItem>
       </>
@@ -2095,33 +2095,33 @@ export const Header: React.FC<HeaderProps> = ({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-[190px]">
                   <DropdownMenuItem onClick={() => { pendingHeaderRenameRef.current = true; }}>
-                    <Icon name="pencil-ai" className="mr-2 size-4" />
+                    <Icon name="pencil-ai" className="mr-1 size-4" />
                     {t('sessions.sidebar.session.menu.rename')}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={copyCurrentSessionId}>
-                    <Icon name="file-copy" className="mr-2 size-4" />
+                    <Icon name="file-copy" className="mr-1 size-4" />
                     {t('sessions.sidebar.session.menu.copyId')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   {currentSession.share?.url ? (
                     <>
                       <DropdownMenuItem onClick={copyCurrentSessionShareUrl}>
-                        <Icon name="file-copy" className="mr-2 size-4" />
+                        <Icon name="file-copy" className="mr-1 size-4" />
                         {t('sessions.sidebar.session.menu.copyLink')}
                       </DropdownMenuItem>
                       <DropdownMenuItem onClick={() => void unshareCurrentSession()}>
-                        <Icon name="link-unlink-m" className="mr-2 size-4" />
+                        <Icon name="link-unlink-m" className="mr-1 size-4" />
                         {t('sessions.sidebar.session.menu.unshare')}
                       </DropdownMenuItem>
                     </>
                   ) : (
                     <DropdownMenuItem onClick={() => void shareCurrentSession()}>
-                      <Icon name="share-2" className="mr-2 size-4" />
+                      <Icon name="share-2" className="mr-1 size-4" />
                       {t('sessions.sidebar.session.menu.share')}
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem onClick={() => void exportCurrentSession()}>
-                    <Icon name="download" className="mr-2 size-4" />
+                    <Icon name="download" className="mr-1 size-4" />
                     {t('sessions.sidebar.session.menu.exportMarkdown')}
                   </DropdownMenuItem>
                   {!isVSCode && !isChatContext && !currentSession.parentID ? (
@@ -2133,7 +2133,7 @@ export const Header: React.FC<HeaderProps> = ({
                             onClick={moveCurrentSessionToWorktree}
                             className="w-full"
                           >
-                            <Icon name="folder-shared" className="mr-2 size-4" />
+                            <Icon name="folder-shared" className="mr-1 size-4" />
                             {t('sessions.sidebar.session.menu.moveToWorktree')}
                           </DropdownMenuItem>
                         </span>
@@ -2149,14 +2149,14 @@ export const Header: React.FC<HeaderProps> = ({
                   ) : null}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => beginHeaderRetentionAction('archive')}>
-                    <Icon name="inbox-archive" className="mr-2 size-4" />
+                    <Icon name="inbox-archive" className="mr-1 size-4" />
                     {t('sessions.sidebar.bulkActions.archive')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"
                     onClick={() => beginHeaderRetentionAction('delete')}
                   >
-                    <Icon name="delete-bin" className="mr-2 size-4" />
+                    <Icon name="delete-bin" className="mr-1 size-4" />
                     {t('sessions.sidebar.bulkActions.delete')}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
