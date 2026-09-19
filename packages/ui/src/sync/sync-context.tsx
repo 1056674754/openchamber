@@ -49,7 +49,7 @@ import {
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
 import { useRoutingStore } from "@/stores/useRoutingStore"
-import { applyMessageQueueUpdatedEvent } from "@/stores/messageQueueStore"
+import { applyMessageQueueUpdatedEvent, useMessageQueueStore } from "@/stores/messageQueueStore"
 import { useConfigStore, type ConfigConnectionState } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
 import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
@@ -2320,6 +2320,9 @@ export function SyncProvider(props: {
           for (const dir of childStores.children.keys()) {
             triggerReconnectMaterialization(dir)
           }
+          // Queue broadcasts ride the event transport only, so a stream gap
+          // or a transport switch can drop them; re-read the server's queue.
+          void useMessageQueueStore.getState().resync().catch(() => undefined)
         }
         // One-time pending message recovery after first SSE connection
         if (!pendingMessagesRecoveredRef.current) {

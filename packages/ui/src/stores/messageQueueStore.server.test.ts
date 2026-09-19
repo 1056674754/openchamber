@@ -5,7 +5,7 @@ import type { MessageQueueUpdatedEvent } from "./messageQueueStore"
 type FetchCall = { path: string; method: string; body: ReturnType<typeof JSON.parse> }
 let calls: FetchCall[] = []
 let isVSCode = false
-let respond: (call: FetchCall) => Response = () => new Response("{}", { status: 200 })
+let respond: (call: FetchCall) => Response | Promise<Response> = () => new Response("{}", { status: 200 })
 
 mock.module("@/lib/runtime-fetch", () => ({
   runtimeFetch: async (path: string, init?: RequestInit) => {
@@ -26,6 +26,7 @@ const {
   applyMessageQueueUpdatedEvent,
   useMessageQueueStore,
 } = await import("./messageQueueStore")
+const { getRuntimeKey } = await import("@/lib/runtime-switch")
 
 type ServerItem = MessageQueueUpdatedEvent["properties"]["session"]["items"][number]
 type ServerSession = MessageQueueUpdatedEvent["properties"]["session"]
@@ -247,6 +248,55 @@ describe("server-owned message queue", () => {
     applyMessageQueueUpdatedEvent(updated(9, session([serverItem("q2", "later")])))
     applyMessageQueueUpdatedEvent(updated(3, { sessionId: SESSION, directory: "", items: [], sendingId: null }))
     expect(useMessageQueueStore.getState().queuedMessages[SESSION]?.map((m) => m.content)).toEqual(["later"])
+  })
+
+  test("a hydration snapshot predating a broadcast keeps the newer queue", async () => {
+    // A broadcast lands while the hydration round-trip is in flight.
+    applyMessageQueueUpdatedEvent(updated(7, session([serverItem("q9", "from broadcast")])))
+    respond = () => new Promise<Response>((resolve) => {
+      setTimeout(() => resolve(json({ revision: 5, sessions: [session([])] })), 10)
+    })
+    await useMessageQueueStore.getState().hydrate()
+
+    expect(useMessageQueueStore.getState().queuedMessages[SESSION]?.map((m) => m.content)).toEqual(["from broadcast"])
+
+    // A newer snapshot than the broadcast supersedes it again.
+    respond = () => json({ revision: 9, sessions: [session([])] })
+    await useMessageQueueStore.getState().resync()
+    expect(useMessageQueueStore.getState().queuedMessages[SESSION]).toBeUndefined()
+  })
+
+  test("resync re-reads the server only after a hydration established ownership", async () => {
+    // Drop ownership a previous test's hydration established.
+    useMessageQueueStore.getState().resetForRuntimeSwitch(getRuntimeKey())
+    useMessageQueueStore.setState({ queuedMessages: { [SESSION]: [{ id: "q1", content: "a", text: "a", createdAt: 1 }] } })
+    await useMessageQueueStore.getState().resync()
+    expect(calls).toEqual([])
+
+    respond = (call) => (call.method === "POST"
+      ? json({ revision: 6, session: session([]) })
+      : json({ revision: 6, sessions: [session([serverItem("q2", "from server")])] }))
+    await useMessageQueueStore.getState().hydrate()
+    calls = []
+    await useMessageQueueStore.getState().resync()
+    expect(calls.map((call) => call.path)).toEqual(["/api/message-queue"])
+    expect(useMessageQueueStore.getState().queuedMessages[SESSION]?.map((m) => m.id)).toEqual(["q2"])
+  })
+
+  test("a failed take re-reads the server session before rethrowing", async () => {
+    respond = () => json({ revision: 4, sessions: [session([serverItem("q1", "queued")])] })
+    await useMessageQueueStore.getState().hydrate()
+    calls = []
+
+    respond = (call) => (call.path.endsWith("/take")
+      ? new Response("gone", { status: 404 })
+      : json({ revision: 5, sessions: [session([])] }))
+    await expect(useMessageQueueStore.getState().takeForSend(SESSION, "q1")).rejects.toThrow()
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "POST /api/message-queue/sessions/session-1/items/q1/take",
+      "GET /api/message-queue",
+    ])
+    expect(useMessageQueueStore.getState().queuedMessages[SESSION]).toBeUndefined()
   })
 
   test("removeFromQueue and clearQueue update locally and tell the server", async () => {

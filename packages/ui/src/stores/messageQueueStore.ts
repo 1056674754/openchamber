@@ -353,6 +353,8 @@ interface MessageQueueActions {
     getQueueForSession: (sessionId: string) => QueuedMessage[];
     /** Server-owned queue: load the authoritative queue for the active runtime. */
     hydrate: () => Promise<void>;
+    /** Server-owned queue: re-read the server after the event stream had a gap. */
+    resync: () => Promise<void>;
     /** Server-owned queue: apply one session's authoritative state (broadcast or response). */
     applyServerSession: (session: ServerQueueSession, revision: number, expectedRuntimeKey?: string) => void;
     /** Server-owned queue: tell the server to hold or release a session's delivery. */
@@ -668,18 +670,25 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                     takeForSend: async (sessionId, messageId) => {
                         const key = sessionId;
                         if (isServerOwnedMessageQueue()) {
-                            if (messageId) {
-                                const result = await requestJson(
-                                    serverTakeResponseSchema,
-                                    `${sessionPath(sessionId)}/items/${encodeURIComponent(messageId)}/take`,
-                                    jsonInit('POST'),
-                                );
+                            try {
+                                if (messageId) {
+                                    const result = await requestJson(
+                                        serverTakeResponseSchema,
+                                        `${sessionPath(sessionId)}/items/${encodeURIComponent(messageId)}/take`,
+                                        jsonInit('POST'),
+                                    );
+                                    applyServerSession(result.session, result.revision);
+                                    return [toQueuedMessage(result.item)];
+                                }
+                                const result = await requestJson(serverTakeAllResponseSchema, `${sessionPath(sessionId)}/take`, jsonInit('POST'));
                                 applyServerSession(result.session, result.revision);
-                                return [toQueuedMessage(result.item)];
+                                return result.items.map(toQueuedMessage);
+                            } catch (error) {
+                                // The take may have failed because the server already
+                                // delivered or dropped the message; re-read it.
+                                await refreshSession(sessionId);
+                                throw error;
                             }
-                            const result = await requestJson(serverTakeAllResponseSchema, `${sessionPath(sessionId)}/take`, jsonInit('POST'));
-                            applyServerSession(result.session, result.revision);
-                            return result.items.map(toQueuedMessage);
                         }
 
                         const state = get();
@@ -792,23 +801,33 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         const snapshot = await requestJson(serverSnapshotSchema, '/api/message-queue');
                         if (!isCurrent()) return;
                         serverOwnedRuntimeKeys.add(runtimeKey);
-                        appliedRevisions.clear();
                         set((state) => {
                             // Everything this runtime persisted is superseded by the
-                            // server's authoritative queue.
-                            return {
-                                queuedMessages: Object.fromEntries(
-                                    snapshot.sessions
-                                        .map((session) => [session.sessionId, session.items.map(toQueuedMessage)])
-                                        .filter(([, queue]) => (queue as QueuedMessage[]).length > 0),
-                                ),
-                                sendingIds: Object.fromEntries(
-                                    snapshot.sessions
-                                        .filter((session) => session.sendingId)
-                                        .map((session) => [session.sessionId, [session.sendingId as string]]),
-                                ),
-                            };
+                            // server's authoritative queue — except a broadcast newer
+                            // than this snapshot, which wins listed in it or not.
+                            const isNewerThanSnapshot = (sessionId: string) => (appliedRevisions.get(sessionId) ?? -1) > snapshot.revision;
+                            const queuedMessages: Record<string, QueuedMessage[]> = {};
+                            const sendingIds: Record<string, string[]> = {};
+                            for (const [sessionId, queue] of Object.entries(state.queuedMessages)) {
+                                if (isNewerThanSnapshot(sessionId)) queuedMessages[sessionId] = queue;
+                            }
+                            for (const [sessionId, ids] of Object.entries(state.sendingIds)) {
+                                if (isNewerThanSnapshot(sessionId)) sendingIds[sessionId] = ids;
+                            }
+                            for (const session of snapshot.sessions) {
+                                if (isNewerThanSnapshot(session.sessionId)) continue;
+                                appliedRevisions.set(session.sessionId, snapshot.revision);
+                                const queue = session.items.map(toQueuedMessage);
+                                if (queue.length > 0) queuedMessages[session.sessionId] = queue;
+                                if (session.sendingId) sendingIds[session.sessionId] = [session.sendingId];
+                            }
+                            return { queuedMessages, sendingIds };
                         });
+                    },
+
+                    resync: async () => {
+                        if (!serverOwnedRuntimeKeys.has(getRuntimeKey())) return;
+                        await get().hydrate();
                     },
 
                     applyServerSession,
