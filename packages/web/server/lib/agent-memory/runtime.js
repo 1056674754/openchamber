@@ -51,6 +51,7 @@ const PROJECT_MEMORY_MAX_ITEMS = 200;
  */
 const MEMORY_TYPES = new Set(['fact', 'preference', 'reference']);
 
+import { projectConfigFileStemOf } from '../projects/project-id.js';
 import { findThreatPattern } from './threat-patterns.js';
 
 const PROJECT_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
@@ -211,7 +212,8 @@ export const createAgentMemoryRuntime = (deps) => {
       return {
         scope: 'project',
         key: `project:${projectId}`,
-        filePath: path.join(projectsDirPath, projectId, 'memory.json'),
+        // Same bounded folder name as `project-context` and the config file.
+        filePath: path.join(projectsDirPath, projectConfigFileStemOf(projectId), 'memory.json'),
       };
     }
     throw new Error('scope is required');
