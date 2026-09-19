@@ -197,7 +197,7 @@ export function ArchiveView(): React.ReactNode {
                 setVisibleCount(PAGE_SIZE);
               }}
               placeholder={t('sessions.archivePage.searchPlaceholder')}
-              className="h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-3 typography-ui-label text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+              className="h-8 w-full rounded-md border border-border bg-transparent pl-8 pr-3 typography-ui-label text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
             />
           </div>
           <span className="typography-micro text-muted-foreground">
@@ -215,8 +215,7 @@ export function ArchiveView(): React.ReactNode {
                   : t('sessions.archivePage.empty.noArchived')}
               </p>
             ) : visibleSessions.map((session) => (
-              <div key={session.id} className="group/session relative">
-                <button
+              <div key={session.id} className="group/session relative">                <button
                   type="button"
                   onClick={() => openSession(session)}
                   className="flex w-full items-center gap-3 rounded-md py-1 pl-2 pr-14 text-left hover:bg-interactive-hover/40"

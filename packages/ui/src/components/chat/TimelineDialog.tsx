@@ -276,8 +276,7 @@ export const TimelineDialog: React.FC<TimelineDialogProps> = ({
                                     }}
                                     className={cn(
                                         "group flex items-center gap-2 py-1.5 hover:bg-interactive-hover/30 rounded transition-colors cursor-pointer",
-                                        isSelected && "bg-interactive-selection text-interactive-selection-foreground"
-                                    )}
+                                        isSelected && "bg-interactive-selection text-interactive-selection-foreground"                                    )}
                                     onClick={() => void navigateToMessage(message.info.id)}
                                     onMouseEnter={() => setSelectedIndex(index)}
                                 >

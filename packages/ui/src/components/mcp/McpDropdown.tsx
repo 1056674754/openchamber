@@ -127,14 +127,13 @@ export const McpDropdownContent: React.FC<McpDropdownContentProps> = ({ active, 
           </div>
           <button
             type="button"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             disabled={isSpinning}
             onClick={handleRefresh}
             aria-label={t('mcpDropdown.actions.refreshAria')}
           >
             <Icon name="refresh" className={cn('h-4 w-4', isSpinning && 'animate-spin')} />
-          </button>
-        </div>
+          </button>        </div>
       </div>
 
       <div className="max-h-64 overflow-y-auto py-2">

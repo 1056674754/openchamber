@@ -871,8 +871,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                   </TooltipTrigger>
                 </Tooltip>
               );
-            })}
-          </div>
+            })}          </div>
         </div>
 
         {/* Footer */}
@@ -986,8 +985,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               type="button"
               onClick={handleOpenPageSidebar}
               aria-label={t('settings.view.actions.openSectionList')}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"            >
               <Icon name="list-unordered" className="h-5 w-5" />
             </button>
           )}
@@ -998,8 +996,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               onClick={onClose}
               aria-label={t('settings.view.actions.closeSettings')}
               title={t('settings.view.actions.closeSettingsWithShortcut', { shortcut: shortcutKey })}
-              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
+              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"            >
               <Icon name="close" className="h-5 w-5" />
             </button>
           )}
@@ -1015,8 +1012,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                 type="button"
                 onClick={handleBack}
                 aria-label={t('settings.view.actions.back')}
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              >
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md p-0.5 text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"              >
                 <Icon name="arrow-left-s" className="h-5 w-5" />
               </button>
             )}
@@ -1095,8 +1091,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                 <Icon name="close" className="h-5 w-5" />
               </button>
             )}
-          </div>
-        </div>
+          </div>        </div>
       )}
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
