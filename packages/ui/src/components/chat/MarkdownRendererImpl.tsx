@@ -8,6 +8,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { marked, type Tokens } from 'marked';
 import remend from 'remend';
+import { stabilizeMarkdownTableWidths } from './markdownTableLayout';
 import { FadeInOnReveal } from './message/FadeInOnReveal';
 import type { Part } from '@opencode-ai/sdk/v2';
 import { cn } from '@/lib/utils';
@@ -305,6 +306,31 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
   const { isMobile, isTablet } = useDeviceInfo();
   const alwaysShowActions = isMobile || isTablet;
 
+  // Re-measure column widths after each content update so tables hug their
+  // content instead of stretching to the container. rAF-deferred to run after
+  // layout; the frame is coalesced across rapid streaming renders.
+  const tableLayoutFrameRef = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    if (tableLayoutFrameRef.current !== null) {
+      window.cancelAnimationFrame(tableLayoutFrameRef.current);
+    }
+    const frame = window.requestAnimationFrame(() => {
+      tableLayoutFrameRef.current = null;
+      const wrapper = tableRef.current;
+      if (!wrapper) return;
+      // Content changed: allow re-measuring a table that was stabilized before.
+      wrapper.querySelector('table')?.removeAttribute('data-md-table-layout');
+      stabilizeMarkdownTableWidths(wrapper);
+    });
+    tableLayoutFrameRef.current = frame;
+    return () => {
+      if (tableLayoutFrameRef.current !== null) {
+        window.cancelAnimationFrame(tableLayoutFrameRef.current);
+        tableLayoutFrameRef.current = null;
+      }
+    };
+  });
+
   return (
     <div className="group my-3 flex flex-col gap-1" data-markdown="table-wrapper" ref={tableRef}>
       <div className={cn(
@@ -315,7 +341,7 @@ const TableWrapper: React.FC<{ children?: React.ReactNode; className?: string }>
         <TableDownloadButton tableRef={tableRef} />
       </div>
       <div className="overflow-x-auto rounded-lg border border-border/70 bg-[var(--surface-elevated)]">
-        <table className={cn('w-full border-collapse typography-meta', className)} data-markdown="table">
+        <table className={cn('w-max border-collapse typography-meta', className)} data-markdown="table">
           {children}
         </table>
       </div>
@@ -1177,10 +1203,10 @@ const buildMarkdownComponents = ({
     return <tr {...props} className={cn('border-b border-border/60', props.className)}>{children}</tr>;
   },
   th({ children, ...props }) {
-    return <th {...props} className={cn('border-r border-border/60 px-3 py-2 text-left align-middle font-semibold text-foreground last:border-r-0', props.className)}>{children}</th>;
+    return <th {...props} className={cn('min-w-[120px] max-w-[320px] whitespace-normal [overflow-wrap:anywhere] border-r border-border/60 px-3 py-2 text-left align-middle font-semibold text-foreground last:border-r-0', props.className)}>{children}</th>;
   },
   td({ children, ...props }) {
-    return <td {...props} className={cn('border-r border-border/60 px-3 py-2 align-middle text-foreground/90 last:border-r-0', props.className)}>{children}</td>;
+    return <td {...props} className={cn('min-w-[120px] max-w-[320px] whitespace-normal [overflow-wrap:anywhere] border-r border-border/60 px-3 py-2 align-middle text-foreground/90 last:border-r-0', props.className)}>{children}</td>;
   },
   ul({ children, ...props }) {
     return <ul {...props} className={cn('typography-markdown-body my-2', props.className)}>{children}</ul>;
