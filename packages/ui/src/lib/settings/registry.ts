@@ -643,6 +643,7 @@ export const LOCAL_DEVICE_KEYS = [
   'contextRailOrder',
   'notesPanelHeight',
   'todoPanelHeight',
+  'messageQueueExpanded',
   'isSessionSwitcherOpen',
   'isSessionDropdownOpen',
   'activeMainTab',

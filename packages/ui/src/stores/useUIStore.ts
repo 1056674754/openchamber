@@ -682,6 +682,12 @@ interface UIStore {
   contextRailOrder: string[];
   notesPanelHeight: number;
   todoPanelHeight: number;
+  /**
+   * Whether the queued-messages panel above the composer shows its list. One
+   * preference for every session: the user opens or closes it once and it
+   * stays that way across session switches and reloads.
+   */
+  messageQueueExpanded: boolean;
   isSessionSwitcherOpen: boolean;
   isSessionDropdownOpen: boolean;
   activeMainTab: MainTab;
@@ -863,6 +869,7 @@ interface UIStore {
   setContextPanelSplit: (directory: string, splitTabId: string | null) => void;
   setContextPanelSplitRatio: (directory: string, ratio: number) => void;
   setNotesPanelHeight: (height: number) => void;
+  setMessageQueueExpanded: (expanded: boolean) => void;
   setTodoPanelHeight: (height: number) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
   setSessionDropdownOpen: (open: boolean) => void;
@@ -1043,6 +1050,7 @@ export const useUIStore = create<UIStore>()(
         contextPanelScope: 'directory',
         contextRailOrder: [],
         notesPanelHeight: 112,
+        messageQueueExpanded: true,
         todoPanelHeight: 259,
         isSessionSwitcherOpen: false,
         isSessionDropdownOpen: false,
@@ -1619,6 +1627,10 @@ export const useUIStore = create<UIStore>()(
 
         setNotesPanelHeight: (height) => {
           set({ notesPanelHeight: height });
+        },
+
+        setMessageQueueExpanded: (expanded) => {
+          set((state) => (state.messageQueueExpanded === expanded ? state : { messageQueueExpanded: expanded }));
         },
 
         setTodoPanelHeight: (height) => {
@@ -2759,6 +2771,7 @@ export const useUIStore = create<UIStore>()(
           contextRailOrder: state.contextRailOrder,
           notesPanelHeight: state.notesPanelHeight,
           todoPanelHeight: state.todoPanelHeight,
+          messageQueueExpanded: state.messageQueueExpanded,
           isSessionSwitcherOpen: state.isSessionSwitcherOpen,
           isSessionDropdownOpen: state.isSessionDropdownOpen,
           activeMainTab: state.activeMainTab,

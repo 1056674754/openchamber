@@ -17,6 +17,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
 import { useI18n } from '@/lib/i18n';
@@ -120,15 +121,10 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
 export const QueuedMessageChips = memo(({ hidden = false, onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
     const { t } = useI18n();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-    // Collapse is local to the mounted session queue and survives temporary
-    // hiding behind btw; switching queue identity resets it. Collapsed by
-    // default: the header strip is enough while a turn runs.
-    const [collapsed, setCollapsed] = React.useState(true);
-    const [collapseSessionId, setCollapseSessionId] = React.useState(currentSessionId);
-    if (collapseSessionId !== currentSessionId) {
-        setCollapseSessionId(currentSessionId);
-        setCollapsed(false);
-    }
+    // One shared preference, so the list stays open (or closed) across
+    // session switches instead of resetting with the queue key.
+    const collapsed = !useUIStore((state) => state.messageQueueExpanded);
+    const setMessageQueueExpanded = useUIStore((state) => state.setMessageQueueExpanded);
     const bodyId = React.useId();
     const bodyRef = React.useRef<HTMLDivElement | null>(null);
     const queuedMessages = useMessageQueueStore(
@@ -186,7 +182,7 @@ export const QueuedMessageChips = memo(({ hidden = false, onEditMessage, onSendM
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => setCollapsed((value) => !value)}
+                    onClick={() => setMessageQueueExpanded(collapsed)}
                     aria-expanded={!collapsed}
                     aria-controls={collapsed ? undefined : bodyId}
                     className="min-w-0 flex-1 shrink justify-start px-0 normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"

@@ -583,6 +583,10 @@
       "scope": "device",
       "local": true
     },
+    "messageQueueExpanded": {
+      "scope": "device",
+      "local": true
+    },
     "todoPanelHeight": {
       "scope": "device",
       "local": true
