@@ -156,7 +156,7 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
 
 const USER_SHELL_MARKER_TEXT = "The following tool was executed by the user"
 
-export function routeMessage(params: {
+export async function routeMessage(params: {
   sessionId: string
   content: string
   providerID: string
@@ -231,11 +231,32 @@ export function routeMessage(params: {
 
   // Slash commands — fire and forget, SSE delivers messages and status
   if (params.content.startsWith("/")) {
-    const dirState = getDirectoryState(sessionDirectory)
-    const syncCommands = dirState?.command ?? []
     const storeCommands = useCommandsStore.getState().commands
     const storeSkills = useSkillsStore.getState().skills
-    const target = resolveSlashRouteTarget(params.content, [syncCommands, storeCommands, storeSkills])
+
+    // The command list is no longer pre-warmed at bootstrap (it initializes
+    // the directory's whole MCP fleet), so a name matched by neither store
+    // gets one live lookup before the input falls through to a plain prompt.
+    // The lookup is default-server scoped: remote stores were never
+    // pre-warmed with command data, so their matching stays stores-only.
+    let matchedCommand: { name: string } | undefined
+    const cmdName = params.content.slice(1).split(" ")[0]
+    const matchedSkill = storeSkills.find((s) => s.name === cmdName)
+    if (!matchedCommand && !matchedSkill && targetServerId === DEFAULT_SERVER_ID) {
+      try {
+        matchedCommand = (await opencodeClient.listCommandsWithDetails(sessionDirectory))
+          .find((c) => c.name === cmdName)
+      } catch {
+        // Command dispatch remains authoritative on the server; treating the
+        // input as a plain prompt is the pre-existing fallthrough.
+      }
+    }
+
+    const target = resolveSlashRouteTarget(params.content, [
+      matchedCommand ? [matchedCommand] : [],
+      storeCommands,
+      storeSkills,
+    ])
 
     if (target) {
       return optimisticSend({
@@ -1711,9 +1732,8 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       const tokenBudget = uiState.sessionGoalDefaultBudgetEnabled ? uiState.sessionGoalDefaultBudget : null
       let objective = goalArm.objectiveOverride?.trim() || content
       if (!goalArm.objectiveOverride && content.startsWith("/")) {
-        const directoryCommands = getDirectoryState(goalDirectory ?? undefined)?.command ?? []
-        const storedCommands = useCommandsStore.getState().commands
-        objective = expandSlashCommandGoalObjective(content, [...directoryCommands, ...storedCommands])
+        const knownCommands = [...useCommandsStore.getState().commands]
+        objective = expandSlashCommandGoalObjective(content, knownCommands)
         if (objective === content) {
           objective = expandSlashCommandGoalObjective(
             content,

@@ -268,8 +268,12 @@ export async function bootstrapDirectory(input: {
       emitSyncConfigChanged(directory, config)
     })),
     retry(() => sdk.app.agents({ directory }).then((x) => set({ agent: unwrap(x, "app.agents") }))),
-    retry(() => sdk.command.list({ directory }).then((x) => set({ command: unwrap(x, "command.list") }))),
-    retry(() => sdk.mcp.status({ directory }).then((x) => set({ mcp: unwrap(x, "mcp.status") }))),
+    // MCP status and the command list are deliberately not read here. Reading
+    // MCP state initializes the directory's whole stdio server fleet as an
+    // OpenCode side effect, and listing commands enumerates MCP prompts,
+    // which touches that same state. Every directory bootstrapped at startup
+    // would otherwise launch one full fleet per project. Both surfaces fetch
+    // on demand through their own stores (useMcpStore, useCommandsStore).
     retry(() => sdk.lsp.status({ directory }).then((x) => set({ lsp: unwrap(x, "lsp.status") }))),
     retry(() =>
       sdk.vcs.get({ directory }).then((x) => {
