@@ -36,6 +36,8 @@ import {
   isWsClosePayload,
   normalizeTunnelRequest,
 } from './tunnel-payloads';
+import { getClientPlatform } from '../platform';
+import { version as appVersion } from '../../../package.json';
 
 const EMPTY_PAYLOAD = new Uint8Array(0);
 const textEncoder = new TextEncoder();
@@ -337,6 +339,10 @@ export const createRelayTunnelClient = (options: RelayTunnelClientOptions): Rela
     url.searchParams.set('v', String(RELAY_PROTOCOL_VERSION));
     url.searchParams.set('role', 'client');
     url.searchParams.set('serverId', options.serverId);
+    // Describe this client, independently of the remote host's runtime.
+    url.searchParams.set('appId', 'openchamber');
+    url.searchParams.set('appVersion', appVersion);
+    url.searchParams.set('platform', getClientPlatform());
     if (options.grant) url.searchParams.set('grant', options.grant);
     return url.toString();
   };
