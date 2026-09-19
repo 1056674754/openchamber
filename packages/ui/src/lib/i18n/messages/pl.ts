@@ -3125,4 +3125,35 @@ export const dict: Record<I18nKey, string> = {
   'settings.projects.shared.status.ok': 'W repozytorium',
   'settings.projects.shared.title': 'Konfiguracja w repozytorium',
   'settings.projects.shared.toast.shareFailed': 'Nie udało się zaktualizować konfiguracji w repozytorium',
-} as const;
+
+  // [fork-port] Sidebar keys ported from upstream v1.24.2
+  // Upstream translations reused where the upstream locale provides them; otherwise English.
+  'common.date.today': 'Today',
+  'common.date.yesterday': 'Yesterday',
+  'common.relative.daysAgoCompact': '{count}d ago',
+  'common.relative.hoursAgoShort': '{count}h ago',
+  'common.relative.justNow': 'Just now',
+  'common.relative.minutesAgoShort': '{count}min ago',
+  'common.relative.weeksAgoCompact': '{count}w ago',
+  'common.relative.yearsAgoCompact': '{count}y ago',
+  'sessions.aiRename.generating': 'Generowanie tytułu sesji...',
+  'sessions.sidebar.group.empty.grantAccess': 'Przyznaj dostęp',
+  'sessions.sidebar.group.empty.initializationFailed': 'Nie udało się zainicjować obszaru roboczego.',
+  'sessions.sidebar.group.empty.loadFailed': 'Nie udało się odświeżyć sesji.',
+  'sessions.sidebar.group.empty.loadingSessions': 'Wczytywanie sesji…',
+  'sessions.sidebar.group.empty.permissionDenied': 'Wymagany jest dostęp do folderu.',
+  'sessions.sidebar.group.empty.retry': 'Spróbuj ponownie',
+  'sessions.sidebar.group.worktreeMissing': 'Brak folderu worktree',
+  'sessions.sidebar.header.actions.extensionPages': 'Strony rozszerzeń',
+  'sessions.sidebar.header.grouping.label': 'Grupowanie sesji',
+  'sessions.sidebar.header.projectDisplay.label': 'Wyświetlanie projektów',
+  'sessions.sidebar.project.actions.edit': 'Edytuj',
+  'sessions.sidebar.project.selectAria': 'Wybierz projekt, obecnie {project}',
+  'sessions.sidebar.projectAction.active': 'Trwa wykonywanie akcji projektu',
+  'sessions.sidebar.session.copyId.error': 'Nie udało się skopiować ID sesji',
+  'sessions.sidebar.session.copyId.success': 'Skopiowano ID sesji',
+  'sessions.sidebar.session.export.failedLoadHistory': 'Nie udało się wczytać pełnej historii sesji',
+  'sessions.sidebar.session.status.questionPendingMany': 'Liczba oczekujących pytań: {count}',
+  'sessions.sidebar.session.status.questionPendingSingle': '1 oczekujące pytanie',
+
+};

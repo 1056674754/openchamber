@@ -253,3 +253,11 @@ export const streamPerfMeasure = <T>(metric: string, fn: () => T): T => {
         updatePerfCounter(metric, nowMs() - start);
     }
 };
+
+// [fork-port] Ported from upstream v1.24.2 (sidebar render attribution).
+export const streamPerfMark = (metric: string): void => {
+    if (!streamPerfEnabled()) {
+        return;
+    }
+    updatePerfCounter(metric, 0);
+};

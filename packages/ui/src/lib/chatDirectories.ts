@@ -118,3 +118,11 @@ export const deleteChatDirectory = async (
     throw new Error(`Failed to delete chat directory (${response.status})`);
   }
 };
+
+// [fork-port] Upstream's managed-chats snapshot path requires the chats root
+// to be resolved (and server-side directory created) before classification.
+// The fork resolves the root for the default server lazily; expose the same
+// contract as a thin async wrapper around the fork's warmer.
+export async function ensureChatsRootDirectory(): Promise<void> {
+  warmChatsRootDirectory();
+}

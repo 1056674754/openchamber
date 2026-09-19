@@ -3103,6 +3103,36 @@ export const dict = {
   'settings.projects.shared.status.ok': 'In the repository',
   'settings.projects.shared.title': 'Repository config',
   'settings.projects.shared.toast.shareFailed': 'Failed to update the repository config',
-} as const;
 
+  // [fork-port] Sidebar keys ported from upstream v1.24.2
+  // Upstream translations reused where the upstream locale provides them; otherwise English.
+  'common.date.today': 'Today',
+  'common.date.yesterday': 'Yesterday',
+  'common.relative.daysAgoCompact': '{count}d ago',
+  'common.relative.hoursAgoShort': '{count}h ago',
+  'common.relative.justNow': 'Just now',
+  'common.relative.minutesAgoShort': '{count}min ago',
+  'common.relative.weeksAgoCompact': '{count}w ago',
+  'common.relative.yearsAgoCompact': '{count}y ago',
+  'sessions.aiRename.generating': 'Generating session title...',
+  'sessions.sidebar.group.empty.grantAccess': 'Grant access',
+  'sessions.sidebar.group.empty.initializationFailed': 'Could not initialize workspace.',
+  'sessions.sidebar.group.empty.loadFailed': 'Could not refresh sessions.',
+  'sessions.sidebar.group.empty.loadingSessions': 'Loading sessions…',
+  'sessions.sidebar.group.empty.permissionDenied': 'Folder access is required.',
+  'sessions.sidebar.group.empty.retry': 'Try again',
+  'sessions.sidebar.group.worktreeMissing': 'Worktree folder is missing',
+  'sessions.sidebar.header.actions.extensionPages': 'Extension pages',
+  'sessions.sidebar.header.grouping.label': 'Group sessions',
+  'sessions.sidebar.header.projectDisplay.label': 'Show projects',
+  'sessions.sidebar.project.actions.edit': 'Edit',
+  'sessions.sidebar.project.selectAria': 'Select project, currently {project}',
+  'sessions.sidebar.projectAction.active': 'Project action active',
+  'sessions.sidebar.session.copyId.error': 'Failed to copy session ID',
+  'sessions.sidebar.session.copyId.success': 'Session ID copied',
+  'sessions.sidebar.session.export.failedLoadHistory': 'Failed to load the complete session history',
+  'sessions.sidebar.session.status.questionPendingMany': '{count} pending questions',
+  'sessions.sidebar.session.status.questionPendingSingle': '1 pending question',
+
+};
 export type I18nKey = keyof typeof dict;
