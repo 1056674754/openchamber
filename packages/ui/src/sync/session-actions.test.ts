@@ -209,6 +209,7 @@ const sessionUiStoreState = {
     return null
   },
   setCurrentSession: () => {},
+  markSessionAsOpenChamberCreated: () => {},
 }
 mock.module("./session-ui-store", () => ({
   useSessionUIStore: {
@@ -246,8 +247,13 @@ mock.module("./input-store", () => ({
 
 // Mock useGlobalSessionsStore
 mock.module("@/stores/useGlobalSessionsStore", () => ({
+  // session-ui-store resolves a session's directory from the catalog before
+  // local routing hints; the mock keeps that lookup inert.
+  resolveGlobalSessionDirectory: (session: { directory?: string }) => session.directory ?? null,
   useGlobalSessionsStore: {
     getState: () => ({
+      activeSessions: [] as Array<{ id: string; directory?: string }>,
+      archivedSessions: [] as Array<{ id: string; directory?: string }>,
       upsertSession: (session: { id: string; directory?: string }) => {
         globalUpsertedSessions.push(session)
       },
@@ -394,6 +400,21 @@ describe("createSession", () => {
       createSession(undefined, "/test/project", null, DEFAULT_SERVER_ID),
       "session.create failed (500): Session storage is not writable (err_session_create)",
     )
+  })
+
+  test("seeds a confirmed empty transcript before navigation", async () => {
+    sessionCreateResult = {
+      data: { id: "ses_new", directory: "/test/project", title: "New" },
+    }
+    const childStores = createChildStores([["/test/project", createStore({})]])
+
+    const { createSession, setActionRefs } = await import("./session-actions")
+    setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
+
+    const created = await createSession(undefined, "/test/project", null, DEFAULT_SERVER_ID)
+    expect(created?.id).toBe("ses_new")
+    const store = childStores.getChild("/test/project")
+    expect(store?.getState().message["ses_new"]).toEqual([])
   })
 })
 

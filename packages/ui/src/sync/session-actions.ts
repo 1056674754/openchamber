@@ -260,6 +260,19 @@ function upsertSessionSnapshot(
   store.setState({ session: sessions })
 }
 
+function seedCreatedSessionSnapshot(
+  store: ReturnType<ChildStoreManager["ensureChild"]>,
+  session: Session,
+) {
+  upsertSessionSnapshot(store, session)
+  // The create response establishes a confirmed empty transcript. Publishing
+  // it before navigation stops the session view from fetching history for a
+  // session that cannot have any, or from surfacing a stale load error.
+  const current = store.getState()
+  if (current.message[session.id] !== undefined) return
+  store.setState({ message: { ...current.message, [session.id]: [] } })
+}
+
 function unwrapMessageRecords<T>(
   result: { data?: T[]; error?: unknown; response?: { status?: number } },
   name: string,
@@ -1014,6 +1027,7 @@ export async function createSession(
       return null
     }
     const targetDir = directoryOverride
+    const runtimeKey = getRuntimeKey()
 
     let client: OpencodeClient
     let resolvedServerId = serverId ?? null
@@ -1039,6 +1053,9 @@ export async function createSession(
     })
     const session = unwrapSdkData(result, "session.create")
 
+      // The runtime switched while the create request travelled; the response
+      // belongs to the old runtime's server and must not enter this one.
+      if (getRuntimeKey() !== runtimeKey) return null
       const sessionDirectory = (session as { directory?: string }).directory ?? directoryOverride ?? null
       if (sessionDirectory) {
         registerSessionDirectory(session.id, sessionDirectory)
@@ -1049,13 +1066,16 @@ export async function createSession(
       }
 
       if (sessionDirectory) {
+        // Bootstrap is not forced here: navigation of the newly selected
+        // session is what declares the demand, and an eager bootstrap would
+        // create the directory's OpenCode instance before the user lands.
         if (resolvedServerId && resolvedServerId !== DEFAULT_SERVER_ID) {
           const remoteStores = getSyncStoresForServer(resolvedServerId)
           if (remoteStores) {
-            upsertSessionSnapshot(remoteStores.ensureChild(sessionDirectory), session)
+            seedCreatedSessionSnapshot(remoteStores.ensureChild(sessionDirectory, { bootstrap: false }), session)
           }
         } else if (_childStores) {
-          upsertSessionSnapshot(_childStores.ensureChild(sessionDirectory), session)
+          seedCreatedSessionSnapshot(_childStores.ensureChild(sessionDirectory, { bootstrap: false }), session)
         }
       }
 

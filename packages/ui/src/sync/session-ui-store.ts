@@ -697,6 +697,14 @@ const getAuthoritativeSessionDirectory = (
     : getAllSyncSessions().find((s) => s.id === sessionId)
   const recordDirectory = target ? resolveDirectoryKey(target) : null
   if (recordDirectory) return normalizePath(recordDirectory)
+  // The global catalog can know this session before its directory store
+  // bootstraps. Use that record's own directory before falling back to
+  // local routing hints.
+  const catalog = useGlobalSessionsStore.getState()
+  const catalogSession = catalog.activeSessions.find((s) => s.id === sessionId)
+    ?? catalog.archivedSessions.find((s) => s.id === sessionId)
+  const catalogDirectory = catalogSession ? resolveGlobalSessionDirectory(catalogSession) : null
+  if (catalogDirectory) return normalizePath(catalogDirectory)
   const owningDirectory = getSyncSessionDirectory(sessionId)
   return owningDirectory ? normalizePath(owningDirectory) : null
 }
