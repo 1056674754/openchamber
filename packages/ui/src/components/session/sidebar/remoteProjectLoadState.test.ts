@@ -7,8 +7,18 @@ const getSyncStoresForServer = mock((serverId: string) => {
   };
 });
 
+// [fork-port] The stub must carry the module's full export surface: bun
+// installs mock.module process-wide, and sidebar tests landed from upstream
+// v1.24.2 pull the real registry transitively.
+const registerSyncStores = mock(() => () => undefined);
+const getAllSyncStores = mock(() => [] as never[]);
+const subscribeSyncStoresRegistry = mock(() => () => undefined);
+
 mock.module('@/sync/multi-server-registry', () => ({
+  registerSyncStores,
+  getAllSyncStores,
   getSyncStoresForServer,
+  subscribeSyncStoresRegistry,
 }));
 
 const { getRemoteProjectLoadStates } = await import('./remoteProjectLoadState');

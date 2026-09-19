@@ -421,3 +421,14 @@ export const partitionSessionsByRunningStatus = (
   }
   return { running, notRunning };
 };
+
+// [fork-port] Ported from upstream v1.24.2 (sessions/useExpandedParents).
+export const toggleExpandedParentKey = (
+  expanded: Set<string>,
+  key: string,
+): Set<string> => {
+  const next = new Set(expanded);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+};
