@@ -291,17 +291,14 @@ const collectStatusPollDirectories = (): string[] => {
   return Array.from(rootDirs);
 };
 
-const buildSnapshot = (instanceName: string): TraySnapshot => {
-  const live = collectLiveData();
+const buildSnapshot = (instanceName: string, includeTray: boolean): TraySnapshot => {
   const notif = useNotificationStore.getState().index.session;
   const allSessions = useGlobalSessionsStore.getState().activeSessions;
-  const globalStatuses = useGlobalSessionsStore.getState().sessionStatuses;
-  const titleById = new Map<string, string>(live.titleById);
+  const ui = useUIStore.getState();
   const childrenByParent = new Map<string, string[]>();
 
   for (const session of allSessions) {
     if (!session?.id) continue;
-    if (session.title) titleById.set(session.id, session.title);
     if (session.parentID) {
       const siblings = childrenByParent.get(session.parentID) ?? [];
       siblings.push(session.id);
@@ -322,6 +319,26 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
     }
     return out;
   };
+
+  // Count the full root list, independently of the tray's visibility and limit.
+  const dockBadgeCount = ui.dockBadgeEnabled
+    ? countDockBadgeChats({
+        sessions: allSessions,
+        unseenCount: notif.unseenCount,
+        notifyOnSubtasks: ui.notifyOnSubtasks,
+      })
+    : 0;
+
+  if (!includeTray) {
+    return { sessions: [], approvals: [], instanceName, usage: { mode: 'usage', groups: [] }, dockBadgeCount };
+  }
+
+  const live = collectLiveData();
+  const globalStatuses = useGlobalSessionsStore.getState().sessionStatuses;
+  const titleById = new Map<string, string>(live.titleById);
+  for (const session of allSessions) {
+    if (session?.id && session.title) titleById.set(session.id, session.title);
+  }
 
   const resolveStatus = (id: string): TraySessionStatus => {
     const fromStores = live.statusById.get(id);
@@ -366,21 +383,13 @@ const buildSnapshot = (instanceName: string): TraySnapshot => {
 
   const approvals = live.approvals.map((a) => ({ ...a, sessionTitle: titleById.get(a.sessionId) || '' }));
 
-  const ui = useUIStore.getState();
-  const dockBadgeCount = ui.dockBadgeEnabled
-    ? countDockBadgeChats({
-        sessions: allSessions,
-        unseenCount: notif.unseenCount,
-        notifyOnSubtasks: ui.notifyOnSubtasks,
-      })
-    : 0;
-
   return { sessions, approvals, instanceName, usage: buildUsage(), dockBadgeCount };
 };
 
 export const useTraySync = (): void => {
   React.useEffect(() => {
-    if (!isTrayPlatform() || !isTrayEnabled() || !canUseElectronDesktopIPC()) return;
+    if (!isTrayPlatform() || !canUseElectronDesktopIPC()) return;
+    const trayEnabled = isTrayEnabled();
 
     let disposed = false;
     let lastSerialized = '';
@@ -389,12 +398,43 @@ export const useTraySync = (): void => {
 
     const flushNow = () => {
       if (disposed) return;
-      const snapshot = buildSnapshot(instanceName);
+      const snapshot = buildSnapshot(instanceName, trayEnabled);
       const serialized = JSON.stringify(snapshot);
       if (serialized === lastSerialized) return;
       lastSerialized = serialized;
       void invokeDesktop('desktop_tray_update', snapshot);
     };
+
+    const scheduleFlush = () => {
+      if (disposed || flushTimer !== null) return;
+      flushTimer = window.setTimeout(() => {
+        flushTimer = null;
+        flushNow();
+      }, FLUSH_DEBOUNCE_MS);
+    };
+
+    const unsubscribeNotif = useNotificationStore.subscribe(() => scheduleFlush());
+    const unsubscribeGlobal = useGlobalSessionsStore.subscribe(() => scheduleFlush());
+    // The dock-badge toggle and subtask-notification preference live here; a
+    // change must re-push the snapshot so the badge appears/clears immediately.
+    const unsubscribeUI = useUIStore.subscribe((state, previous) => {
+      if (state.dockBadgeEnabled !== previous.dockBadgeEnabled || state.notifyOnSubtasks !== previous.notifyOnSubtasks) scheduleFlush();
+    });
+    const stopBadgeSync = () => {
+      disposed = true;
+      if (flushTimer !== null) window.clearTimeout(flushTimer);
+      unsubscribeNotif();
+      unsubscribeGlobal();
+      unsubscribeUI();
+    };
+
+    // Dock badges share the desktop_tray_update command but stay active when
+    // the menu bar is disabled: observe unread state only, without tray
+    // polling, quotas, or directory listeners.
+    if (!trayEnabled) {
+      flushNow();
+      return stopBadgeSync;
+    }
 
     void resolveInstanceName().then((name) => {
       if (disposed) return;
@@ -406,14 +446,6 @@ export const useTraySync = (): void => {
       const directories = collectStatusPollDirectories();
       if (directories.length === 0) return;
       await useGlobalSessionsStore.getState().batchLoadStatuses(directories);
-    };
-
-    const scheduleFlush = () => {
-      if (disposed || flushTimer !== null) return;
-      flushTimer = window.setTimeout(() => {
-        flushTimer = null;
-        flushNow();
-      }, FLUSH_DEBOUNCE_MS);
     };
 
     const storeUnsubs = new Map<string, () => void>();
@@ -465,12 +497,9 @@ export const useTraySync = (): void => {
     });
     rebindStores();
 
-    const unsubscribeNotif = useNotificationStore.subscribe(() => scheduleFlush());
-    const unsubscribeGlobal = useGlobalSessionsStore.subscribe(() => scheduleFlush());
     const unsubscribeProjects = useProjectsStore.subscribe(() => scheduleFlush());
     const unsubscribeWorktrees = useSessionUIStore.subscribe(() => scheduleFlush());
     const unsubscribeGit = useGitStore.subscribe(() => scheduleFlush());
-    const unsubscribeUI = useUIStore.subscribe(() => scheduleFlush());
     const unsubscribeQuota = useQuotaStore.subscribe(() => scheduleFlush());
 
     void ensureGlobalSessionsLoaded(getAllSyncSessions());
@@ -495,18 +524,14 @@ export const useTraySync = (): void => {
     flushNow();
 
     return () => {
-      disposed = true;
-      if (flushTimer !== null) window.clearTimeout(flushTimer);
+      stopBadgeSync();
       window.clearInterval(interval);
       window.clearInterval(refreshInterval);
       window.clearInterval(globalStatusInterval);
       window.clearInterval(usageRefreshTick);
-      unsubscribeNotif();
-      unsubscribeGlobal();
       unsubscribeProjects();
       unsubscribeWorktrees();
       unsubscribeGit();
-      unsubscribeUI();
       unsubscribeQuota();
       unsubscribeDefaultRegistry?.();
       unsubscribeRemoteRegistry();
@@ -516,7 +541,7 @@ export const useTraySync = (): void => {
   }, []);
 
   React.useEffect(() => {
-    if (!isTrayPlatform() || !isTrayEnabled() || typeof window === 'undefined') return;
+    if (!isTrayPlatform() || !isTrayEnabled() || !canUseElectronDesktopIPC() || typeof window === 'undefined') return;
 
     const handle = (action: TrayAction) => {
       switch (action.type) {
