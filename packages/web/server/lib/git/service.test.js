@@ -767,6 +767,47 @@ describe('setLocalIdentity', () => {
     expect(() => runGit(repo, ['config', '--local', '--get', 'user.signingkey'])).toThrow();
     expect(() => runGit(repo, ['config', '--local', '--get', 'commit.gpgsign'])).toThrow();
   });
+
+  it('configures the stored credential helper for token auth with the targeted simple-git opt-in', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+
+    await setLocalIdentity(repo, {
+      userName: 'Token User',
+      userEmail: 'token@example.com',
+      authType: 'token',
+      host: 'github.com',
+    });
+
+    expect(runGit(repo, ['config', '--local', '--get', 'credential.helper']).trim()).toBe('store');
+  });
+
+  it('clears the stored credential helper when switching to SSH auth', async () => {
+    if (!canRunGit()) return;
+
+    const repo = createTempDir();
+    runGit(repo, ['init', '-b', 'main']);
+
+    await setLocalIdentity(repo, {
+      userName: 'Token User',
+      userEmail: 'token@example.com',
+      authType: 'token',
+      host: 'github.com',
+    });
+    await setLocalIdentity(repo, {
+      userName: 'SSH User',
+      userEmail: 'ssh@example.com',
+      authType: 'ssh',
+      sshKey: '/tmp/test key',
+    });
+
+    expect(runGit(repo, ['config', '--local', '--get', 'core.sshCommand']).trim()).toBe(
+      "ssh -i '/tmp/test key' -o IdentitiesOnly=yes"
+    );
+    expect(() => runGit(repo, ['config', '--local', '--get', 'credential.helper'])).toThrow();
+  });
 });
 
 describe('fetch', () => {

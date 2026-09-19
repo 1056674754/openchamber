@@ -341,7 +341,7 @@ const buildGitEnv = async () => {
   return env;
 };
 
-const createGit = async (directory, { stallTimeoutMs = 0 } = {}) => {
+const createGit = async (directory, { allowUnsafeSshCommand = false, allowUnsafeCredentialHelper = false, stallTimeoutMs = 0 } = {}) => {
   const env = await buildGitEnv();
   const spawnOptions = { windowsHide: true };
   // simple-git's block timeout kills the process once it has produced no
@@ -350,7 +350,13 @@ const createGit = async (directory, { stallTimeoutMs = 0 } = {}) => {
   const timeout = stallTimeoutMs > 0 ? { block: stallTimeoutMs } : undefined;
   const binary = getGitBinary();
   const hasCustomBinary = typeof binary === 'string' && binary.trim() && binary !== 'git' && binary !== 'git.exe';
-  const unsafe = hasCustomBinary ? { allowUnsafeCustomBinary: true } : undefined;
+  const unsafe = hasCustomBinary || allowUnsafeSshCommand || allowUnsafeCredentialHelper
+    ? {
+        ...(hasCustomBinary && { allowUnsafeCustomBinary: true }),
+        ...(allowUnsafeSshCommand && { allowUnsafeSshCommand: true }),
+        ...(allowUnsafeCredentialHelper && { allowUnsafeCredentialHelper: true }),
+      }
+    : undefined;
   const baseDir = normalizeDirectoryPath(directory);
   if (typeof baseDir !== 'string' || !baseDir.trim()) {
     throw new Error('Git directory is required');
@@ -1715,7 +1721,10 @@ export async function hasLocalIdentity(directory) {
 }
 
 export async function setLocalIdentity(directory, profile) {
-  const git = await createGit(directory);
+  // Both opt-ins are needed: newer simple-git blocklists configuring
+  // core.sshCommand and credential.helper without them, which would make
+  // switching to an SSH or token identity throw.
+  const git = await createGit(directory, { allowUnsafeSshCommand: true, allowUnsafeCredentialHelper: true });
 
   try {
 
