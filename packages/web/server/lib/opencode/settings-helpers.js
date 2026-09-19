@@ -424,6 +424,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
       result.sessionRetentionAction = candidate.sessionRetentionAction;
     }
+    if (typeof candidate.sessionRetentionOnlyArchived === 'boolean') {
+      result.sessionRetentionOnlyArchived = candidate.sessionRetentionOnlyArchived;
+    }
     if (typeof candidate.autoSaveEnabled === 'boolean') {
       result.autoSaveEnabled = candidate.autoSaveEnabled;
     }

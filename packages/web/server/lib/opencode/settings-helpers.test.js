@@ -579,7 +579,7 @@ describe('settings registry gate', () => {
     skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global',
     agentControlToolEnabled: true, agentMemoryToolEnabled: true,
-    autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionAction: 'archive', autoSaveEnabled: true,
+    autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionAction: 'archive', sessionRetentionOnlyArchived: false, autoSaveEnabled: true,
     openInAppId: 'vscode',
     sttProvider: 'server', sttServerUrl: 'http://localhost:8001/v1', sttModel: 'm', wasmSttModel: 'm', sttLanguage: 'en',
     sttSilenceThresholdDb: -40, sttSilenceHoldMs: 500, sttTranscribeOnStop: true,
