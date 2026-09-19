@@ -2,9 +2,9 @@
   "metadata": {
     "id": "dracula-dark",
     "name": "Dracula",
+    "variant": "dark",
     "description": "Dracula",
     "version": "1.0.0",
-    "variant": "dark",
     "tags": [
       "dark",
       "palette"
@@ -13,9 +13,9 @@
   "colors": {
     "primary": {
       "base": "#BD93F9",
+      "foreground": "#14151F",
       "hover": "#A480D8",
       "active": "#C7A3FA",
-      "foreground": "#14151F",
       "muted": "#BD93F980",
       "emphasis": "#A480D8"
     },
@@ -25,17 +25,15 @@
       "muted": "#181926",
       "mutedForeground": "#7c7e9c",
       "elevated": "#161722",
-      "elevatedForeground": "#F8F8F2",
       "overlay": "#FFFFFF20",
       "subtle": "#222436"
     },
     "interactive": {
       "border": "#2D2F3C",
-      "borderHover": "#303244",
-      "borderFocus": "#4A4D6D",
       "selection": "#30334b",
       "selectionForeground": "#FFFFFF",
-      "focus": "#BD93F9",
+      "borderHover": "#303244",
+      "borderFocus": "#4A4D6D",
       "focusRing": "#BD93F940",
       "cursor": "#FFFFFF",
       "hover": "#30334ba3",
@@ -44,32 +42,16 @@
     "status": {
       "error": "#FF5555",
       "errorForeground": "#14151F",
-      "errorBackground": "#FF555520",
-      "errorBorder": "#FF555550",
       "warning": "#FFB86C",
       "warningForeground": "#14151F",
-      "warningBackground": "#FFB86C20",
-      "warningBorder": "#FFB86C50",
       "success": "#50FA7B",
       "successForeground": "#14151F",
-      "successBackground": "#50FA7B20",
-      "successBorder": "#50FA7B50",
       "info": "#8BE9FD",
-      "infoForeground": "#14151F",
-      "infoBackground": "#8BE9FD20",
-      "infoBorder": "#8BE9FD50"
-    },
-    "pr": {
-      "open": "#50FA7B",
-      "draft": "#B6B9E4",
-      "blocked": "#FFB86C",
-      "merged": "#BD93F9",
-      "closed": "#FF5555"
+      "infoForeground": "#14151F"
     },
     "syntax": {
       "base": {
         "background": "#181926",
-        "foreground": "#F8F8F2",
         "comment": "#B6B9E4",
         "keyword": "#BD93F9",
         "string": "#50FA7B",
@@ -81,34 +63,17 @@
       },
       "tokens": {
         "boolean": "#FFB86C",
-        "class": "#BD93F9",
         "className": "#BD93F9",
         "commentDoc": "#9EA0C6",
         "constant": "#8BE9FD",
         "decorator": "#FFB86C",
-        "enum": "#BD93F9",
-        "exception": "#FF79C6",
-        "functionCall": "#BD93F9",
-        "interface": "#FFB86C",
-        "jsxTag": "#BD93F9",
         "key": "#BD93F9",
-        "keywordImport": "#FF79C6",
-        "label": "#FF79C6",
         "macro": "#8BE9FD",
         "method": "#50FA7B",
-        "module": "#FF79C6",
-        "namespace": "#FFB86C",
         "parameter": "#F8F8F2",
-        "preprocessor": "#FF79C6",
-        "punctuation": "#B6B9E4",
-        "regex": "#50FA7B",
         "storageModifier": "#8BE9FD",
         "stringEscape": "#FFFFFF",
-        "struct": "#BD93F9",
-        "tag": "#BD93F9",
         "tagAttribute": "#FFB86C",
-        "tagAttributeValue": "#50FA7B",
-        "typeParameter": "#FFB86C",
         "url": "#8BE9FD",
         "variableGlobal": "#BD93F9",
         "variableLocal": "#161722",
@@ -126,6 +91,18 @@
         "lineNumberActive": "#FFFFFF"
       }
     },
+    "pr": {
+      "draft": "#B6B9E4",
+      "merged": "#BD93F9"
+    },
+    "chat": {
+      "userMessage": "#F8F8F2",
+      "userMessageBackground": "#222436",
+      "assistantMessage": "#F8F8F2",
+      "assistantMessageBackground": "#14151F",
+      "timestamp": "#B6B9E4",
+      "divider": "#2D2F3C"
+    },
     "markdown": {
       "heading1": "#F8F8F2",
       "heading2": "#F8F8F2",
@@ -138,14 +115,6 @@
       "blockquote": "#FFB86C",
       "blockquoteBorder": "#2D2F3C",
       "listMarker": "#BD93F999"
-    },
-    "chat": {
-      "userMessage": "#F8F8F2",
-      "userMessageBackground": "#222436",
-      "assistantMessage": "#F8F8F2",
-      "assistantMessageBackground": "#14151F",
-      "timestamp": "#B6B9E4",
-      "divider": "#2D2F3C"
     },
     "tools": {
       "background": "#18192680",

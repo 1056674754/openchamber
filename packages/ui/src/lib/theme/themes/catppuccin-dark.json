@@ -2,9 +2,9 @@
   "metadata": {
     "id": "catppuccin-dark",
     "name": "Catppuccin",
+    "variant": "dark",
     "description": "Catppuccin",
     "version": "1.0.0",
-    "variant": "dark",
     "tags": [
       "dark",
       "palette"
@@ -13,9 +13,9 @@
   "colors": {
     "primary": {
       "base": "#cba6f7",
+      "foreground": "#11111b",
       "hover": "#dec7fa",
       "active": "#dec7fa",
-      "foreground": "#11111b",
       "muted": "#cba6f780",
       "emphasis": "#9EA6DF"
     },
@@ -25,16 +25,15 @@
       "muted": "#181825",
       "mutedForeground": "#a6adc8",
       "elevated": "#181825",
-      "elevatedForeground": "#CDD6F4",
       "overlay": "#F4F2FF20",
       "subtle": "#2f2f50"
     },
     "interactive": {
       "border": "#8587961d",
-      "borderHover": "#8587961d",
-      "borderFocus": "#575379",
       "selection": "#313244",
       "selectionForeground": "#F4F2FF",
+      "borderHover": "#8587961d",
+      "borderFocus": "#575379",
       "focus": "#B4BEFE",
       "focusRing": "#cba6f7",
       "cursor": "#f5e0dc",
@@ -59,17 +58,9 @@
       "infoBackground": "#89b4fa29",
       "infoBorder": "#89b4fa73"
     },
-    "pr": {
-      "open": "#A6D189",
-      "draft": "#A6ADC8",
-      "blocked": "#F9E2AF",
-      "merged": "#cba6f7",
-      "closed": "#F38BA8"
-    },
     "syntax": {
       "base": {
         "background": "#211F31",
-        "foreground": "#CDD6F4",
         "comment": "#9399b2",
         "keyword": "#cba6f7",
         "string": "#a6e3a1",
@@ -81,15 +72,12 @@
       },
       "tokens": {
         "boolean": "#fab387",
-        "class": "#B4BEFE",
         "className": "#B4BEFE",
         "commentDoc": "#9298B1",
         "constant": "#94e2d5",
         "decorator": "#F9E2AF",
-        "enum": "#B4BEFE",
         "exception": "#F38BA8",
         "functionCall": "#B4BEFE",
-        "interface": "#F9E2AF",
         "jsxTag": "#B4BEFE",
         "key": "#B4BEFE",
         "keywordImport": "#cba6f7",
@@ -97,18 +85,12 @@
         "macro": "#89DCEB",
         "method": "#A6D189",
         "module": "#F38BA8",
-        "namespace": "#F9E2AF",
         "parameter": "#eba0ac",
         "preprocessor": "#F38BA8",
         "punctuation": "#A6ADC8",
-        "regex": "#A6E3A1",
         "storageModifier": "#89DCEB",
         "stringEscape": "#f5c2e7",
-        "struct": "#B4BEFE",
         "tag": "#89b4fa",
-        "tagAttribute": "#F9E2AF",
-        "tagAttributeValue": "#A6E3A1",
-        "typeParameter": "#F9E2AF",
         "url": "#89DCEB",
         "variableGlobal": "#B4BEFE",
         "variableLocal": "#1C1C29",
@@ -126,6 +108,20 @@
         "lineNumberActive": "#cba6f7"
       }
     },
+    "pr": {
+      "open": "#A6D189",
+      "blocked": "#F9E2AF",
+      "merged": "#cba6f7"
+    },
+    "chat": {
+      "userMessage": "#CDD6F4",
+      "userMessageBackground": "#151521",
+      "assistantMessage": "#CDD6F4",
+      "assistantMessageBackground": "#1E1E2E",
+      "timestamp": "#A6ADC8",
+      "divider": "#8587961d",
+      "background": "#1e1e2e"
+    },
     "markdown": {
       "heading1": "#CDD6F4",
       "heading2": "#CDD6F4",
@@ -139,19 +135,12 @@
       "blockquoteBorder": "#11111b",
       "listMarker": "#cba6f799"
     },
-    "chat": {
-      "userMessage": "#CDD6F4",
-      "userMessageBackground": "#151521",
-      "assistantMessage": "#CDD6F4",
-      "assistantMessageBackground": "#1E1E2E",
-      "timestamp": "#A6ADC8",
-      "divider": "#8587961d",
-      "background": "#1e1e2e"
-    },
     "tools": {
       "background": "#211F3180",
       "border": "#8587961d",
       "headerHover": "#191926",
+      "icon": "#cba6f7",
+      "title": "#cdd6f4",
       "description": "#cdd6f4cc",
       "edit": {
         "added": "#A6D189",
@@ -160,9 +149,7 @@
         "removedBackground": "#f38ba826",
         "lineNumber": "#7f849c",
         "modifiedBackground": "#f9e2af29"
-      },
-      "icon": "#cba6f7",
-      "title": "#cdd6f4"
+      }
     }
   },
   "config": {

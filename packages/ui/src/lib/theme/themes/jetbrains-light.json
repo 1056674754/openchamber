@@ -2,10 +2,10 @@
   "metadata": {
     "id": "jetbrains-light",
     "name": "JetBrains",
-    "description": "JetBrains IDE-inspired colors for OpenChamber - light variant",
-    "author": "Artem Evsevev, adapted for OpenChamber",
-    "version": "1.0.0",
     "variant": "light",
+    "description": "JetBrains IDE-inspired colors for OpenChamber - light variant",
+    "version": "1.0.0",
+    "author": "Artem Evsevev, adapted for OpenChamber",
     "tags": [
       "light",
       "jetbrains",
@@ -18,7 +18,6 @@
       "base": "#195ce3",
       "hover": "#2D61F0",
       "active": "#0055FF",
-      "foreground": "#FFFFFF",
       "muted": "#3573F080",
       "emphasis": "#006DCC"
     },
@@ -28,16 +27,14 @@
       "muted": "#F7F8FA",
       "mutedForeground": "#404040",
       "elevated": "#FFFFFF",
-      "elevatedForeground": "#000000",
       "overlay": "#00000025",
       "subtle": "#ecf0f8"
     },
     "interactive": {
       "border": "#cfd3de",
+      "selection": "#DFE1E5",
       "borderHover": "#AEB3C2",
       "borderFocus": "#0055FF",
-      "selection": "#DFE1E5",
-      "selectionForeground": "#000000",
       "focus": "#0055FF",
       "focusRing": "#0055FF40",
       "cursor": "#000000",
@@ -46,28 +43,17 @@
     },
     "status": {
       "error": "#CE0606",
-      "errorForeground": "#FFFFFF",
       "errorBackground": "#FFE8E8",
       "errorBorder": "#CF5B56",
       "warning": "#F49810",
-      "warningForeground": "#000000",
       "warningBackground": "#FFF8DC",
       "warningBorder": "#F49810",
       "success": "#077D18",
-      "successForeground": "#FFFFFF",
       "successBackground": "#E9F5E6",
       "successBorder": "#55A76A",
       "info": "#389FD6",
-      "infoForeground": "#000000",
       "infoBackground": "#E7F4FB",
       "infoBorder": "#389FD6"
-    },
-    "pr": {
-      "open": "#369650",
-      "draft": "#808080",
-      "blocked": "#F49810",
-      "merged": "#834DF0",
-      "closed": "#E55765"
     },
     "syntax": {
       "base": {
@@ -83,20 +69,13 @@
         "operator": "#080808"
       },
       "tokens": {
-        "commentDoc": "#8C8C8C",
         "stringEscape": "#0037A6",
         "keywordImport": "#0033B3",
-        "storageModifier": "#0033B3",
-        "functionCall": "#00627A",
-        "method": "#00627A",
         "functionBuiltin": "#C27203",
         "variableProperty": "#871094",
-        "variableOther": "#000000",
         "variableGlobal": "#1C5DFE",
-        "variableLocal": "#000000",
         "parameter": "#007E8A",
         "constant": "#871094",
-        "class": "#00627A",
         "className": "#00627A",
         "interface": "#835DDA",
         "struct": "#A04908",
@@ -104,19 +83,13 @@
         "typeParameter": "#007E8A",
         "namespace": "#000000",
         "module": "#835DDA",
-        "tag": "#0033B3",
-        "jsxTag": "#0033B3",
         "tagAttribute": "#9E880D",
-        "tagAttributeValue": "#067D17",
-        "boolean": "#0033B3",
         "decorator": "#9E880D",
         "label": "#C27203",
         "punctuation": "#080808",
         "macro": "#C27203",
         "preprocessor": "#C27203",
-        "regex": "#067D17",
         "url": "#00627A",
-        "key": "#871094",
         "exception": "#1C5DFE"
       },
       "highlights": {
@@ -130,6 +103,20 @@
         "lineNumberActive": "#767A8A"
       }
     },
+    "pr": {
+      "open": "#369650",
+      "draft": "#808080",
+      "merged": "#834DF0",
+      "closed": "#E55765"
+    },
+    "chat": {
+      "userMessage": "#000000",
+      "userMessageBackground": "#E8F1FF",
+      "assistantMessage": "#000000",
+      "assistantMessageBackground": "#F7F8FA",
+      "timestamp": "#767A8A",
+      "divider": "#C9CCD6"
+    },
     "markdown": {
       "heading1": "#000000",
       "heading2": "#161617",
@@ -142,14 +129,6 @@
       "blockquote": "#8C8C8C",
       "blockquoteBorder": "#C9CCD6",
       "listMarker": "#9E880D99"
-    },
-    "chat": {
-      "userMessage": "#000000",
-      "userMessageBackground": "#E8F1FF",
-      "assistantMessage": "#000000",
-      "assistantMessageBackground": "#F7F8FA",
-      "timestamp": "#767A8A",
-      "divider": "#C9CCD6"
     },
     "tools": {
       "background": "#F5F7F950",

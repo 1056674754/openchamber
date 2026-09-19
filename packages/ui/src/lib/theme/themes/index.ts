@@ -1,6 +1,7 @@
 import type { Theme } from '@/types/theme';
 import { presetThemes } from './presets';
 import { withPrColors } from './prColors';
+import { requireTheme } from '../definition';
 import flexokiLightRaw from './flexoki-light.json';
 import flexokiDarkRaw from './flexoki-dark.json';
 import openchamberLightRaw from './fields-of-the-shire-light.json';
@@ -8,12 +9,12 @@ import openchamberDarkRaw from './fields-of-the-shire-dark.json';
 import openchamberHybridLightRaw from './openchamber-hybrid-light.json';
 import openchamberHybridDarkRaw from './openchamber-hybrid-dark.json';
 
-export const flexokiLightTheme = withPrColors(flexokiLightRaw as Theme);
-export const flexokiDarkTheme = withPrColors(flexokiDarkRaw as Theme);
-export const openchamberLightTheme = withPrColors(openchamberLightRaw as Theme);
-export const openchamberDarkTheme = withPrColors(openchamberDarkRaw as Theme);
-export const openchamberHybridLightTheme = withPrColors(openchamberHybridLightRaw as Theme);
-export const openchamberHybridDarkTheme = withPrColors(openchamberHybridDarkRaw as Theme);
+export const flexokiLightTheme = withPrColors(requireTheme(flexokiLightRaw));
+export const flexokiDarkTheme = withPrColors(requireTheme(flexokiDarkRaw));
+export const openchamberLightTheme = withPrColors(requireTheme(openchamberLightRaw));
+export const openchamberDarkTheme = withPrColors(requireTheme(openchamberDarkRaw));
+export const openchamberHybridLightTheme = withPrColors(requireTheme(openchamberHybridLightRaw));
+export const openchamberHybridDarkTheme = withPrColors(requireTheme(openchamberHybridDarkRaw));
 
 export const DEFAULT_LIGHT_THEME_ID = 'openchamber-hybrid-light' as const;
 export const DEFAULT_DARK_THEME_ID = 'openchamber-hybrid-dark' as const;

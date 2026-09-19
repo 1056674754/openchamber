@@ -35,6 +35,7 @@ export type VSCodeThemeColorToken =
   | 'panel.border'
   // Inputs
   | 'input.background'
+  | 'inputOption.activeBorder'
   | 'input.foreground'
   | 'input.border'
   | 'input.placeholderForeground'
@@ -74,6 +75,8 @@ export type VSCodeThemeColorToken =
   | 'statusBar.foreground'
   // Lists
   | 'list.hoverBackground'
+  | 'chat.requestBorder'
+  | 'icon.foreground'
   | 'list.activeSelectionBackground'
   | 'list.activeSelectionForeground'
   | 'list.inactiveSelectionBackground'
@@ -136,6 +139,7 @@ const VARIABLE_MAP: Record<VSCodeThemeColorToken, string> = {
   'panel.border': '--vscode-panel-border',
   // Inputs
   'input.background': '--vscode-input-background',
+  'inputOption.activeBorder': '--vscode-inputOption-activeBorder',
   'input.foreground': '--vscode-input-foreground',
   'input.border': '--vscode-input-border',
   'input.placeholderForeground': '--vscode-input-placeholderForeground',
@@ -175,6 +179,8 @@ const VARIABLE_MAP: Record<VSCodeThemeColorToken, string> = {
   'statusBar.foreground': '--vscode-statusBar-foreground',
   // Lists
   'list.hoverBackground': '--vscode-list-hoverBackground',
+  'chat.requestBorder': '--vscode-chat-requestBorder',
+  'icon.foreground': '--vscode-icon-foreground',
   'list.activeSelectionBackground': '--vscode-list-activeSelectionBackground',
   'list.activeSelectionForeground': '--vscode-list-activeSelectionForeground',
   'list.inactiveSelectionBackground': '--vscode-list-inactiveSelectionBackground',
@@ -281,8 +287,8 @@ export const readVSCodeThemePalette = (
 };
 
 export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme => {
-  const base = getDefaultTheme(palette.kind === 'dark');
   const isDark = palette.kind === 'dark' || palette.kind === 'high-contrast';
+  const base = getDefaultTheme(isDark);
   
   const read = (token: VSCodeThemeColorToken, fallback: string): string =>
     palette.colors[token] ?? fallback;
@@ -310,8 +316,8 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // Subtle: used for input backgrounds, user message bubbles - input.background is the semantic match
   const subtle = read('input.background', read('dropdown.background', elevated));
   
-  // Overlay: modal backdrops, status bar
-  const overlay = read('statusBar.background', base.colors.surface.overlay);
+  // VS Code's status bar is a surface, not a modal backdrop.
+  const overlay = base.colors.surface.overlay;
 
   // ===========================================
   // PRIMARY / ACCENT COLORS
@@ -346,8 +352,8 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   const selectionForeground = read('editor.selectionForeground', read('list.activeSelectionForeground', foreground));
   
   // Focus
-  const focus = read('focusBorder', accent);
-  const focusRing = applyAlpha(focus, isDark ? 0.45 : 0.35);
+  const focus = read('focusBorder', read('inputOption.activeBorder', accent));
+  const focusRing = palette.kind === 'high-contrast' ? focus : applyAlpha(focus, isDark ? 0.45 : 0.35);
   
   // Cursor
   const cursor = read('editorCursor.foreground', base.colors.interactive.cursor);
@@ -385,9 +391,7 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // ===========================================
   
   // Tools border should be visible! Use border directly without extra opacity reduction
-  const toolsBorder = effectiveBorder;
-  const toolsBackground = applyAlpha(muted, 0.5);
-  const toolsHeaderHover = applyAlpha(hoverBg, 0.5);
+  const toolsBorder = read('chat.requestBorder', effectiveBorder);
   
   // Diff colors from VS Code diff editor
   const diffAddedBg = read('diffEditor.insertedLineBackground', read('diffEditor.insertedTextBackground', successBg));
@@ -400,8 +404,6 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
   // BADGES
   // ===========================================
   
-  const badgeBg = read('badge.background', accent);
-  const badgeFg = read('badge.foreground', accentForeground);
 
   // ===========================================
   // CHAT COLORS
@@ -430,7 +432,6 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
         active: accentHover,
         foreground: accentForeground,
         muted: accentMuted,
-        emphasis: accent,
       },
       surface: {
         background,
@@ -473,7 +474,17 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
         infoBorder: applyAlpha(infoColor, isDark ? 0.45 : 0.35),
       },
       syntax: {
-        ...base.colors.syntax,
+        tokens: {},
+        highlights: {
+          diffAdded: diffAddedColor,
+          diffAddedBackground: diffAddedBg,
+          diffRemoved: diffRemovedColor,
+          diffRemovedBackground: diffRemovedBg,
+          diffModified: diffModifiedColor,
+          diffModifiedBackground: applyAlpha(diffModifiedColor, isDark ? 0.16 : 0.12),
+          lineNumber: read('editorLineNumber.foreground', mutedForeground),
+          lineNumberActive: read('editorLineNumber.activeForeground', foreground),
+        },
         base: {
           background: elevated,
           foreground,
@@ -489,10 +500,8 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
       },
       // Explicit tools section - cssGenerator will use these values directly
       tools: {
-        background: toolsBackground,
         border: toolsBorder,
-        headerHover: toolsHeaderHover,
-        icon: mutedForeground,
+        icon: read('icon.foreground', mutedForeground),
         title: foreground,
         description: applyAlpha(mutedForeground, 0.8),
         edit: {
@@ -514,21 +523,8 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
         timestamp: mutedForeground,
         divider: effectiveBorder,
       },
-      // Badges
-      badges: {
-        ...(base.colors.badges || {}),
-        default: {
-          bg: badgeBg,
-          fg: badgeFg,
-          border: effectiveBorder,
-        },
-      },
       // Markdown colors
       markdown: {
-        heading1: foreground,
-        heading2: foreground,
-        heading3: foreground,
-        heading4: foreground,
         link: accentMuted,
         linkHover: read('textLink.activeForeground', accentHover),
         inlineCode: syntaxString,
@@ -536,12 +532,6 @@ export const buildVSCodeThemeFromPalette = (palette: VSCodeThemePalette): Theme 
         blockquote: mutedForeground,
         blockquoteBorder: effectiveBorder,
         listMarker: applyAlpha(accent, 0.6),
-      },
-      // Scrollbar
-      scrollbar: {
-        track: 'transparent',
-        thumb: read('scrollbarSlider.background', applyAlpha(foreground, isDark ? 0.2 : 0.15)),
-        thumbHover: read('scrollbarSlider.hoverBackground', applyAlpha(foreground, isDark ? 0.35 : 0.25)),
       },
     },
   };

@@ -51,7 +51,7 @@ const JsonSummaryValue = React.memo(({
     const summary = label ? `${formatKey(label)} (${value.length})` : `(${value.length})`;
     return (
       <details open={depth < 2} className="group/json-summary">
-        <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1.5 typography-meta text-[var(--surface-foreground)] hover:text-[var(--surface-mutedForeground)]">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1.5 typography-meta text-[var(--surface-foreground)] hover:text-muted-foreground">
           <Icon name="arrow-right-s" className="h-3.5 w-3.5 shrink-0 transition-transform group-open/json-summary:rotate-90" />
           <span className="min-w-0 truncate font-medium">{summary}</span>
         </summary>
@@ -92,7 +92,7 @@ const JsonSummaryValue = React.memo(({
 
     return (
       <details open={depth < 2} className="group/json-summary">
-        <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1.5 typography-meta text-[var(--surface-foreground)] hover:text-[var(--surface-mutedForeground)]">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1.5 typography-meta text-[var(--surface-foreground)] hover:text-muted-foreground">
           <Icon name="arrow-right-s" className="h-3.5 w-3.5 shrink-0 transition-transform group-open/json-summary:rotate-90" />
           <span className="min-w-0 truncate font-medium">{summary ?? (label ? formatKey(label) : '{}')}</span>
         </summary>
@@ -123,7 +123,7 @@ const JsonSummaryValue = React.memo(({
     <span
       className={cn(
         'min-w-0 break-words',
-        value === null ? 'text-[var(--surface-mutedForeground)]' : 'text-[var(--surface-foreground)]',
+        value === null ? 'text-muted-foreground' : 'text-[var(--surface-foreground)]',
       )}
     >
       {text}
@@ -133,7 +133,7 @@ const JsonSummaryValue = React.memo(({
   return (
     <div className="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] gap-x-2 py-1 typography-meta">
       {label ? (
-        <span className="truncate text-[var(--surface-mutedForeground)]" title={label}>{formatKey(label)}</span>
+        <span className="truncate text-muted-foreground" title={label}>{formatKey(label)}</span>
       ) : (
         <span />
       )}
