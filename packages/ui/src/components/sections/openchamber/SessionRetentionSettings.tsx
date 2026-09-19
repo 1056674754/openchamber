@@ -8,6 +8,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionAutoCleanup } from '@/hooks/useSessionAutoCleanup';
 import { useI18n } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 
 const MIN_DAYS = 1;
 const MAX_DAYS = 365;
@@ -21,16 +22,21 @@ export const SessionRetentionSettings: React.FC = () => {
   const { t } = useI18n();
   const autoDeleteEnabled = useUIStore((state) => state.autoDeleteEnabled);
   const autoDeleteAfterDays = useUIStore((state) => state.autoDeleteAfterDays);
-  const sessionRetentionAction = useUIStore((state) => state.sessionRetentionAction);
+  const onlyArchived = useUIStore((state) => state.sessionRetentionOnlyArchived);
   const setAutoDeleteEnabled = useUIStore((state) => state.setAutoDeleteEnabled);
   const setAutoDeleteAfterDays = useUIStore((state) => state.setAutoDeleteAfterDays);
   const setSessionRetentionAction = useUIStore((state) => state.setSessionRetentionAction);
+  const setOnlyArchived = useUIStore((state) => state.setSessionRetentionOnlyArchived);
 
-  const { candidates, isRunning, runCleanup, action } = useSessionAutoCleanup({ autoRun: false });
+  const { candidates, isRunning, runCleanup, action, status } = useSessionAutoCleanup({ autoRun: false });
   const pendingCount = candidates.length;
 
   const handleRunCleanup = React.useCallback(async () => {
-    const result = await runCleanup({ force: true });
+    const result = await runCleanup({ force: true }).catch(() => {
+      toast.error(t('settings.openchamber.sessionRetention.status.loadFailed'));
+      return null;
+    });
+    if (!result || (result.skippedReason && result.skippedReason !== 'no-candidates')) return;
 
     if (result.completedIds.length === 0 && result.failedIds.length === 0) {
       toast.message(
@@ -68,7 +74,9 @@ export const SessionRetentionSettings: React.FC = () => {
               <Icon name="information" className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help" />
             </TooltipTrigger>
             <TooltipContent sideOffset={8} className="max-w-xs">
-              {t('settings.openchamber.sessionRetention.tooltip')}
+              {t(onlyArchived
+                ? 'settings.openchamber.sessionRetention.archivedTooltip'
+                : 'settings.openchamber.sessionRetention.tooltip')}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -94,6 +102,28 @@ export const SessionRetentionSettings: React.FC = () => {
             ariaLabel={t('settings.openchamber.sessionRetention.field.enableAutoCleanupAria')}
           />
           <span className="typography-ui-label text-foreground">{t('settings.openchamber.sessionRetention.field.enableAutoCleanup')}</span>
+        </div>
+
+        <div
+          className={cn('group flex cursor-pointer items-center gap-2 py-1.5', isRunning && 'pointer-events-none opacity-60')}
+          role="button"
+          tabIndex={0}
+          aria-pressed={onlyArchived}
+          onClick={() => setOnlyArchived(!onlyArchived)}
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') {
+              event.preventDefault();
+              setOnlyArchived(!onlyArchived);
+            }
+          }}
+        >
+          <Checkbox
+            checked={onlyArchived}
+            onChange={setOnlyArchived}
+            ariaLabel={t('settings.openchamber.sessionRetention.field.onlyArchived')}
+          />
+          <span className="typography-ui-label text-foreground">{t('settings.openchamber.sessionRetention.field.onlyArchived')}</span>
+          <span className="typography-meta text-muted-foreground">{t('settings.openchamber.sessionRetention.field.onlyArchivedDescription')}</span>
         </div>
 
         <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-8">
@@ -136,8 +166,9 @@ export const SessionRetentionSettings: React.FC = () => {
                 type="button"
                 variant="chip"
                 size="xs"
-                aria-pressed={sessionRetentionAction === option.value}
+                aria-pressed={action === option.value}
                 className="!font-normal"
+                disabled={isRunning || (onlyArchived && option.value === 'archive')}
                 onClick={() => setSessionRetentionAction(option.value)}
               >
                 {t(option.labelKey)}
@@ -166,7 +197,11 @@ export const SessionRetentionSettings: React.FC = () => {
           </div>
         </div>
         <p className="typography-meta text-muted-foreground">
-          {action === 'archive'
+          {status === 'error'
+            ? t('settings.openchamber.sessionRetention.status.loadFailed')
+            : status !== 'ready'
+            ? t('settings.openchamber.sessionRetention.status.loadingSessions')
+            : action === 'archive'
             ? t('settings.openchamber.sessionRetention.manualCleanup.eligibleArchiveNow', { count: pendingCount })
             : t('settings.openchamber.sessionRetention.manualCleanup.eligibleDeleteNow', { count: pendingCount })}
         </p>

@@ -235,6 +235,9 @@
     "autoDeleteAfterDays": {
       "scope": "instance"
     },
+    "sessionRetentionOnlyArchived": {
+      "scope": "instance"
+    },
     "sessionRetentionAction": {
       "scope": "instance"
     },

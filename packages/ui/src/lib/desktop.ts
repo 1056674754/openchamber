@@ -156,6 +156,7 @@ export type DesktopSettings = {
   autoSaveEnabled?: boolean;
   autoDeleteAfterDays?: number;
   sessionRetentionAction?: 'archive' | 'delete';
+  sessionRetentionOnlyArchived?: boolean;
   tunnelProvider?: string;
   tunnelMode?: 'quick' | 'managed-remote' | 'managed-local';
   tunnelBootstrapTtlMs?: number | null;
