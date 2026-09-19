@@ -157,6 +157,17 @@ export class SessionEditorPanelProvider {
     panel.webview.onDidReceiveMessage(async (message: BridgeRequest | WebviewDiagnosticsResponse) => {
       if (this._diagnostics.handle(message)) return;
       if (!('id' in message) || typeof message.id !== 'string') return;
+      if (message.type === 'webview:bridgeReady') {
+        // A reload or move between windows replaces the document without
+        // disposing the panel; retire the previous document's streams and
+        // resend the current connection state.
+        for (const controller of state.sseStreams.values()) {
+          controller.abort();
+        }
+        state.sseStreams.clear();
+        this._sendCachedStateToPanel(state);
+        return;
+      }
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;

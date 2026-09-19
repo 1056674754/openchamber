@@ -282,12 +282,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage(async (message: (BridgeRequest & { _msgId?: string }) | { type: 'bridge:ack'; _msgId: string } | { type: 'webview:bridgeReady' } | { type: 'ui:chunkReload'; payload?: unknown } | { type: 'ui:freezeReport'; payload?: unknown } | { type: 'ui:bootTrace'; payload?: unknown } | { type: 'ui:jsError'; payload?: unknown } | { type: 'session:currentChanged'; payload?: { sessionId?: string | null } } | { type: 'browser:control'; id?: string; payload?: { command?: string; args?: unknown } } | WebviewDiagnosticsResponse) => {
       if (message.type === 'webview:bridgeReady') {
+        // A reload or move between windows replaces the document without
+        // disposing this view; retire the previous document's streams so the
+        // reload cannot leak one upstream SSE stream (and its heartbeat
+        // traffic) per reload.
+        for (const [streamId, stream] of this._sseStreams) {
+          if (stream.view !== webviewView) continue;
+          stream.controller.abort();
+          this._sseStreams.delete(streamId);
+        }
         const bootedInMs = this._webviewResolvedAt > 0 ? Date.now() - this._webviewResolvedAt : 0;
         this._webviewBootedAt = Date.now();
         this._rapidWebviewRecoveries = 0;
         this._webviewRecoveryAbandoned = false;
         // console.error because VS Code only forwards that level to renderer.log.
         console.error(`[ChatView] webview bridge ready (booted in ${bootedInMs}ms)`);
+        if (this._view === webviewView) {
+          this._clearPendingMessages();
+        }
         // Delivered over a round trip, so every webview-side listener is live.
         this._sendCachedState();
         void this.updateTheme(vscode.window.activeColorTheme.kind);

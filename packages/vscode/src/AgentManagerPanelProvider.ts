@@ -84,6 +84,17 @@ export class AgentManagerPanelProvider {
     this._panel.webview.onDidReceiveMessage(async (message: BridgeRequest | WebviewDiagnosticsResponse) => {
       if (this._diagnostics.handle(message)) return;
       if (!('id' in message) || typeof message.id !== 'string') return;
+      if (message.type === 'webview:bridgeReady') {
+        // A reload or move between windows replaces the document without
+        // disposing this panel; retire the previous document's streams and
+        // resend the current connection state.
+        for (const controller of this._sseStreams.values()) {
+          controller.abort();
+        }
+        this._sseStreams.clear();
+        this._sendCachedState();
+        return;
+      }
       if (message.type === 'restartApi') {
         await this._openCodeManager?.restart();
         return;
