@@ -33,6 +33,9 @@ import {
 import { detectDevServerCommand, readPackageJsonScripts } from '@/lib/detectDevServer';
 import { connectTerminalStream } from '@/lib/terminalApi';
 import { useActiveServerBaseUrl, useActiveServerId } from '@/hooks/useActiveServerId';
+import { resolveProjectActionsOwner } from '@/hooks/useProjectActionsContext';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 type UrlWatchEntry = {
   lastSeenChunkId: number | null;
@@ -203,6 +206,26 @@ export const ProjectActionsButton = ({
     return { id: projectId, path: projectPath };
   }, [projectId, projectPath]);
 
+  // A session living in a worktree belongs to the parent project: its saved
+  // actions stay usable there (upstream v1.22.2). Only when the open directory
+  // resolves to no project do we fall back to the incoming project ref.
+  const projects = useProjectsStore((state) => state.projects);
+  const worktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
+  const ownerProject = React.useMemo(() => resolveProjectActionsOwner({
+    projects,
+    worktreesByProject,
+    directory,
+    activeProjectId: projectId,
+  }), [directory, projectId, projects, worktreesByProject]);
+
+  const effectiveProjectRef = React.useMemo(() => {
+    if (ownerProject) {
+      return { id: ownerProject.id, path: ownerProject.path };
+    }
+    return stableProjectRef;
+  }, [ownerProject, stableProjectRef]);
+  const effectiveProjectId = effectiveProjectRef?.id ?? null;
+
   React.useEffect(() => {
     if (!isDesktopShellApp) {
       return;
@@ -215,7 +238,7 @@ export const ProjectActionsButton = ({
   }, []);
 
   const loadActions = React.useCallback(async () => {
-    if (!stableProjectRef) {
+    if (!effectiveProjectRef) {
       return;
     }
 
@@ -224,7 +247,7 @@ export const ProjectActionsButton = ({
 
     setIsLoading(true);
     try {
-      const state = await getProjectActionsState(stableProjectRef);
+      const state = await getProjectActionsState(effectiveProjectRef);
       if (loadRequestIdRef.current !== requestId) {
         return;
       }
@@ -249,7 +272,7 @@ export const ProjectActionsButton = ({
         setIsLoading(false);
       }
     }
-  }, [stableProjectRef]);
+  }, [effectiveProjectRef]);
 
   const normalizedDirectory = React.useMemo(() => {
     return normalizeProjectActionDirectory(directory || stableProjectRef?.path || '');
@@ -287,10 +310,10 @@ export const ProjectActionsButton = ({
 
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ projectId?: string }>).detail;
-      if (!projectId) {
+      if (!effectiveProjectId) {
         return;
       }
-      if (detail?.projectId && detail.projectId !== projectId) {
+      if (detail?.projectId && detail.projectId !== effectiveProjectId) {
         return;
       }
       void loadActions();
@@ -300,7 +323,7 @@ export const ProjectActionsButton = ({
     return () => {
       window.removeEventListener(PROJECT_ACTIONS_UPDATED_EVENT, handler);
     };
-  }, [loadActions, projectId]);
+  }, [effectiveProjectId, loadActions]);
 
   React.useEffect(() => {
     if (!selectedActionId) {
@@ -468,7 +491,7 @@ export const ProjectActionsButton = ({
       const discovered = action.id === AUTO_DISCOVER_ACTION_ID
         ? await (async (): Promise<OpenChamberProjectAction> => {
           const [actionsState, scripts] = await Promise.all([
-            getProjectActionsState({ id: stableProjectRef?.id ?? '', path: normalizedDirectory }),
+            getProjectActionsState({ id: effectiveProjectRef?.id ?? '', path: normalizedDirectory }),
             readPackageJsonScripts(normalizedDirectory),
           ]);
           const devServer = await detectDevServerCommand(normalizedDirectory, actionsState.actions, scripts);
@@ -514,50 +537,53 @@ export const ProjectActionsButton = ({
         await sleep(350);
       }
 
-      if (discovered.id === AUTO_DISCOVER_ACTION_ID) {
-        streamCleanupByRunKeyRef.current[key]?.();
-        setConnecting(normalizedDirectory, tabId, true, activeServerId);
-        streamCleanupByRunKeyRef.current[key] = connectTerminalStream(
-          activeSessionId,
-          (event) => {
-            if (event.type === 'snapshot') {
-              useTerminalStore.getState().replaceBuffer(
-                normalizedDirectory,
-                tabId,
-                event.data ?? '',
-                typeof event.sequence === 'number' ? event.sequence : 0,
-                activeServerId,
-              );
-              useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false, activeServerId);
-            }
-            if (event.type === 'data' && typeof event.data === 'string' && event.data.length > 0) {
-              useTerminalStore.getState().appendToBuffer(
-                normalizedDirectory,
-                tabId,
-                event.data,
-                activeServerId,
-                event.sequence,
-                event.replayData,
-              );
-            }
-            if (event.type === 'exit') {
-              useTerminalStore.getState().setTabLifecycle(normalizedDirectory, tabId, 'exited', activeServerId);
-              useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false, activeServerId);
-              useTerminalStore.getState().removeProjectActionRun(key);
-              delete urlWatchByRunKeyRef.current[key];
-              streamCleanupByRunKeyRef.current[key]?.();
-              delete streamCleanupByRunKeyRef.current[key];
-              window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[key]);
-              delete previewWaitTimeoutByRunKeyRef.current[key];
-            }
-          },
-          () => {
+      // Track every action run (not just auto-discover) so the run is cleared
+      // the moment the command really exits, even when its tab is not the one
+      // being viewed (upstream v1.22.2 "running state is reliable"). Buffer
+      // writes are sequence-deduped in the store, so co-streaming with the
+      // terminal view is safe.
+      streamCleanupByRunKeyRef.current[key]?.();
+      setConnecting(normalizedDirectory, tabId, true, activeServerId);
+      streamCleanupByRunKeyRef.current[key] = connectTerminalStream(
+        activeSessionId,
+        (event) => {
+          if (event.type === 'snapshot') {
+            useTerminalStore.getState().replaceBuffer(
+              normalizedDirectory,
+              tabId,
+              event.data ?? '',
+              typeof event.sequence === 'number' ? event.sequence : 0,
+              activeServerId,
+            );
             useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false, activeServerId);
-          },
-          { maxRetries: 60, initialRetryDelay: 250, maxRetryDelay: 2000, connectionTimeout: 5000 },
-          activeServerBaseUrl || undefined,
-        );
-      }
+          }
+          if (event.type === 'data' && typeof event.data === 'string' && event.data.length > 0) {
+            useTerminalStore.getState().appendToBuffer(
+              normalizedDirectory,
+              tabId,
+              event.data,
+              activeServerId,
+              event.sequence,
+              event.replayData,
+            );
+          }
+          if (event.type === 'exit') {
+            useTerminalStore.getState().setTabLifecycle(normalizedDirectory, tabId, 'exited', activeServerId);
+            useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false, activeServerId);
+            useTerminalStore.getState().removeProjectActionRun(key);
+            delete urlWatchByRunKeyRef.current[key];
+            streamCleanupByRunKeyRef.current[key]?.();
+            delete streamCleanupByRunKeyRef.current[key];
+            window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[key]);
+            delete previewWaitTimeoutByRunKeyRef.current[key];
+          }
+        },
+        () => {
+          useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false, activeServerId);
+        },
+        { maxRetries: 60, initialRetryDelay: 250, maxRetryDelay: 2000, connectionTimeout: 5000 },
+        activeServerBaseUrl || undefined,
+      );
 
       const hasDesktopForwardSelection = discovered.autoOpenUrl === true
         && isDesktopShellApp
@@ -643,7 +669,7 @@ export const ProjectActionsButton = ({
     setProjectActionRun,
     setTabPreviewUrl,
     setTabSessionId,
-    stableProjectRef?.id,
+    effectiveProjectRef?.id,
     t,
     terminal,
   ]);
@@ -736,15 +762,15 @@ export const ProjectActionsButton = ({
   }, [activeServerId, normalizedDirectory, runAction, projectActionRuns, stopAction]);
 
   const openProjectActionsSettings = React.useCallback(() => {
-    if (!stableProjectRef?.id) {
+    if (!effectiveProjectRef?.id) {
       return;
     }
-    setSettingsProjectsSelectedId(stableProjectRef.id);
+    setSettingsProjectsSelectedId(effectiveProjectRef.id);
     setSettingsPage('projects');
     setSettingsDialogOpen(true);
-  }, [setSettingsDialogOpen, setSettingsPage, setSettingsProjectsSelectedId, stableProjectRef?.id]);
+  }, [effectiveProjectRef?.id, setSettingsDialogOpen, setSettingsPage, setSettingsProjectsSelectedId]);
 
-  if (runtime.isVSCode || (!allowMobile && isMobile) || !stableProjectRef || !normalizedDirectory) {
+  if (runtime.isVSCode || (!allowMobile && isMobile) || !effectiveProjectRef || !normalizedDirectory) {
     return null;
   }
 
