@@ -35,6 +35,7 @@ mock.module('node:fs', () => ({
 }));
 
 const {
+  fetchOllamaCloudQuota,
   fetchQuotaForProvider,
   listConfiguredQuotaProviders,
 } = await import('./quotaProviders.ts');
@@ -271,5 +272,95 @@ describe('VS Code quota provider parity', () => {
       configured: true,
       error: 'Session expired — please re-authenticate with NeuralWatt',
     });
+  });
+});
+
+describe('Ollama Cloud quota validation and refresh', () => {
+  const readCookie = () => 'test-ollama-cookie';
+
+  for (const { html, expected } of [
+    { html: '<h1>Monthly usage</h1><p>$25.00 of $100.00</p>', expected: { monthly: { usedPercent: 25, valueLabel: '$25.00 / $100.00' } } },
+    { html: 'Monthly usage $1,250.00 of $2,500.00', expected: { monthly: { usedPercent: 50, valueLabel: '$1,250.00 / $2,500.00' } } },
+    { html: 'Session usage 12% Weekly usage 34% Premium 2 / 10', expected: { session: { usedPercent: 12 }, weekly: { usedPercent: 34 }, premium: { usedPercent: 20, valueLabel: '2 / 10' } } },
+    { html: 'Monthly usage $0 of $100 Balance remaining $5.25 Add $5', expected: { monthly: { usedPercent: 0, valueLabel: '$0 / $100' }, credits_balance: { usedPercent: null, valueLabel: '$5.25' } } },
+    { html: 'Monthly usage $0 of $100 Balance remaining $0.00 Add $5', expected: { monthly: { usedPercent: 0, valueLabel: '$0 / $100' } } },
+    { html: 'Monthly usage $125 of $100 Add $5', expected: { monthly: { usedPercent: 100, valueLabel: '$125 / $100' } } },
+  ]) {
+    it(`accepts and displays ${html}`, async () => {
+      const fetchImpl = async (url, init) => {
+        expect(url).toBe('https://ollama.com/settings');
+        expect(init.redirect).toBe('manual');
+        expect(init.method).toBe('GET');
+        expect(new Headers(init.headers).get('Cookie')).toBe('test-ollama-cookie');
+        expect(init.signal).toBeInstanceOf(AbortSignal);
+        return new Response(html);
+      };
+      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      expect(result.ok).toBe(true);
+      expect(result.usage).toBeTruthy();
+      expect(Object.keys(result.usage.windows)).toEqual(Object.keys(expected));
+      for (const [key, expectedWindow] of Object.entries(expected)) {
+        const window = result.usage.windows[key];
+        expect(window).toBeTruthy();
+        expect(window.usedPercent).toBe(expectedWindow.usedPercent);
+        if ('valueLabel' in expectedWindow) expect(window.valueLabel).toBe(expectedWindow.valueLabel);
+        expect(window.resetAt).toBe(null);
+      }
+      expect(JSON.stringify(result)).not.toContain('test-ollama-cookie');
+    });
+  }
+
+  for (const html of ['', '<h1>Monthly usage</h1>', 'Session usage', 'Session usage 1.2.3%', 'Weekly usage 1.2.3%', 'Add $5', 'Monthly usage $1.2.3 of $100', 'Balance remaining $1.2.3']) {
+    it(`rejects unparseable HTML ${JSON.stringify(html)}`, async () => {
+      const fetchImpl = async () => new Response(html);
+      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      expect(result.ok).toBe(false);
+      expect(result.configured).toBe(true);
+      expect(result.usage).toBe(null);
+      expect(result.error).toBe('Ollama Cloud usage data could not be parsed');
+    });
+  }
+
+  for (const status of [302, 307, 401, 403, 429, 500]) {
+    it(`rejects HTTP ${status}`, async () => {
+      const fetchImpl = async () => new Response('Monthly usage $25 of $100', { status });
+      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      expect(result.ok).toBe(false);
+      expect(result.usage).toBe(null);
+      expect(result.error).toBe('Ollama Cloud authentication failed');
+    });
+  }
+
+  for (const failure of [new DOMException('Request timed out', 'TimeoutError'), new Error('Network unavailable')]) {
+    it(`reports ${failure.message}`, async () => {
+      const fetchImpl = async () => { throw failure; };
+      const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+      expect(result.ok).toBe(false);
+      expect(result.usage).toBe(null);
+      expect(result.error).toBe(failure.message);
+    });
+  }
+
+  it('does not request usage without a cookie', async () => {
+    const result = await fetchOllamaCloudQuota({
+      readCookie: () => undefined,
+      fetchImpl: async () => { throw new Error('Unexpected request'); },
+    });
+    expect(result.configured).toBe(false);
+    expect(result.ok).toBe(false);
+  });
+
+  it('reports response body failures', async () => {
+    const failure = new Error('Response body interrupted');
+    const fetchImpl = async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.error(failure);
+      },
+    }));
+    const result = await fetchOllamaCloudQuota({ readCookie, fetchImpl });
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.usage).toBe(null);
+    expect(result.error).toBe(failure.message);
   });
 });
