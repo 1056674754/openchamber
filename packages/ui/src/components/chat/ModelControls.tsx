@@ -2654,7 +2654,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         onTouchCancel={controlsReady ? handleLongPressEnd : undefined}
                         disabled={!controlsReady}
                         className={cn(
-                            'model-controls__model-trigger flex items-center gap-1.5 min-w-0 focus:outline-none',
+                            'model-controls__model-trigger flex items-center gap-1.5 min-w-0 select-none focus:outline-none',
                             controlsReady ? 'cursor-pointer hover:bg-transparent hover:opacity-70' : 'opacity-60 cursor-not-allowed',
                             buttonHeight
                         )}
@@ -2839,7 +2839,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     type="button"
                     onClick={() => setActiveMobilePanel('variant')}
                     className={cn(
-                        'model-controls__variant-trigger flex items-center gap-1.5 transition-opacity min-w-0 focus:outline-none',
+                        'model-controls__variant-trigger flex items-center gap-1.5 transition-opacity min-w-0 select-none focus:outline-none',
                         buttonHeight,
                         'cursor-pointer hover:bg-transparent hover:opacity-70',
                     )}

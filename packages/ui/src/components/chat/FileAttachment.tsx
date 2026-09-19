@@ -11,7 +11,6 @@ import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
-import { useDeviceInfo } from '@/lib/device';
 import { isDrawioFile } from '@/lib/toolHelpers';
 
 interface DrawioFileSource {
@@ -141,8 +140,6 @@ interface ImagePreviewProps {
 
 const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
   const { t } = useI18n();
-  const { isMobile, isTablet } = useDeviceInfo();
-  const alwaysShowActions = isMobile || isTablet;
   const isLocalImagePreview =
     file.source !== 'server' &&
     file.mimeType.startsWith('image/') &&
@@ -191,7 +188,7 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
   }
 
   return (
-    <div className="relative h-10 w-10 rounded-lg border border-border/40 bg-muted/10 overflow-hidden flex-shrink-0 group">      <img
+    <div className="relative h-16 w-16 rounded-lg border border-border/80 bg-background overflow-hidden flex-shrink-0">      <img
         src={imageUrl}
         alt={displayName}
         className="h-full w-full object-cover"
@@ -199,14 +196,11 @@ const ImagePreview = memo(({ file, onRemove }: ImagePreviewProps) => {
       />
       <button
         onClick={onRemove}
-        className={cn(
-          "absolute top-0.5 right-0.5 h-4 w-4 rounded-full bg-background/80 text-foreground hover:text-destructive flex items-center justify-center transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-          alwaysShowActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-        )}
+        className="absolute top-1 right-1 h-5 w-5 rounded-md bg-background/80 text-foreground hover:bg-background flex items-center justify-center transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         title={t('chat.fileAttachment.actions.removeImage')}
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
-        <Icon name="close" className="h-2.5 w-2.5" />
+        <Icon name="close" className="h-3.5 w-3.5" />
       </button>
     </div>
   );
@@ -259,23 +253,22 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
           return;
         }
       }}
-      className="flex items-center gap-1.5 text-sm hover:opacity-80 transition-opacity text-left h-5"
+      className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/80 bg-background pl-2 pr-1 text-xs text-foreground text-left hover:opacity-90 transition-opacity"
+      title={displayName}
     >
-      <FileTypeIcon filePath={file.filename} extension={extension} className="h-4 w-4" />
-      <span className="text-foreground truncate max-w-[200px]">
-        {displayName}
-        {fileSize && <span className="text-muted-foreground ml-1">({fileSize})</span>}
-      </span>
+      <FileTypeIcon filePath={file.filename} extension={extension} className="h-4 w-4 flex-shrink-0" />
+      <span className="truncate max-w-[200px]">{displayName}</span>
+      {fileSize && <span className="text-muted-foreground flex-shrink-0">{fileSize}</span>}
       <span
         data-remove-button
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
         }}
-        className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-full transition-colors cursor-pointer"
+        className="flex items-center justify-center h-5 w-5 flex-shrink-0 hover:bg-[var(--interactive-hover)] rounded-md transition-colors cursor-pointer"
         aria-label={t('chat.fileAttachment.actions.removeNamed', { name: displayName })}
       >
-        <Icon name="close" className="h-4 w-4 text-muted-foreground" />
+        <Icon name="close" className="h-3.5 w-3.5 text-muted-foreground" />
       </span>
     </button>
   );
@@ -362,10 +355,10 @@ export const AttachedFilesList = memo(() => {
   const otherFiles = localFiles.filter((f) => !f.mimeType.startsWith('image/'));
 
   return (
-    <div className="pb-4 w-full px-1 space-y-3">
+    <div className="w-full space-y-2">
       {/* Images row - inline with previews */}
       {images.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           {images.map((file) => (
             <ImagePreview
               key={file.id}
@@ -375,10 +368,10 @@ export const AttachedFilesList = memo(() => {
           ))}
         </div>
       )}
-      
+
       {/* Other files row - inline text-only */}
       {otherFiles.length > 0 && (
-        <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           {otherFiles.map((file) => (
             <FileChip
               key={file.id}

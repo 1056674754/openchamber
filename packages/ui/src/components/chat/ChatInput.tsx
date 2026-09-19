@@ -3362,6 +3362,77 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         };
     }, [clearDropTextSuppression, clearFileMentionPasteSuppression]);
 
+    /**
+     * Attach files that arrived by paste or drop and cite each one in the
+     * draft as `[name]`, the same way pasted images are cited. Images get a
+     * generated unique name up front; other files keep their own name and are
+     * cited only once they attached, so a rejected file leaves no dangling
+     * citation.
+     */
+    const attachFilesWithCitation = React.useCallback(async (
+        files: File[],
+        leadingText: string = '',
+    ): Promise<void> => {
+        const imageFiles = files.filter((file) => file.type.startsWith('image/'));
+        const otherFiles = files.filter((file) => !file.type.startsWith('image/'));
+
+        const insertCitation = (filenames: string[], text: string) => {
+            if (filenames.length === 0 && !text) return;
+            const citationText = buildAttachmentCitationText(filenames);
+            const editor = composerRef.current;
+            const currentMessage = editor?.getValue() ?? messageRef.current;
+            const selectionStart = editor?.getSelection().start ?? currentMessage.length;
+            const selectionEnd = editor?.getSelection().end ?? currentMessage.length;
+            const insertionText = withInlineInsertionBoundaries(
+                buildImagePasteInsertion(text, citationText),
+                currentMessage.slice(0, selectionStart),
+                currentMessage.slice(selectionEnd),
+            );
+            insertTextAtSelection(insertionText, getFileMentionInputSourceForInsertedText(insertionText));
+        };
+
+        const assignedImageNames = assignImageAttachmentFilenames(
+            imageFiles,
+            [
+                ...useInputStore.getState().attachedFiles.map((file) => file.filename),
+                ...pendingPastedAttachmentFilenamesRef.current,
+            ],
+        );
+        insertCitation(assignedImageNames, leadingText);
+
+        let attached = false;
+        for (let index = 0; index < imageFiles.length; index += 1) {
+            const filename = assignedImageNames[index];
+            const file = renameFileForAttachmentCitation(imageFiles[index], filename);
+            pendingPastedAttachmentFilenamesRef.current.add(filename);
+            try {
+                attached = (await addAttachedFile(file)) || attached;
+            } catch (error) {
+                console.error('Clipboard image attach failed', error);
+                toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.clipboardAttachFailed'));
+            } finally {
+                pendingPastedAttachmentFilenamesRef.current.delete(filename);
+            }
+        }
+
+        const attachedOtherNames: string[] = [];
+        for (const file of otherFiles) {
+            try {
+                if (await addAttachedFile(file)) {
+                    attached = true;
+                    attachedOtherNames.push(file.name);
+                }
+            } catch (error) {
+                console.error('File attach failed', error);
+            }
+        }
+        insertCitation(attachedOtherNames, '');
+
+        if (files.length > 0 && !attached) {
+            toast.error(t('chat.chatInput.toast.attachFileFailed'));
+        }
+    }, [addAttachedFile, insertTextAtSelection, t]);
+
     const handlePaste = React.useCallback(async (e: ClipboardEvent) => {
         const clipboardData = e.clipboardData;
         if (!clipboardData) return;
@@ -3386,24 +3457,25 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
         }
 
-        const fileMap = new Map<string, File>();
+        // Images get a citation and a generated name; every other clipboard
+        // file (Finder/Explorer copy, a saved document) attaches as picked.
+        const imageMap = new Map<string, File>();
+        const otherFileMap = new Map<string, File>();
+        const collectClipboardFile = (file: File) => {
+            const target = file.type.startsWith('image/') ? imageMap : otherFileMap;
+            target.set(`${file.name}-${file.size}`, file);
+        };
 
-        Array.from(clipboardData.files || []).forEach(file => {
-            if (file.type.startsWith('image/')) {
-                fileMap.set(`${file.name}-${file.size}`, file);
-            }
-        });
+        Array.from(clipboardData.files || []).forEach(collectClipboardFile);
 
         Array.from(clipboardData.items || []).forEach(item => {
-            if (item.kind === 'file' && item.type.startsWith('image/')) {
-                const file = item.getAsFile();
-                if (file) {
-                    fileMap.set(`${file.name}-${file.size}`, file);
-                }
-            }
+            if (item.kind !== 'file') return;
+            const file = item.getAsFile();
+            if (file) collectClipboardFile(file);
         });
 
-        const imageFiles = Array.from(fileMap.values());
+        const imageFiles = Array.from(imageMap.values());
+        const otherFiles = Array.from(otherFileMap.values());
         const pastedText = clipboardData.getData('text');
 
         // Word/Excel/Google Docs etc. copy the selection as text/plain + text/html AND a
@@ -3414,6 +3486,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             if (pastedText.includes('@')) {
                 markFileMentionPasteSuppression();
             }
+            return;
+        }
+
+        if (imageFiles.length === 0 && otherFiles.length > 0) {
+            // A copied file also carries its name as text; keep it out of the draft.
+            e.preventDefault();
+            if (!currentSessionId && !newSessionDraftOpen) {
+                return;
+            }
+            await attachFilesWithCitation(otherFiles);
             return;
         }
 
@@ -3432,40 +3514,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         e.preventDefault();
-
-        const assignedFilenames = assignImageAttachmentFilenames(
-            imageFiles,
-            [
-                ...attachedFiles.map((file) => file.filename),
-                ...pendingPastedAttachmentFilenamesRef.current,
-            ],
-        );
-        const citationText = buildAttachmentCitationText(assignedFilenames);
-        const selection = composerRef.current?.getSelection();
-        const selectionStart = selection?.start ?? message.length;
-        const selectionEnd = selection?.end ?? message.length;
-        const insertionText = withInlineInsertionBoundaries(
-            buildImagePasteInsertion(pastedText, citationText),
-            message.slice(0, selectionStart),
-            message.slice(selectionEnd),
-        );
-
-        insertTextAtSelection(insertionText, getFileMentionInputSourceForInsertedText(insertionText));
-
-        for (let index = 0; index < imageFiles.length; index += 1) {
-            const filename = assignedFilenames[index];
-            const file = renameFileForAttachmentCitation(imageFiles[index], filename);
-            pendingPastedAttachmentFilenamesRef.current.add(filename);
-            try {
-                await addAttachedFile(file);
-            } catch (error) {
-                console.error('Clipboard image attach failed', error);
-                toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.clipboardAttachFailed'));
-            } finally {
-                pendingPastedAttachmentFilenamesRef.current.delete(filename);
-            }
-        }
-    }, [addAttachedFile, attachedFiles, currentSessionId, inputMode, markFileMentionPasteSuppression, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
+        await attachFilesWithCitation([...imageFiles, ...otherFiles], pastedText);
+    }, [addAttachedFile, attachFilesWithCitation, currentSessionId, inputMode, markFileMentionPasteSuppression, message, newSessionDraftOpen, insertTextAtSelection, setMessage, t, updateAutocompleteState]);
 
     const handleFileSelect = (file: { name: string; path: string; relativePath?: string }) => {
 
@@ -3783,14 +3833,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         if (files.length > 0) {
-            for (const file of files) {
-                try {
-                    await addAttachedFile(file);
-                } catch (error) {
-                    console.error('File attach failed', error);
-                    toast.error(error instanceof Error ? error.message : t('chat.chatInput.toast.attachFileFailed'));
-                }
-            }
+            await attachFilesWithCitation(files);
         }
         clearDropTextSuppression();
     };
@@ -4268,7 +4311,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         </span>
                     </div>
                 )}
-                <AttachedFilesList />
                 <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
@@ -4599,8 +4641,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     className={cn(
                         "flex flex-col relative overflow-visible",
                         isDesktopExpanded && 'flex-1 min-h-0',
-                        "border border-border/80",
-                        "focus-within:ring-1 focus-within:ring-interactive-selection-foreground/25",
+                        "border border-border/80 focus-within:border-interactive-selection-foreground/35",
+                        "shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]",
                         isDragging && "ring-2 ring-primary ring-offset-2"
                     )}
                     style={{
@@ -4721,6 +4763,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     )}
                     <div className={cn("overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
+                            <AttachedFilesList />
                             <AttachedVSCodeFileChips />
                             <ActiveEditorFileSuggestion />
                         </div>
