@@ -67,7 +67,7 @@ describe('session assist runtime', () => {
       },
       '/workspace',
     );
-    await Bun.sleep(25);
+    await new Promise((resolve) => setTimeout(resolve, 25));
     runtime.stop();
 
     expect(generatedPrompt).toContain('User: 继续完成生产采样');
