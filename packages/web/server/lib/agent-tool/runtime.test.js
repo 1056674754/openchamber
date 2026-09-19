@@ -92,6 +92,23 @@ describe('agent tool runtime', () => {
     expect(plugin.tool.openchamber_memory).toBeUndefined();
   });
 
+  it('keeps the action schema to one validator keyword', async () => {
+    // A node carrying both `enum` and `oneOf` is valid JSON Schema, but some
+    // OpenAI-compatible gateways reject it and answer with an empty completion
+    // instead of an error. `oneOf` is the keyword that stayed. Its branches
+    // carry the per-action descriptions the model reads.
+    const { dataDir, runtime } = await createRuntime();
+    await runtime.prepareManagedOpenCodeEnv({ includeMemory: true });
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?validator=${Date.now()}`);
+    const plugin = await pluginModule.OpenChamberPlugin();
+
+    for (const entry of Object.values(plugin.tool)) {
+      expect(entry.args.action.oneOf).toBeInstanceOf(Array);
+      expect(entry.args.action).not.toHaveProperty('enum');
+    }
+  });
+
   it('injects the memory tool only when explicitly enabled', async () => {
     const { dataDir, runtime } = await createRuntime();
 

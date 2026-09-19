@@ -2180,12 +2180,12 @@ const fetchNeuralwattQuota = async (): Promise<ProviderResult> => {
       )
         ? (period === 'month' ? 'monthly' : period)
         : 'billing_cycle';
-      const keyName = asNonEmptyString(key?.name);
+      // Window title is the localized period label (daily/weekly/monthly); the
+      // usage value stays a percent so the UI's display-mode toggle applies.
       windows[periodKey] = toUsageWindow({
         usedPercent,
         windowSeconds: neuralwattWindowSeconds(period),
         resetAt: toTimestamp(allowance.reset_at),
-        ...(keyName ? { valueLabel: keyName } : {}),
       });
     } else if (creditsRemaining !== null) {
       windows.credits_balance = toUsageWindow({

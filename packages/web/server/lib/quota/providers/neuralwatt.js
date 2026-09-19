@@ -71,7 +71,6 @@ export const fetchQuota = async () => {
     const payload = await response.json();
     const subscription = payload?.subscription ?? null;
     const allowance = payload?.key?.allowance ?? null;
-    const keyName = payload?.key?.name ?? null;
     const creditsRemaining = toNumber(payload?.balance?.credits_remaining_usd);
     const windows = {};
 
@@ -114,12 +113,12 @@ export const fetchQuota = async () => {
       )
         ? (period === 'month' ? 'monthly' : period)
         : 'billing_cycle';
-      const labelName = asNonEmptyString(keyName);
+      // Window title is the localized period label (daily/weekly/monthly); the
+      // usage value stays a percent so the UI's display-mode toggle applies.
       windows[periodKey] = toUsageWindow({
         usedPercent,
         windowSeconds: period ? periodToWindowSeconds(period) : null,
         resetAt: toTimestamp(allowance.reset_at),
-        ...(labelName ? { valueLabel: labelName } : {}),
       });
     } else if (creditsRemaining !== null) {
       windows.credits_balance = toUsageWindow({

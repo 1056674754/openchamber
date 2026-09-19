@@ -20,7 +20,9 @@ it as `state.lastScheduledFor`.
   `<project>.json.lock` file.
 - The winner advances `nextRunAt`; another process seeing the same claimed
   occurrence skips session creation and rearms from persisted state.
-- Manual `runNow` does not claim a scheduled occurrence.
+- Manual `runNow` does not claim a scheduled occurrence. It also runs paused
+  (`enabled: false`) tasks — that is the point of the button — while scheduled
+  dispatches still skip disabled tasks, and completion never re-arms a paused task.
 - Lock, claim, and completion-write failures always release the running slot.
 - Only future timestamps are armed, preventing consumed once tasks from
   spinning delay-zero retries.

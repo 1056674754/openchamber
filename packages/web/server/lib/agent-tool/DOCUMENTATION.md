@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This module injects `openchamber` for Session/schedule control and `openchamber_web` for Browser actions into managed OpenCode. Both call the same policy-first control service, while their action schemas and parameters remain separate.
+This module injects `openchamber` for Session/schedule control and `openchamber_web` for Browser actions into managed OpenCode. Both call the same policy-first control service, while their action schemas and parameters remain separate. Each generated action schema carries `oneOf` and no `enum`: the combination is valid JSON Schema, but some OpenAI-compatible gateways reject it and answer with an empty completion instead of an error.
 
 ## Startup
 

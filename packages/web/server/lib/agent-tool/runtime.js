@@ -97,7 +97,7 @@ const createWebToolEntry = () => String.raw`
     openchamber_web: {
       description: "Look at and interact with a live page in OpenChamber's browser panel. Open a page, snapshot it, then click, type, scroll, inspect, resize, or capture using one action per call. The page may contain the user's real login session.",
       args: {
-        action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_WEB_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_WEB_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Browser action" },
+        action: { type: "string", oneOf: ${JSON.stringify(OPENCHAMBER_WEB_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Browser action" },
         parameters: { type: "object", properties: ${JSON.stringify(WEB_PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the action" },
       },
       async execute(input, context) {
@@ -130,7 +130,7 @@ const createMemoryToolEntry = () => String.raw`
     openchamber_memory: {
       description: "Keep durable facts, preferences, decisions, and hard-won references across sessions. Read a listed memory before acting on its abbreviated title. Never store secrets, one-off task state, facts already obvious from the code, or anything the user asked you not to keep. Choose global only for facts about the user; project is for this codebase.",
       args: {
-        action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_MEMORY_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_MEMORY_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Memory action" },
+        action: { type: "string", oneOf: ${JSON.stringify(OPENCHAMBER_MEMORY_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Memory action" },
         parameters: { type: "object", properties: ${JSON.stringify(MEMORY_PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the memory action" },
       },
       async execute(input, context) {
@@ -166,7 +166,7 @@ ${includeControl ? String.raw`
     openchamber: {
       description: "Control OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with; never use this tool to delegate parts of your own current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default. To inspect a completed result later, use session.messages; session.send always sends a new prompt. Session and worktree deletion are unavailable.",
       args: {
-        action: { type: "string", enum: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTIONS)}, oneOf: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "OpenChamber action to perform" },
+        action: { type: "string", oneOf: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "OpenChamber action to perform" },
         parameters: { type: "object", properties: ${JSON.stringify(PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
       },
       async execute(input, context) {

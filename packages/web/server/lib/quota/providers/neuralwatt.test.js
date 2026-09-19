@@ -62,7 +62,7 @@ describe('NeuralWatt quota provider', () => {
 
     expect(result.usage.windows.monthly.usedPercent).toBeCloseTo((25 / 55) * 100, 4);
     expect(result.usage.windows.monthly.windowSeconds).toBe(30 * 86400);
-    expect(result.usage.windows.monthly.valueLabel).toBe('prod-key');
+    expect(result.usage.windows.monthly.valueLabel).toBeUndefined();
     expect(result.usage.windows.credits_balance).toBeUndefined();
   });
 
