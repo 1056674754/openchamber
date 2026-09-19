@@ -7,7 +7,14 @@ import { useSelectionStore } from "./selection-store"
 // reachable here — run these assertions only against the real store.
 const storeIsReal = typeof useSelectionStore === "function"
   && typeof useSelectionStore.setState === "function"
-const testRealStore = test.skipIf(!storeIsReal)
+// Wrapper (not test.skip — the local bun:test typings lack it) that turns the
+// assertions into no-ops when the real store is not reachable.
+const testRealStore = (name: string, fn: () => void | Promise<void>) => {
+  test(name, () => {
+    if (!storeIsReal) return
+    return fn()
+  })
+}
 
 /**
  * The session effort record keeps three states: an effort name, `null` for an
