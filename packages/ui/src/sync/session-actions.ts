@@ -1738,7 +1738,9 @@ export async function optimisticSend(input: {
     metadata: (input.deliveryMode === "steer"
       ? { openchamberLiveSteer: true, openchamberDeliveryMode: "steer" }
       : {}) as Record<string, unknown>,
-    time: { created: Date.now(), completed: 0 },
+    // A user message never completes a turn; only assistant messages carry
+    // `time.completed`, and readers treat its presence as "turn finished".
+    time: { created: Date.now() },
   } as unknown as Message
 
   if (input.deliveryMode === "steer") {
