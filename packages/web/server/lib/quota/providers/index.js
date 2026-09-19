@@ -14,6 +14,7 @@ import * as copilot from './copilot.js';
 import * as crof from './crof.js';
 import * as cursor from './cursor.js';
 import * as deepseek from './deepseek.js';
+import * as exeDev from './exe-dev.js';
 import * as google from './google/index.js';
 import * as kimi from './kimi.js';
 import * as nanogpt from './nanogpt.js';
@@ -71,6 +72,12 @@ const registry = {
     providerName: google.providerName,
     isConfigured: google.isConfigured,
     fetchQuota: google.fetchGoogleQuota
+  },
+  'exe-dev': {
+    providerId: exeDev.providerId,
+    providerName: exeDev.providerName,
+    isConfigured: exeDev.isConfigured,
+    fetchQuota: exeDev.fetchQuota
   },
   'zai-coding-plan': {
     providerId: zai.providerId,

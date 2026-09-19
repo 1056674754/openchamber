@@ -4,6 +4,7 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { deleteLegacyOpenCodeGoCredential, fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { fetchCommandCodeUsage } from './commandCodeQuota';
+import { fetchExeDevUsage } from './exeDevQuota';
 
 type AuthEntry = Record<string, unknown> | string;
 type AuthFile = Record<string, AuthEntry>;
@@ -578,6 +579,11 @@ export const listConfiguredQuotaProviders = () => {
   const deepseekAuth = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
   if (asNonEmptyString(deepseekAuth?.key) || asNonEmptyString(deepseekAuth?.token)) {
     configured.add('deepseek');
+  }
+
+  const exeDevAuth = normalizeAuthEntry(getAuthEntry(auth, ['exe-dev']));
+  if (asNonEmptyString(exeDevAuth?.usageToken)) {
+    configured.add('exe-dev');
   }
 
   return Array.from(configured);
@@ -2302,6 +2308,40 @@ const fetchCrofQuota = async (): Promise<ProviderResult> => {
   }
 };
 
+const fetchExeDevQuota = async (): Promise<ProviderResult> => {
+  const auth = readAuthFile();
+  const entry = normalizeAuthEntry(getAuthEntry(auth, ['exe-dev']));
+  const usageToken = asNonEmptyString(entry?.usageToken);
+
+  if (!usageToken) {
+    return buildResult({
+      providerId: 'exe-dev',
+      providerName: 'exe.dev',
+      ok: false,
+      configured: false,
+      error: 'Not configured',
+    });
+  }
+
+  try {
+    return buildResult({
+      providerId: 'exe-dev',
+      providerName: 'exe.dev',
+      ok: true,
+      configured: true,
+      usage: { windows: await fetchExeDevUsage(usageToken) },
+    });
+  } catch (error) {
+    return buildResult({
+      providerId: 'exe-dev',
+      providerName: 'exe.dev',
+      ok: false,
+      configured: true,
+      error: error instanceof Error ? error.message : 'Request failed',
+    });
+  }
+};
+
 const fetchDeepseekQuota = async (): Promise<ProviderResult> => {
   const auth = readAuthFile();
   const entry = normalizeAuthEntry(getAuthEntry(auth, ['deepseek']));
@@ -2428,6 +2468,8 @@ const fetchQuotaForProviderUncoalesced = async (providerId: string): Promise<Pro
       return fetchCrofQuota();
     case 'deepseek':
       return fetchDeepseekQuota();
+    case 'exe-dev':
+      return fetchExeDevQuota();
     case 'neuralwatt':
       return fetchNeuralwattQuota();
     case 'opencode-go': {

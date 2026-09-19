@@ -18,6 +18,7 @@ export type QuotaProviderId =
   | 'wafer'
   | 'opencode-go'
   | 'crof'
+  | 'exe-dev'
   | 'neuralwatt'
   | 'xai';
 
