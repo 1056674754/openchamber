@@ -121,6 +121,15 @@ describe("server-owned message queue", () => {
     expect(useMessageQueueStore.getState().sendingIds[SESSION]).toEqual(["q1"])
   })
 
+  test("context-only queue previews survive authoritative snapshots", async () => {
+    respond = () => json({ revision: 3, sessions: [session([serverItem("q1", "", { contextPreview: "Explain this quote" })])] })
+    await useMessageQueueStore.getState().hydrate()
+    const queued = useMessageQueueStore.getState().queuedMessages[SESSION]?.[0]
+    expect(queued?.contextPreview).toBe("Explain this quote")
+    expect(queued?.content).toBe("")
+    expect(queued?.context).toBeUndefined()
+  })
+
   test("addToQueue shows the message at once and settles on the server's copy", async () => {
     respond = () => json({ revision: 5, session: session([serverItem("srv-1", "hi @reviewer", { agentMention: "reviewer" })]) })
     const pending = useMessageQueueStore.getState().addToQueue(SESSION, {
@@ -165,6 +174,7 @@ describe("server-owned message queue", () => {
       sendConfig: { providerID: "p", modelID: "m" },
     })
     expect(calls[0]?.body.item.context).toEqual(context)
+    expect(calls[0]?.body.item.contextPreview).toBe("Bug")
     // The projection carries no context; the server strips payloads from snapshots.
     expect(useMessageQueueStore.getState().queuedMessages[SESSION]?.[0]?.context).toBe(undefined)
 

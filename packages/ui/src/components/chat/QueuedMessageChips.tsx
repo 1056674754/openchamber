@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
+import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
@@ -46,15 +47,7 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit, onSend }: QueuedMe
         isDragging,
     } = useSortable({ id: message.id });
 
-    const firstLine = React.useMemo(() => {
-        const lines = message.content.split('\n');
-        const first = lines[0] || '';
-        const maxLength = 100;
-        if (first.length > maxLength) {
-            return first.substring(0, maxLength) + '...';
-        }
-        return first + (lines.length > 1 ? '...' : '');
-    }, [message.content]);
+    const firstLine = getQueuedMessagePreview(message);
 
     const attachmentCount = message.attachments?.length ?? 0;
 
@@ -128,8 +121,9 @@ export const QueuedMessageChips = memo(({ hidden = false, onEditMessage, onSendM
     const { t } = useI18n();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     // Collapse is local to the mounted session queue and survives temporary
-    // hiding behind btw; switching queue identity resets it.
-    const [collapsed, setCollapsed] = React.useState(false);
+    // hiding behind btw; switching queue identity resets it. Collapsed by
+    // default: the header strip is enough while a turn runs.
+    const [collapsed, setCollapsed] = React.useState(true);
     const [collapseSessionId, setCollapseSessionId] = React.useState(currentSessionId);
     if (collapseSessionId !== currentSessionId) {
         setCollapseSessionId(currentSessionId);

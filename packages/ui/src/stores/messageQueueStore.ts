@@ -6,6 +6,7 @@ import { createInputHistoryIdentity, createInputHistorySubmission, useInputHisto
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import type { AttachedFile } from './types/sessionTypes';
 import { contextPartMetadataSchema, type ContextPartMetadata } from '@/lib/messages/contextParts';
+import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -87,6 +88,8 @@ export interface QueuedMessage {
     attachments?: AttachedFile[];
     /** Context captured at queue time; delivered (and restored on edit) with the message. */
     context?: QueuedContextPart[];
+    /** Bounded display-only context summary retained in server projections. */
+    contextPreview?: string;
     createdAt: number;
     /** Authoritative routing captured at queue time. */
     sendTarget?: {
@@ -153,6 +156,7 @@ const serverItemSchema = z.object({
     attachments: z.array(serverAttachmentSchema),
     /** Present only on a taken item; broadcasts and snapshots omit it like attachment payloads. */
     context: z.array(serverContextPartSchema).optional(),
+    contextPreview: z.string().optional(),
     sendConfig: serverSendConfigSchema,
 });
 
@@ -230,6 +234,7 @@ const toQueuedMessage = (item: ServerQueueItem): QueuedMessage => {
     if (item.agentMention) message.agentMention = item.agentMention;
     if (item.attachments.length > 0) message.attachments = item.attachments.map(toAttachedFile);
     if (item.context) message.context = item.context;
+    if (item.contextPreview) message.contextPreview = item.contextPreview;
     return message;
 };
 
@@ -241,6 +246,7 @@ type ServerQueueItemInput = {
     agentMention?: string;
     attachments: ServerQueueAttachmentInput[];
     context: QueuedContextPart[];
+    contextPreview?: string;
     sendConfig: QueuedMessageSendConfig;
 };
 
@@ -271,6 +277,8 @@ const toServerItemInput = (message: QueuedMessageInput, sendConfig: QueuedMessag
         sendConfig,
     };
     if (message.agentMention) item.agentMention = message.agentMention;
+    const contextPreview = getQueuedMessagePreview({ content: '', context: message.context });
+    if (contextPreview) item.contextPreview = contextPreview;
     return item;
 };
 
