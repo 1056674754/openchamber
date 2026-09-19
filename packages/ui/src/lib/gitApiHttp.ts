@@ -388,6 +388,22 @@ export async function getGitBranches(directory: string, baseUrl?: string): Promi
   return response.json();
 }
 
+export async function getGitUnpushedBranchCounts(
+  directory: string,
+  branches: string[],
+  baseUrl?: string,
+): Promise<import('./api/types').GitUnpushedBranchCounts> {
+  const response = await fetch(buildUrl(`${API_BASE}/branch-push-status`, directory, undefined, baseUrl), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branches }),
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to get branch push status: ${response.statusText}`);
+  }
+  return response.json();
+}
+
 export async function deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }> {
   if (!payload?.branch) {
     throw new Error('branch is required to delete a branch');

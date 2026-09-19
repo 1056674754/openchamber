@@ -17,6 +17,7 @@ import {
   getStatus,
   getWorktreeBootstrapStatus,
   getBranchBase,
+  getUnpushedBranchCounts,
   getRangeFiles,
   parseBranchCreationSource,
   populateWorktreeWithLockRecovery,
@@ -973,5 +974,44 @@ describe('hash validation', () => {
     await expect(
       resetToCommit('/tmp', '1234567890abcdef1234567890abcdef12345678', 'soft')
     ).rejects.not.toThrow('Invalid commit hash');
+  });
+});
+
+describe('getUnpushedBranchCounts', () => {
+  const createRepositoryWithRemote = () => {
+    const repository = createTempDir();
+    const remote = createTempDir();
+    runGit(remote, ['init', '--bare']);
+    runGit(repository, ['init', '-b', 'main']);
+    runGit(repository, ['config', 'user.email', 'test@example.com']);
+    runGit(repository, ['config', 'user.name', 'Test User']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+    runGit(repository, ['add', 'README.md']);
+    runGit(repository, ['commit', '-m', 'Initial commit']);
+    runGit(repository, ['remote', 'add', 'origin', remote]);
+    runGit(repository, ['push', '-u', 'origin', 'main']);
+    return repository;
+  };
+
+  it('counts only commits ahead of a locally known upstream', async () => {
+    if (!canRunGit()) return;
+
+    const repository = createRepositoryWithRemote();
+    fs.writeFileSync(path.join(repository, 'ahead.txt'), 'ahead\n');
+    runGit(repository, ['add', 'ahead.txt']);
+    runGit(repository, ['commit', '-m', 'ahead']);
+    runGit(repository, ['checkout', '-b', 'no-upstream']);
+
+    await expect(getUnpushedBranchCounts(repository, ['main', 'no-upstream', 'remotes/origin/main'])).resolves.toEqual({
+      counts: { main: 1 },
+    });
+  });
+
+  it('omits branches that are in sync with their upstream', async () => {
+    if (!canRunGit()) return;
+
+    const repository = createRepositoryWithRemote();
+
+    await expect(getUnpushedBranchCounts(repository, ['main'])).resolves.toEqual({ counts: {} });
   });
 });

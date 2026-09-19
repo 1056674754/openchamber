@@ -51,6 +51,7 @@ import { StashesDialog } from './git/StashesDialog';
 import { ChangesSection } from './git/ChangesSection';
 import { CommitSection } from './git/CommitSection';
 import { GitEmptyState } from './git/GitEmptyState';
+import { DirtyBranchSwitchDialog } from './git/DirtyBranchSwitchDialog';
 import { NestedRepoResolutionStates } from './git/NestedRepoResolutionStates';
 import { HistorySection } from './git/HistorySection';
 import { PullRequestSection } from './git/PullRequestSection';
@@ -655,6 +656,8 @@ export const GitView: React.FC = () => {
     }
   }, [conflictStorageKey, gitDirectory]);
   const [stashDialogOpen, setStashDialogOpen] = React.useState(false);
+  // Branch a dirty-tree switch is waiting on; null when no switch is blocked.
+  const [pendingDirtySwitchBranch, setPendingDirtySwitchBranch] = React.useState<string | null>(null);
   const [stashDialogOperation, setStashDialogOperation] = React.useState<'merge' | 'rebase'>('merge');
   const [stashDialogBranch, setStashDialogBranch] = React.useState('');
 
@@ -1399,7 +1402,24 @@ export const GitView: React.FC = () => {
       return;
     }
 
+    // A checkout over uncommitted changes can carry them onto the target
+    // branch, conflict, or silently rewrite what the user was editing. The
+    // switch is blocked until the working tree is resolved: commit, or
+    // explicitly revert (DirtyBranchSwitchDialog).
+    if ((status?.files?.length ?? 0) > 0) {
+      setPendingDirtySwitchBranch(normalized);
+      return;
+    }
+
+    await performCheckout(normalized);
+  };
+
+  const performCheckout = async (branch: string) => {
+    if (!gitDirectory) return;
+    const normalized = branch;
     try {
+      // Picking a remote-tracking branch checks out the local branch that
+      // tracks it, so report the branch the repository actually landed on.
       const result = await git.checkoutBranch(gitDirectory, normalized);
       toast.success(t('gitView.toast.checkedOut', { name: result?.branch || normalized }));
       await refreshStatusAndBranches();
@@ -2313,6 +2333,7 @@ export const GitView: React.FC = () => {
   return (
     <div className={cn('flex h-full flex-col overflow-hidden', 'bg-sidebar')}>
           <GitHeader
+        directory={gitDirectory ?? ''}
         status={status}
         localBranches={localBranches}
         remoteBranches={remoteBranches}
@@ -2641,6 +2662,82 @@ export const GitView: React.FC = () => {
           onClearState={clearConflictState}
         />
       )}
+
+      <DirtyBranchSwitchDialog
+        open={pendingDirtySwitchBranch !== null}
+        onOpenChange={(open) => { if (!open) setPendingDirtySwitchBranch(null); }}
+        targetBranch={pendingDirtySwitchBranch ?? ''}
+        changedFileCount={status?.files?.length ?? 0}
+        onCommitAndSwitch={async (message, pushAfter) => {
+          const branch = pendingDirtySwitchBranch;
+          if (!branch || !gitDirectory) return;
+          const sourceBranch = status?.current ?? null;
+          await git.createGitCommit(gitDirectory, message, { addAll: true });
+          let pushedRemoteName: string | null = null;
+          if (pushAfter) {
+            const trackingRemoteName = status?.tracking?.split('/')[0];
+            const remote = effectiveRemotes.find((entry) => entry.name === trackingRemoteName) ?? effectiveRemotes[0];
+            try {
+              if (!remote) throw new Error(t('gitView.sync.noRemoteTooltip'));
+              await git.gitPush(gitDirectory, status?.tracking
+                ? { remote: remote.name }
+                : { remote: remote.name, branch: sourceBranch ?? undefined, options: ['--set-upstream'] });
+              pushedRemoteName = remote.name;
+            } catch (error) {
+              // The commit stands, so nothing is lost — but the switch is
+              // cancelled: the user must see the failed push on the branch it
+              // belongs to instead of discovering it later from elsewhere.
+              console.error('Push after commit failed:', error);
+              toast.error(t('gitView.dirtySwitch.pushFailed'));
+              await refreshStatusAndBranches();
+              await refreshLog();
+              setPendingDirtySwitchBranch(null);
+              return;
+            }
+          }
+          // Without a push the commit stays local on the branch being left;
+          // after the switch nothing on screen would say so, so the toast must.
+          toast.success(pushedRemoteName
+            ? t('gitView.toast.pushedToUpstream', { name: pushedRemoteName })
+            : sourceBranch
+              ? t('gitView.dirtySwitch.committedNotPushed', { branch: sourceBranch })
+              : t('gitView.toast.commitCreated'));
+          await refreshStatusAndBranches();
+          await refreshLog();
+          setPendingDirtySwitchBranch(null);
+          await performCheckout(branch);
+        }}
+        onGenerateMessage={async () => {
+          if (!gitDirectory) return '';
+          const paths = (status?.files ?? []).map((file) => file.path).sort();
+          const { message } = await generateSessionCommitMessage(gitDirectory, paths);
+          const subject = message.subject?.trim() ?? '';
+          // Same gitmoji decoration as the commit panel's Generate button.
+          if (subject && settingsGitmojiEnabled && gitmojiEmojis.length > 0) {
+            const match = matchGitmojiFromSubject(subject, gitmojiEmojis);
+            if (match && !subject.startsWith(match.code) && !subject.startsWith(match.emoji)) {
+              return `${match.code} ${subject}`;
+            }
+          }
+          return subject;
+        }}
+        onRevertAndSwitch={async () => {
+          const branch = pendingDirtySwitchBranch;
+          if (!branch || !gitDirectory) return;
+          const paths = (status?.files ?? []).map((file) => file.path);
+          await handleRevertPaths(paths, true, 'all');
+          // The revert reports its own partial failures; the checkout happens
+          // only once the tree is verifiably clean, so a half-reverted tree is
+          // never switched over.
+          const fresh = await git.getGitStatus(gitDirectory);
+          if (!fresh.isClean && (fresh.files?.length ?? 0) > 0) {
+            toast.error(t('gitView.dirtySwitch.revertIncomplete'));
+            return;
+          }
+          setPendingDirtySwitchBranch(null);
+          await performCheckout(branch);
+        }}
+      />
 
       <StashDialog
         open={stashDialogOpen}

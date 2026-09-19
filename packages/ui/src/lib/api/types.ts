@@ -209,6 +209,9 @@ export interface GitBranch {
   defaultBranches?: Record<string, string>;
 }
 
+/** Branch -> number of local commits ahead of its upstream; branches in sync or without an upstream are omitted. */
+export type GitUnpushedBranchCounts = { counts: Record<string, number> };
+
 export interface GitCommitSummary {
   changes: number;
   insertions: number;
@@ -515,6 +518,7 @@ export interface GitAPI {
   unstageGitFiles?(directory: string, filePaths: string[]): Promise<void>;
   isLinkedWorktree(directory: string): Promise<boolean>;
   getGitBranches(directory: string): Promise<GitBranch>;
+  getGitUnpushedBranchCounts?(directory: string, branches: string[]): Promise<GitUnpushedBranchCounts>;
   deleteGitBranch(directory: string, payload: GitDeleteBranchPayload): Promise<{ success: boolean }>;
   deleteRemoteBranch(directory: string, payload: GitDeleteRemoteBranchPayload): Promise<{ success: boolean }>;
   removeRemote(directory: string, payload: GitRemoveRemotePayload): Promise<{ success: boolean }>;

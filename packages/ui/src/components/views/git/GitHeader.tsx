@@ -21,10 +21,12 @@ import { WorktreeBranchDisplay } from './WorktreeBranchDisplay';
 import { SyncActions } from './SyncActions';
 import type { GitStatus, GitIdentityProfile, GitRemote } from '@/lib/api/types';
 import { useI18n } from '@/lib/i18n';
+import { useDeviceInfo } from '@/lib/device';
 
 type SyncAction = 'fetch' | 'pull' | 'push' | 'sync' | null;
 
 interface GitHeaderProps {
+  directory: string;
   status: GitStatus | null;
   localBranches: string[];
   remoteBranches: string[];
@@ -192,6 +194,7 @@ export const IdentityDropdown: React.FC<IdentityDropdownProps> = ({
 };
 
 export const GitHeader: React.FC<GitHeaderProps> = ({
+  directory,
   status,
   localBranches,
   remoteBranches,
@@ -221,6 +224,7 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
   onSelectActionTab,
 }) => {
   const { t } = useI18n();
+  const { isMobile } = useDeviceInfo();
   if (!status) {
     return null;
   }
@@ -330,21 +334,23 @@ export const GitHeader: React.FC<GitHeaderProps> = ({
               </SelectContent>
             </Select>
           ) : null}
-          {isWorktreeMode ? (
+          {isWorktreeMode && !isMobile ? (
             <WorktreeBranchDisplay
               currentBranch={status.current}
               onRename={onRenameBranch}
             />
           ) : (
             <BranchSelector
+              directory={directory}
               currentBranch={status.current}
               localBranches={localBranches}
               remoteBranches={remoteBranches}
               branchInfo={branchInfo}
+              currentBranchAhead={status.ahead}
               onCheckout={onCheckoutBranch}
               onCreate={onCreateBranch}
               remotes={remotes}
-
+              switchBlockedNotice={(status.files?.length ?? 0) > 0 ? t('gitView.branch.switchBlockedNotice') : null}
             />
           )}
         </div>
