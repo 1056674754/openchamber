@@ -33,7 +33,8 @@ import { getLanguageFromExtension, isImageFile } from '@/lib/toolHelpers';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { DiffViewToggle } from '@/components/chat/message/DiffViewToggle';
 import type { DiffViewMode } from '@/components/chat/message/types';
-import { PierreDiffViewer } from './PierreDiffViewer';
+import { PierreDiffViewer, type DiffHunkActions } from './PierreDiffViewer';
+import { HunkActions, type HunkBusyState, type HunkDiffAction } from './git/HunkActions';
 import { useDeviceInfo } from '@/lib/device';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
@@ -57,7 +58,7 @@ import {
     statusToGitCode,
 } from '@/lib/diff/turnSnapshotDiff';
 import type { FileDiffMetadata } from '@pierre/diffs';
-import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
+import { fileDiffFromPatch, extractHunkPatch, getPatchHunkAnchors } from '@/lib/diff/patchFileDiff';
 
 // Minimum width for side-by-side diff view (px)
 const SIDE_BY_SIDE_MIN_WIDTH = 1100;
@@ -611,13 +612,15 @@ interface InlineDiffViewerProps {
     diff: DiffData;
     renderSideBySide: boolean;
     wrapLines: boolean;
+    hunkActions?: DiffHunkActions;
 }
 
-const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({ 
+const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
     filePath,
     diff,
     renderSideBySide,
     wrapLines,
+    hunkActions,
 }) => {
     const language = React.useMemo(
         () => getLanguageFromExtension(filePath) || 'text',
@@ -649,6 +652,7 @@ const InlineDiffViewer = React.memo<InlineDiffViewerProps>(({
                 renderSideBySide={renderSideBySide}
                 wrapLines={wrapLines}
                 layout="inline"
+                hunkActions={hunkActions}
             />
         </div>
     );
@@ -765,6 +769,8 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
         }, [directory, file.path])
     );
     const setDiff = useGitStore((state) => state.setDiff);
+    const fetchStatus = useGitStore((state) => state.fetchStatus);
+    const clearDiffCache = useGitStore((state) => state.clearDiffCache);
     const setDiffFileLayout = useUIStore((state) => state.setDiffFileLayout);
 
     const [isExpanded, setIsExpanded] = React.useState(!defaultCollapsed);
@@ -773,6 +779,9 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const [diffLoadError, setDiffLoadError] = React.useState<string | null>(null);
     const [isLoading, setIsLoading] = React.useState(false);
     const [forceRenderLarge, setForceRenderLarge] = React.useState(false);
+    const [hunkAction, setHunkAction] = React.useState<HunkBusyState>(null);
+    const [canonicalPatch, setCanonicalPatch] = React.useState<{ scope: string; patch: string } | null>(null);
+    const mutationInFlight = React.useRef(false);
     const lastDiffRequestRef = React.useRef<string | null>(null);
     const sectionRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -887,6 +896,87 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
             }
         };
     }, [directory, diffData, diffRetryNonce, file.path, git, hasBeenVisible, initialDiffData, isExpanded, setDiff]);
+
+    // Hunk-level actions operate on a canonical patch of the file's unstaged
+    // changes (the fork's diff panel has no staged scope). Turn/branch
+    // comparisons arrive as initialDiffData snapshots and stay read-only.
+    const fileStatusKey = `${file.index ?? ''} ${file.working_dir ?? ''} ${file.insertions} ${file.deletions}`;
+    const patchScope = `${directory} ${file.path} ${fileStatusKey} ${diffRetryNonce}`;
+    const hunkEligible = !initialDiffData && !isImageFile(file.path);
+    const actionPatch = canonicalPatch?.scope === patchScope ? canonicalPatch.patch : null;
+
+    React.useEffect(() => {
+        if (!isExpanded || !hunkEligible || !directory || actionPatch !== null || diffLoadError) {
+            return;
+        }
+
+        let cancelled = false;
+        git.getGitDiff(directory, { path: file.path, contextLines: 3 })
+            .then((response) => {
+                if (cancelled) return;
+                const patch = response.diff;
+                // Only patches with hunk headers anchor hunk actions; binary
+                // and metadata-only responses are silently skipped.
+                if (patch && /^@@\s/m.test(patch)) {
+                    setCanonicalPatch({ scope: patchScope, patch });
+                }
+            })
+            .catch(() => {
+                // Hunk controls are optional; a failed fetch just hides them.
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [actionPatch, diffLoadError, directory, file.path, git, hunkEligible, isExpanded, patchScope]);
+
+    const handleHunkAction = React.useCallback(async (hunkIndex: number, action: HunkDiffAction) => {
+        if (!directory || !hunkEligible || isLoading || diffLoadError || mutationInFlight.current || hunkAction !== null) {
+            return;
+        }
+
+        const hunkPatch = actionPatch ? extractHunkPatch(actionPatch, hunkIndex) : null;
+        if (!hunkPatch) {
+            toast.error(t('diffView.hunk.unavailable'));
+            return;
+        }
+
+        // The fork's diff panel only shows unstaged changes, so staged is
+        // always false here and 'unstage' cannot be requested.
+        const hunkMutation = action === 'stage'
+            ? git.stageGitHunk
+            : action === 'unstage'
+                ? git.unstageGitHunk
+                : git.revertGitHunk;
+        if (!hunkMutation) {
+            toast.error(t('diffView.hunk.unsupported'));
+            return;
+        }
+
+        mutationInFlight.current = true;
+        setHunkAction({ index: hunkIndex, action });
+        try {
+            await hunkMutation(directory, file.path, hunkPatch);
+            setCanonicalPatch(null);
+            clearDiffCache(directory, [file.path]);
+            setDiffRetryNonce((nonce) => nonce + 1);
+            sessionEvents.requestGitRefresh({ directory, paths: [file.path] });
+            await fetchStatus(directory, git);
+        } catch (error) {
+            toast.error(error instanceof Error && error.message ? error.message : t('diffView.hunk.unavailable'));
+        } finally {
+            mutationInFlight.current = false;
+            setHunkAction((current) => (current?.index === hunkIndex && current.action === action ? null : current));
+        }
+    }, [actionPatch, clearDiffCache, diffLoadError, directory, fetchStatus, file.path, git, hunkAction, hunkEligible, isLoading, t]);
+
+    const hunkAnchors = React.useMemo(() => hunkEligible && actionPatch !== null ? getPatchHunkAnchors(actionPatch) : [], [actionPatch, hunkEligible]);
+    const renderHunkActions = React.useCallback((index: number) => (
+        <HunkActions index={index} staged={false} busyHunk={hunkAction}
+            disabled={isLoading || Boolean(diffLoadError)} onAction={handleHunkAction} />
+    ), [diffLoadError, handleHunkAction, hunkAction, isLoading]);
+    const diffHunkActions = React.useMemo<DiffHunkActions | undefined>(() => hunkAnchors.length > 0
+        ? { anchors: hunkAnchors, render: renderHunkActions } : undefined, [hunkAnchors, renderHunkActions]);
 
     const handleToggle = React.useCallback(() => {
         handleOpenChange(!isExpanded);
@@ -1045,6 +1135,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
                             diff={diffData}
                             renderSideBySide={renderSideBySide}
                             wrapLines={wrapLines}
+                            hunkActions={diffHunkActions}
                         />
                     ) : null}
                 </div>
