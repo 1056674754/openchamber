@@ -1,5 +1,5 @@
 import { DateTime, IANAZone } from 'luxon';
-import parser from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 
 import { projectPathFromId } from './project-id.js';
 import {
@@ -158,7 +158,7 @@ const normalizeTimezone = (value, fallback = resolveDefaultTimezone()) => {
 
 const validateCronExpression = (expression, timezone) => {
   try {
-    const iterator = parser.parseExpression(expression, {
+    const iterator = CronExpressionParser.parse(expression, {
       tz: timezone,
       currentDate: new Date(),
     });
