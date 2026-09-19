@@ -131,6 +131,16 @@ export const VSCodeLayout: React.FC = () => {
 
   const hasAppliedInitialSession = React.useRef(false);
 
+  // The workspace folder this editor panel was opened for; new-session drafts
+  // started without an explicit session should target it.
+  const bootstrapWorkspaceFolder = React.useMemo<string | null>(() => {
+    const configured =
+      typeof window !== 'undefined'
+        ? (window as unknown as { __VSCODE_CONFIG__?: { workspaceFolder?: unknown } }).__VSCODE_CONFIG__?.workspaceFolder
+        : null;
+    return typeof configured === 'string' && configured.trim().length > 0 ? configured.trim() : null;
+  }, []);
+
   const bootDraftOpen = React.useMemo(() => {
     try {
       return Boolean(useSessionUIStore.getState().newSessionDraft?.open);
@@ -401,10 +411,12 @@ export const VSCodeLayout: React.FC = () => {
       return;
     }
 
-    // No initialSessionId means open a new session draft
+    // No initialSessionId means open a new session draft, anchored to the
+    // workspace folder this editor panel was opened for (fork draft store keeps
+    // its own implicit target when the bootstrap folder is absent).
     if (!initialSessionId) {
       hasAppliedInitialSession.current = true;
-      openNewSessionDraft();
+      openNewSessionDraft(bootstrapWorkspaceFolder ? { directoryOverride: bootstrapWorkspaceFolder } : undefined);
       return;
     }
 
@@ -414,7 +426,7 @@ export const VSCodeLayout: React.FC = () => {
 
     hasAppliedInitialSession.current = true;
     void useSessionUIStore.getState().setCurrentSession(initialSessionId);
-  }, [connectionStatus, hasInitializedOnce, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
+  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
 
   // Track container width for responsive settings layout
   React.useEffect(() => {
