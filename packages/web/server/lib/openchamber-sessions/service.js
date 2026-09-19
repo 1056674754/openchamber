@@ -692,9 +692,78 @@ export const createOpenChamberSessionService = (dependencies) => {
     }
   };
 
+  /**
+   * Archive a batch of sessions in one request.
+   *
+   * The UI archives every session linked to a worktree before removing it.
+   * Doing that from the browser costs one request per session plus a store
+   * reconciliation between each of them, which is what made deleting a
+   * worktree with many sessions take tens of seconds. Here the batch stays on
+   * the server, next to OpenCode, and the client reconciles once.
+   *
+   * Sessions are updated one at a time on purpose: they are archived against a
+   * single OpenCode instance, and a fan-out of concurrent writes would trade a
+   * UI stall for server event-loop starvation. One failed session never stops
+   * the batch — it is reported in `failedIds` while the rest still archive, so
+   * callers keep the partial-failure behaviour they already show.
+   */
+  const archive = async (payload = {}) => {
+    assertLocalAuthority(payload);
+
+    const rawIds = payload?.ids;
+    if (!Array.isArray(rawIds) || rawIds.length === 0) {
+      throw new OpenChamberControlError('ids must be a non-empty array of session ids', 400);
+    }
+    if (rawIds.length > 500) {
+      throw new OpenChamberControlError('ids must contain at most 500 session ids', 400);
+    }
+    const ids = [];
+    for (const value of rawIds) {
+      const id = asNonEmptyString(value);
+      if (!id) throw new OpenChamberControlError('ids must contain non-empty session ids', 400);
+      ids.push(id);
+    }
+
+    const requestedArchivedAt = payload?.archivedAt;
+    if (requestedArchivedAt !== undefined
+      && (!Number.isSafeInteger(requestedArchivedAt) || requestedArchivedAt <= 0)) {
+      throw new OpenChamberControlError('archivedAt must be a positive integer timestamp', 400);
+    }
+    const archivedAt = requestedArchivedAt ?? Date.now();
+
+    const resolved = await resolveDirectory(payload);
+
+    if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
+
+    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    const authHeaders = getOpenCodeAuthHeaders();
+    const client = createClient({ baseUrl, headers: authHeaders });
+
+    const archived = [];
+    const failedIds = [];
+    for (const sessionID of ids) {
+      try {
+        const response = await client.session.update({
+          sessionID,
+          directory: resolved.directory,
+          time: { archived: archivedAt },
+        });
+        const session = response?.data;
+        if (session?.id) archived.push(session);
+        else failedIds.push(sessionID);
+      } catch (error) {
+        console.warn('[OpenChamberSessions] failed to archive session', sessionID, error);
+        failedIds.push(sessionID);
+      }
+    }
+
+    return { directory: resolved.directory, archived, failedIds };
+  };
+
   return {
     create,
     send: (sessionID, payload) => runExisting('send', sessionID, payload),
     fork: (sessionID, payload) => runExisting('fork', sessionID, payload),
+    archive,
   };
 };

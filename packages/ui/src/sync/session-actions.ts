@@ -11,7 +11,7 @@ import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
 import type { ChildStoreManager } from "./child-store"
 import { requireSessionAuthority, UnresolvedSessionServerError } from "./session-authority"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { useGlobalSessionsStore, resolveGlobalSessionDirectory } from "@/stores/useGlobalSessionsStore"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { registerSessionDirectory } from "./sync-refs"
 import { recordSendFailure } from "./send-failure-log"
@@ -48,6 +48,10 @@ import { runtimeFetch } from "@/lib/runtime-fetch"
 import { messagesBefore, messagesFrom, sortMessagesChronologically } from './message-ordering'
 import { cleanupBtwBeforeSessionRemoval } from '@/lib/sessionBtwLifecycle'
 import { deleteChatDirectory, isChatDirectoryPath } from '@/lib/chatDirectories'
+import { requestSessionArchiveBatch } from "./session-archive-batch"
+import { registerBulkArchiveEchoes, releaseBulkArchiveEchoes } from "./bulk-archive-echo"
+import { isReviewSession } from '@/lib/sessionReviewMetadata'
+import { isBtwSession, getBtwSessionID } from '@/lib/sessionBtwMetadata'
 
 export {
   resolveApiUrl,
@@ -1070,10 +1074,55 @@ export async function archiveSessions(
   const archivedIds: string[] = []
   const failedIds: string[] = []
   const expectedRuntimeKey = options?.expectedRuntimeKey ?? getRuntimeKey()
+  if (ids.length === 0) return { archivedIds, failedIds }
 
-  for (const [index, id] of ids.entries()) {
+  const plan = planArchiveBatches(ids)
+
+  for (const [directory, batchIds] of plan.batchesByDirectory) {
     if (isStaleRuntime(expectedRuntimeKey)) {
-      failedIds.push(...ids.slice(index))
+      failedIds.push(...batchIds)
+      continue
+    }
+
+    const archivedAt = Date.now()
+    registerBulkArchiveEchoes(
+      expectedRuntimeKey,
+      batchIds.map((id) => ({ id, archivedAt })),
+    )
+    const result = await requestSessionArchiveBatch(directory, batchIds, archivedAt, resolveBaseUrl(directory))
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...batchIds)
+      continue
+    }
+
+    if (result.outcome === "archived") {
+      releaseBulkArchiveEchoes(expectedRuntimeKey, batchIds)
+      registerBulkArchiveEchoes(
+        expectedRuntimeKey,
+        result.archived.flatMap((session) => (
+          session.time?.archived === undefined
+            ? []
+            : [{ id: session.id, archivedAt: session.time.archived }]
+        )),
+      )
+      commitArchivedSessions(result.archived, directory)
+      archivedIds.push(...result.archived.map((session) => session.id))
+      failedIds.push(...result.failedIds)
+      continue
+    }
+
+    // The runtime does not serve the batch route, or its answer could not be
+    // trusted. Archiving each session individually is slower but reaches the
+    // same state, and re-archiving a session the server already archived writes
+    // the same field again.
+    console.warn("[session-actions] archive batch unavailable, archiving one by one", result.reason)
+    releaseBulkArchiveEchoes(expectedRuntimeKey, batchIds)
+    plan.individualIds.push(...batchIds)
+  }
+
+  for (const [index, id] of plan.individualIds.entries()) {
+    if (isStaleRuntime(expectedRuntimeKey)) {
+      failedIds.push(...plan.individualIds.slice(index))
       break
     }
     if (await archiveSession(id, expectedRuntimeKey)) archivedIds.push(id)
@@ -1081,6 +1130,148 @@ export async function archiveSessions(
   }
 
   return { archivedIds, failedIds }
+}
+
+/**
+ * A session whose archive also has to rewrite another session's metadata.
+ *
+ * Review sessions and btw forks point at a parent that must be unlinked, and a
+ * parent with an active btw fork has to delete that fork. Those are
+ * read-modify-write pairs on a second session, so they stay on the per-session
+ * path instead of the server batch.
+ */
+function hasLinkedSessionCleanup(session: Session): boolean {
+  return isReviewSession(session) || isBtwSession(session) || Boolean(getBtwSessionID(session))
+}
+
+/**
+ * Split the requested IDs into per-directory server batches and the sessions
+ * that must be archived individually.
+ *
+ * Link classification reads this client's session records rather than
+ * refetching each session: those records are kept current by the same
+ * `session.updated` events that publish a link created anywhere else, so a
+ * fetch per session would buy no authority the store does not already have.
+ * A session this client does not hold is classified as individual, which
+ * restores the per-session fetch for exactly the cases where the store has
+ * nothing to say.
+ */
+function planArchiveBatches(ids: string[]) {
+  const global = useGlobalSessionsStore.getState()
+  const knownSessions = new Map<string, Session>()
+  for (const session of [...global.activeSessions, ...global.archivedSessions]) {
+    knownSessions.set(session.id, session)
+  }
+  for (const { childStores } of getAllSyncStores()) {
+    for (const store of childStores.children.values()) {
+      for (const session of store.getState().session) knownSessions.set(session.id, session)
+    }
+  }
+  if (_childStores) {
+    for (const store of _childStores.children.values()) {
+      for (const session of store.getState().session) knownSessions.set(session.id, session)
+    }
+  }
+
+  const batchesByDirectory = new Map<string, string[]>()
+  const individualIds: string[] = []
+
+  for (const id of ids) {
+    const session = knownSessions.get(id)
+    const directory = session
+      ? resolveGlobalSessionDirectory(session) ?? getSessionDirectory(id)
+      : undefined
+    if (!session || !directory || hasLinkedSessionCleanup(session)) {
+      individualIds.push(id)
+      continue
+    }
+    const batch = batchesByDirectory.get(directory)
+    if (batch) batch.push(id)
+    else batchesByDirectory.set(directory, [id])
+  }
+
+  return { batchesByDirectory, individualIds }
+}
+
+/**
+ * Remove a batch of server-confirmed sessions from every live child store.
+ *
+ * Each affected store is written once for the whole batch. Removing the
+ * sessions one at a time notified every subscriber — and therefore re-rendered
+ * the sidebar — once per session, which is what made archiving a worktree's
+ * sessions block the main thread for seconds.
+ */
+function removeSessionsFromLiveStores(sessionIds: Iterable<string>, preferredDirectory?: string): string[] {
+  const ids = new Set(sessionIds)
+  if (ids.size === 0) return []
+
+  const visited = new Set<string>()
+  const managers: Array<ChildStoreManager | undefined> = []
+
+  if (preferredDirectory) {
+    const baseUrl = resolveBaseUrl(preferredDirectory)
+    const preferredServerId = baseUrl ? getServerIdForBaseUrl(baseUrl) : DEFAULT_SERVER_ID
+    if (preferredServerId && preferredServerId !== DEFAULT_SERVER_ID) {
+      managers.push(getSyncStoresForServer(preferredServerId))
+    }
+  }
+  managers.push(_childStores ?? undefined)
+  for (const { childStores } of getAllSyncStores()) managers.push(childStores)
+
+  const writtenDirectories: string[] = []
+
+  for (const manager of managers) {
+    if (!manager) continue
+    const candidates: Array<[string, ReturnType<ChildStoreManager["ensureChild"]>]> = []
+
+    if (preferredDirectory) {
+      const preferredStore = manager.getChild(preferredDirectory)
+      if (preferredStore) {
+        candidates.push([preferredDirectory, preferredStore])
+        visited.add(normalizeDirectoryKey(preferredDirectory))
+      }
+    }
+
+    for (const entry of manager.children.entries()) {
+      const key = normalizeDirectoryKey(entry[0])
+      if (visited.has(key)) continue
+      candidates.push(entry)
+      visited.add(key)
+    }
+
+    for (const [storeDirectory, store] of candidates) {
+      const current = store.getState()
+      const removed = current.session.filter((session) => ids.has(session.id)).map((session) => session.id)
+      if (removed.length === 0) continue
+
+      writtenDirectories.push(normalizeDirectoryKey(storeDirectory))
+      store.setState({
+        session: current.session.filter((session) => !ids.has(session.id)),
+      })
+    }
+  }
+
+  return writtenDirectories
+}
+
+/**
+ * Reconcile a server-confirmed archive batch with one write per store.
+ *
+ * This mirrors what `archiveSession` does for a single session — drop it from
+ * the live directory stores, move it to the archived bucket, and clear it if
+ * it was open — with the per-session store notifications collapsed into one.
+ */
+function commitArchivedSessions(sessions: Session[], directory: string): void {
+  if (sessions.length === 0) return
+
+  const ids = sessions.map((session) => session.id)
+  removeSessionsFromLiveStores(ids, directory)
+
+  const global = useGlobalSessionsStore.getState()
+  for (const session of sessions) global.upsertSession(session)
+
+  const ui = useSessionUIStore.getState()
+  if (ui.currentSessionId && ids.includes(ui.currentSessionId)) ui.setCurrentSession(null)
 }
 
 /**

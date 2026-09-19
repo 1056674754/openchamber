@@ -102,3 +102,83 @@ describe('OpenChamber Session selection inheritance', () => {
     expect(recordDelivered).toHaveBeenCalledWith('ses_existing', '/workspace/current', 'knowledge-v1');
   });
 });
+
+describe('OpenChamber Session archive batch', () => {
+  const buildService = (client) => createOpenChamberSessionService({
+    readSettingsFromDiskMigrated: mock(async () => ({})),
+    sanitizeProjects: (projects) => projects,
+    validateDirectoryPath: mock(async (directory) => ({ ok: true, directory })),
+    buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    createClient: () => client,
+  });
+
+  test('archives every session and reports each server payload', async () => {
+    const archivedBy = new Map([
+      ['ses_1', { id: 'ses_1', title: 'one', time: { archived: 111 } }],
+      ['ses_2', { id: 'ses_2', title: 'two', time: { archived: 111 } }],
+    ]);
+    const client = {
+      session: {
+        update: mock(async ({ sessionID, time }) => ({ data: archivedBy.get(sessionID) && { ...archivedBy.get(sessionID), time } })),
+      },
+    };
+    const service = buildService(client);
+
+    const result = await service.archive({
+      serverId: 'default',
+      directory: '/workspace/current',
+      ids: ['ses_1', 'ses_2'],
+      archivedAt: 111,
+    });
+
+    expect(client.session.update).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      directory: '/workspace/current',
+      archived: [
+        { id: 'ses_1', title: 'one', time: { archived: 111 } },
+        { id: 'ses_2', title: 'two', time: { archived: 111 } },
+      ],
+      failedIds: [],
+    });
+  });
+
+  test('keeps archiving the rest when one session fails', async () => {
+    const client = {
+      session: {
+        update: mock(async ({ sessionID }) => {
+          if (sessionID === 'ses_bad') throw new Error('boom');
+          return { data: { id: sessionID, time: { archived: 222 } } };
+        }),
+      },
+    };
+    const service = buildService(client);
+
+    const result = await service.archive({
+      serverId: 'default',
+      directory: '/workspace/current',
+      ids: ['ses_bad', 'ses_good'],
+      archivedAt: 222,
+    });
+
+    expect(client.session.update).toHaveBeenCalledTimes(2);
+    expect(result.archived).toEqual([{ id: 'ses_good', time: { archived: 222 } }]);
+    expect(result.failedIds).toEqual(['ses_bad']);
+  });
+
+  test('rejects empty id lists and bad timestamps', async () => {
+    const service = buildService({ session: { update: mock(async () => ({ data: null })) } });
+
+    await expect(service.archive({ serverId: 'default', directory: '/w', ids: [] }))
+      .rejects.toThrow('ids must be a non-empty array of session ids');
+    await expect(service.archive({ serverId: 'default', directory: '/w', ids: ['ses_1'], archivedAt: 0 }))
+      .rejects.toThrow('archivedAt must be a positive integer timestamp');
+  });
+
+  test('rejects a foreign serverId', async () => {
+    const service = buildService({ session: { update: mock(async () => ({ data: null })) } });
+
+    await expect(service.archive({ serverId: 'remote-x', directory: '/w', ids: ['ses_1'] }))
+      .rejects.toThrow(/does not support server/i);
+  });
+});
