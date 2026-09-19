@@ -13,6 +13,7 @@ import updaterPkg from 'electron-updater';
 import { ElectronSshManager } from './ssh-manager.mjs';
 import { replaceFileWithRetry } from './windows-file-replace.mjs';
 import { createShellEnvironmentLoader } from './shell-environment.mjs';
+import { stopEmbeddedServer } from './server-shutdown.mjs';
 import { hasSameHttpOrigin, loginRemotePasswordAndPersistSession } from './remote-password-login.mjs';
 import { applyConnectAttemptTimeout } from '@openchamber/web/server/lib/network-defaults.js';
 import {
@@ -1499,15 +1500,20 @@ const spawnLocalServer = async () => {
 const spawnLocalServerOnce = createSingleFlight(spawnLocalServer);
 
 const killSidecar = async ({ stopOpenCode = !shouldKeepManagedOpenCodeAliveByDefault() } = {}) => {
-  if (state.serverHandle) {
-    try {
-      const result = state.serverHandle.stop({ exitProcess: false, stopOpenCode });
-      if (result && typeof result.then === 'function') {
-        await result;
-      }
-    } catch {
-    }
-    state.serverHandle = null;
+  const handle = state.serverHandle;
+  state.serverHandle = null;
+  state.sidecarUrl = null;
+  if (handle) {
+    // Bounded: a hung backend stop must not hold the quit path forever. The
+    // fork has no detached reaper to launch as a fallback yet, so the timeout
+    // surfaces a warning and the OS-level cleanup remains the backstop.
+    await stopEmbeddedServer(
+      { stop: (options) => handle.stop({ ...options, stopOpenCode }) },
+      {
+        launchFallback: () => {},
+        warn: (error) => log.warn('[electron] embedded server shutdown:', error),
+      },
+    ).catch(() => {});
   }
   state.sidecarUrl = null;
 };

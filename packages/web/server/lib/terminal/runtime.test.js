@@ -567,4 +567,129 @@ describe('terminal runtime', () => {
       await new Promise((resolve) => server.close(resolve));
     }
   }, 15_000);
+
+  // Gated harness: an armed gate holds the next validateCwd stat call, so a
+  // create or restart can be held mid-flight across a shutdown
+  // (upstream ac5005ddf / 3f958a397 regressions). shutdownProcesses fakes the
+  // tree teardown.
+  const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+  const createGatedHarness = (overrides = {}) => {
+    const routes = { get: new Map(), post: new Map(), delete: new Map() };
+    const processes = [];
+    let gate = null;
+    const app = {
+      post(route, handler) { routes.post.set(route, handler); },
+      get(route, handler) { routes.get.set(route, handler); },
+      delete(route, handler) { routes.delete.set(route, handler); },
+    };
+    const loadPtyProvider = async () => ({
+      backend: 'fake-pty',
+      spawn: (shell, args, options) => {
+        const dataHandlers = new Set();
+        const exitHandlers = new Set();
+        const process = {
+          pid: 400 + processes.length,
+          shell,
+          args,
+          options,
+          writes: [],
+          resizes: [],
+          killed: false,
+          kills: [],
+          write(data) { this.writes.push(data); },
+          resize(cols, rows) { this.resizes.push([cols, rows]); },
+          kill(signal) { this.killed = true; this.kills.push(signal ?? 'SIGTERM'); },
+          onData(handler) { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
+          onExit(handler) { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
+          emitData(data) { for (const handler of dataHandlers) handler(data); },
+          emitExit(exitCode = 0, signal = 0) { for (const handler of exitHandlers) handler({ exitCode, signal }); },
+        };
+        processes.push(process);
+        return process;
+      },
+    });
+    const runtime = createRuntime(new EventEmitter(), {
+      app,
+      loadPtyProvider,
+      terminalTerminationGraceMs: 10,
+      fs: { promises: { stat: async () => {
+        if (gate) { const pending = gate; gate = null; await pending.promise; }
+        return { isDirectory: () => true };
+      } } },
+      searchPathFor: () => '/bin/sh',
+      isExecutable: () => true,
+      shutdownProcesses: async (terminals) => { for (const terminal of terminals) terminal.process.kill('SIGKILL'); },
+      ...overrides,
+    });
+    return { routes, processes, armGate: () => { gate = deferred(); return gate; }, runtime };
+  };
+
+  it('reaps a pending create during shutdown and rejects later creates', async () => {
+    const harness = createGatedHarness();
+    const pendingGate = harness.armGate();
+    const create = harness.routes.post.get('/api/terminal/create');
+    const response = createResponse();
+    const creation = create({ body: { sessionId: 'pending', cwd: '/repo' } }, response);
+    await new Promise((resolve) => setImmediate(resolve));
+    const closing = harness.runtime.shutdown();
+    pendingGate.resolve();
+    await Promise.all([creation, closing]);
+    expect(harness.processes).toHaveLength(1);
+    // The in-flight create completed when its gate resolved, so the session
+    // exists and shutdown reaps it; later creates are rejected outright.
+    expect(harness.processes[0].killed).toBe(true);
+    expect(response.statusCode).toBe(200);
+    const later = createResponse();
+    await create({ body: { sessionId: 'later', cwd: '/repo' } }, later);
+    expect(later.statusCode).toBe(400);
+    expect(harness.processes).toHaveLength(1);
+    await harness.runtime.shutdown();
+  });
+
+  it('rejects a restart whose session is closed while the restart waits', async () => {
+    const harness = createGatedHarness();
+    const createGate = harness.armGate();
+    const create = harness.routes.post.get('/api/terminal/create');
+    const created = createResponse();
+    const creating = create({ body: { sessionId: 'terminal', cwd: '/repo' } }, created);
+    await new Promise((resolve) => setImmediate(resolve));
+    createGate.resolve();
+    await creating;
+    expect(created.statusCode).toBe(200);
+    // Arm a fresh gate so the restart's own validateCwd blocks pre-spawn.
+    const restartGate = harness.armGate();
+    const response = createResponse();
+    const restarting = harness.routes.post.get('/api/terminal/:sessionId/restart')({ params: { sessionId: 'terminal' }, body: {} }, response);
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    const removed = createResponse();
+    await harness.routes.delete.get('/api/terminal/:sessionId')({ params: { sessionId: 'terminal' } }, removed);
+    restartGate.resolve();
+    await restarting;
+    expect(response.statusCode).toBe(400);
+    expect(harness.processes.every((child) => child.killed)).toBe(true);
+  });
+
+  it('joins terminal cleanup and retires sessions before waiting for shutdown', async () => {
+    const gate = deferred();
+    let terminals;
+    const harness = createGatedHarness({ shutdownProcesses: async (current) => { terminals = current; await gate.promise; } });
+    const create = harness.routes.post.get('/api/terminal/create');
+    const created = createResponse();
+    await create({ body: { sessionId: 'running', cwd: '/repo' } }, created);
+    let done = false;
+    const closing = harness.runtime.shutdown();
+    expect(harness.runtime.shutdown()).toBe(closing);
+    closing.then(() => { done = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0].process).toBe(harness.processes[0]);
+    expect(done).toBe(false);
+    const later = createResponse();
+    await create({ body: { sessionId: 'later', cwd: '/repo' } }, later);
+    expect(later.statusCode).toBe(400);
+    gate.resolve();
+    await closing;
+    expect(done).toBe(true);
+  });
 });

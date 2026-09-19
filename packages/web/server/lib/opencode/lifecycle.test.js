@@ -865,7 +865,7 @@ describe('OpenCode lifecycle', () => {
     }));
   });
 
-  it('kills the spawned child on startup timeout and cleans up the allocated port (orphan prevention)', async () => {
+  it('closes the spawned child on startup timeout and cleans up the allocated port (orphan prevention)', async () => {
     delete process.env.OPENCODE_BINARY;
     delete process.env.OPENCHAMBER_RUNTIME;
 
@@ -878,8 +878,12 @@ describe('OpenCode lifecycle', () => {
     const runtime = createRuntime({ startupTimeoutMs: 50 });
     await expect(runtime.startOpenCode()).rejects.toThrow('Timeout waiting for OpenCode to start');
 
-    expect(child1.kill).toHaveBeenCalledWith('SIGKILL');
-    expect(child2.kill).toHaveBeenCalledWith('SIGKILL');
+    // Ownership starts at spawn: the startup failure closes the child
+    // orderly (SIGTERM, with SIGKILL reserved for a child ignoring it).
+    expect(child1.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(child2.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(child1.signalCode).toBe('SIGTERM');
+    expect(child2.signalCode).toBe('SIGTERM');
 
     const lsofCallsForSpawnPort = spawnSyncMock.mock.calls.filter(
       ([cmd, args]) => cmd === 'lsof' && args?.some((a) => a.includes(':45678'))

@@ -318,34 +318,33 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     const pid = child.pid;
-    if (!pid || hasChildProcessExited(child)) {
+    // On POSIX a closed parent can still own a live group (a tool ignoring
+    // SIGTERM keeps running after the server closed its stdio), so only the
+    // win32 check may shortcut the tree termination below.
+    if (!pid || (process.platform === 'win32' && hasChildProcessExited(child))) {
       await waitForChildProcessClose(child, 250);
       return;
     }
 
+    const signalChild = (signal) => {
+      // Only a detached child is its own process group leader; signaling the
+      // group of a non-detached child would be a no-op at best.
+      if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
+        try {
+          process.kill(-pid, signal);
+        } catch {
+        }
+      }
+
+      try {
+        if (!hasChildProcessExited(child)) child.kill(signal);
+      } catch {
+      }
+    };
+
     if (process.platform === 'win32') {
-      try {
-        child.kill();
-      } catch {
-      }
-
-      if (await waitForChildProcessClose(child, 800)) {
-        return;
-      }
-
-      try {
-        spawnSync('taskkill', ['/pid', String(pid), '/t'], {
-          stdio: 'ignore',
-          timeout: 3000,
-          windowsHide: true,
-        });
-      } catch {
-      }
-
-      if (await waitForChildProcessClose(child, 1500)) {
-        return;
-      }
-
+      // Windows child.kill() terminates only the parent. Kill the owned tree
+      // while its parent still exists, otherwise /T cannot find its children.
       try {
         spawnSync('taskkill', ['/pid', String(pid), '/f', '/t'], {
           stdio: 'ignore',
@@ -359,26 +358,10 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       return;
     }
 
-    const signalChild = (signal) => {
-      if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
-        try {
-          process.kill(-pid, signal);
-          return;
-        } catch {
-        }
-      }
-
-      try {
-        child.kill(signal);
-      } catch {
-      }
-    };
-
     signalChild('SIGTERM');
-
-    if (await waitForChildProcessClose(child, 2500)) {
-      return;
-    }
+    // Parent exit does not prove group exit. Tools can ignore SIGTERM and keep
+    // running after their server has exited and closed its own stdio.
+    await waitForChildProcessClose(child, 2500);
 
     signalChild('SIGKILL');
 
@@ -495,21 +478,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       child.unref();
     }
 
-    // Kill the spawned child if it never becomes ready. Without this, a startup
-    // timeout rejects the URL promise but leaves the child process alive as an
-    // orphan — it keeps its listening port and accumulates across retries.
-    const killUnresolvedChild = () => {
-      if (!child.pid || hasChildProcessExited(child)) return;
-      try {
-        if (process.env.OPENCHAMBER_RUNTIME === 'desktop') {
-          process.kill(-child.pid, 'SIGKILL');
-        } else {
-          child.kill('SIGKILL');
-        }
-      } catch {
-      }
-    };
-
     const url = await new Promise((resolve, reject) => {
       let stdout = '';
       let stderr = '';
@@ -558,7 +526,6 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       };
 
       const timer = setTimeout(() => {
-        killUnresolvedChild();
         finish(reject, new Error(`Timeout waiting for OpenCode to start after ${timeout}ms`));
       }, timeout);
 
@@ -566,6 +533,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       child.stderr?.on('data', onStderr);
       child.on('exit', onExit);
       child.on('error', onError);
+    }).catch(async (error) => {
+      // Ownership starts at spawn: a server that never becomes ready (timeout,
+      // parse failure, early exit) is closed with its descendants instead of
+      // being left orphaned with its listening port, accumulating across retries.
+      expectedStopReason = expectedStopReason ?? 'startup_failed';
+      await closeManagedOpenCodeChild(child);
+      throw error;
     });
 
     child.stderr?.on('data', (chunk) => {
