@@ -29,15 +29,15 @@ commit 类型分布：193 fix、53 feat、13 test、9 docs、8 chore、7 release
 
 ## 特殊拓扑：orphan v1.22.2 基线（本轮第一阻塞项）
 
-上游 `5012de6b8 release v1.22.2` 是**无父 orphan 提交**（历史重导入）。v1.22.0→v1.22.2 的真实内容差为 **630 文件 / +42,546 / -6,024**，全部未分解为可审 commit，且包含大量后续 commit 依赖的基建：
+上游 `5012de6b8 release v1.22.2` 是**无父 orphan 提交**（历史重导入）。v1.22.0→v1.22.2 的真实内容差为 **630 文件 / +42,546 / -6,024**，全部未分解为可审 commit。
 
-- composer draft-target 基建（DraftTargetSelectors / useComposerDraft）
-- LiveTurnActivity 时间线 + timelineScrollAnchoring
-- markdown / markdownCore + decorate 渲染管线
-- 上游 WorkStatusPanel（turn stats 载体）
-- session-message-loader、network-defaults、downstream-scheduler（relay 流控）
+**2026-09-19 内容核实修正**（逐文件核查 v1.22.0/v1.22.2/v1.23.0/v1.24.2/fork 五方存在性）：
 
-分类中被判"不适用"的 commit（#9/#34/#49/#50/#87 等）都源于缺这些基建。**基线必须先按内容对比移植（按功能块分解），否则后续约 1/3 的 commit 缺依赖**。
+- orphan 内容 = **v1.22.1 + v1.22.2 两个版本的常规发布变更**，可用上游 CHANGELOG 精确分解（服务端消息队列、分支切换 DirtyBranchSwitchDialog、prompt history/useInputHistoryStore、ProjectActionsButton worktree 化、terminal chunk replay、fileContentPoller/fileStatChange、toolDiffPreview、IME 修复、worktree 系列修复等 ~45 项）。
+- **澄清**：早期分类报告把 DraftTargetSelectors/useDraftTarget、timelineScrollAnchoring、markdown/ 管线、WorkStatusPanel、sidebar 子目录归为"orphan 基建"是**错的**——这些在 v1.22.0 之前就存在，属 fork 长期自研替换的既有架构分歧（按 D3/D4 模式适配，不属于 B0）。LiveTurnActivity 由已分解 commit `b2058db3d` 引入；settings registry 由 `82a0ee757` 引入（分类表 #92，B1 批次）。
+- 分类表中所有"不适用（依赖 orphan 基建）"判定需按此重估：真正缺的是 orphan delta 里的具体功能，而非那些基建。
+
+**结论**：B0 = 按 CHANGELOG 把 orphan delta 分解为功能块移植；fork 已自研等价的块记不做；依赖前述长期自研区域的功能在对应批次做语义适配。
 
 ## 架构级冲突（逐 commit 移植不可行，需整体决策）
 
@@ -109,7 +109,7 @@ commit 类型分布：193 fix、53 feat、13 test、9 docs、8 chore、7 release
 
 | 批次 | 内容 | 前置 |
 | --- | --- | --- |
-| **B0 基线与准备** | 基线验证（type-check/vitest/build 全绿）；orphan v1.22.2 基线按功能块移植（draft-target、markdownCore 管线、LiveTurnActivity、WorkStatusPanel、session-message-loader、network-defaults 等，按 D1=(a)）；fork 已自研等价的部分记不做 | D1 |
+| **B0 基线与准备** | ✅ 基线验证绿 + **全部落地（2026-09-19，22 commits）**：B0a exe.dev+XDG（b1d19176d）；B0b 文件/渲染 5 项（0cd74f0c1 文件闪烁、72785335c 巨型 patch 防冻结、ac48e6c9d markdown 表格、9c44e2db8 IME、2fc594542 JSON 视图记忆）；B0c git/worktree 6 项（049c56da8 分支切换保护+recent branches、68f11aa31 fetch fallback、55b11e1b8 后台删除、bf285bcfe 批量归档提速、5aa327f7d missing-worktree 迁移、5fd150c62 bootstrap 期间状态隐藏）；B0d+B0e prompt history + 服务端消息队列（105afe614、6475ba88f，保留 fork followUpBehavior，sessionId 单键遗留复合键迁移给 B5）；B0f project actions worktree 化 + vscode XDG + Fixel 字体（ecf6796a7、08dfba569、0d30e751f）；B0g thinking effort 持久化（f66471d0d）、记住上次侧（73527b343）、Goal Mode 截断续跑（08c2fa372）+ 交叉修复（6122a78ab）。**N/A**：OPENCHAMBER_CHATS_DIR、rename 全选（fork 对话框已等价）、desktopHostStatus（实为实例切换器缓存，fork 自研已覆盖）；**延后**：DirectoryActionIndicator→B6、unarchive 迁移变体→B6、设置面 scope/条数→B1、mcp-reconnect 不移植（D15）、Windows-only 暂缓、Docker/CLI/l10n→B7/B9 | D1 ✅ |
 | **B1 设置基建** | 82a0ee757 settings registry/scopes + 两侧 settings-registry.json；若 D2=(b) 则改为产出"fork 设置体系映射表"供后续批次引用 | D2 |
 | **B2 低风险独立修复** | 三段分类中标"手工合(低)"的 ~56 笔 + 已核实可直接移植的（7f089b08a、096f67b62、a3a8137ed、5271bba42）+ relay 测试适配 + 依赖升级类（12063fe2f、7af8f4555） | 无 |
 | **B3 web-server 功能批** | quota provider 簇（ClinePass/Charm Hyper/既有 provider 修复）；git service applyHunk 端点 + 健壮性链（f16ca02b8 → dabfe7ab9(git) → 73ad4f859 → e31013943 等，按上游顺序）；worktree/PR review 服务端；scheduled-tasks；small-model；credential-helper | B0 |
