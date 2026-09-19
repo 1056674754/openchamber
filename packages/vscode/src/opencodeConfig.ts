@@ -3,8 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import yaml from 'yaml';
 import { parse as parseJsonc, printParseErrorCode, type ParseError } from 'jsonc-parser';
-
-const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const CONFIG_FILE = path.join(OPENCODE_CONFIG_DIR, 'config.json');

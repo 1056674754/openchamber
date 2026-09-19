@@ -1,6 +1,6 @@
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import {
   createAgent,
@@ -60,7 +60,7 @@ type ConfigRuntimeDeps = {
   clientReloadDelayMs: number;
 };
 
-const AGENTS_MD_PATH = path.join(os.homedir(), '.config', 'opencode', 'AGENTS.md');
+const AGENTS_MD_PATH = path.join(OPENCODE_CONFIG_DIR, 'AGENTS.md');
 const MAX_BEHAVIOR_PROMPT_SIZE = 1024 * 1024;
 
 const resolveWorkingDirectory = (ctx: BridgeContext | undefined, directory?: string): string | undefined => (

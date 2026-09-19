@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { OPENCODE_CONFIG_DIR } from './opencodeConfigPaths';
 import { deleteLegacyOpenCodeGoCredential, fetchOpenCodeGoUsage } from './opencodeGoQuota';
 import { fetchCommandCodeUsage } from './commandCodeQuota';
 import { fetchExeDevUsage } from './exeDevQuota';
@@ -163,7 +164,6 @@ const formatZaiCreditValueLabel = (limit: ZaiLimit): string | null => {
   return `${formatZaiCreditAmount(used)} / ${formatZaiCreditAmount(total)} credits`;
 };
 
-const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const OPENCODE_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'opencode');
 const AUTH_FILE = path.join(OPENCODE_DATA_DIR, 'auth.json');
 const OLLAMA_CLOUD_COOKIE_PATH = path.join(os.homedir(), '.config', 'ollama-quota', 'cookie');
