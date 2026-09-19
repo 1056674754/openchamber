@@ -614,23 +614,26 @@ describe('message stream websocket runtime', () => {
     const socket = new FakeSocket();
     runtime.wsServer.emit('connection', socket, { url: '/api/global/event/ws' });
 
-    await new Promise((resolve) => setTimeout(resolve, 35));
+    try {
+      // Wait for the reconnect event itself; a fixed sleep races the event
+      // loop when the workspace build and test workers run together.
+      await expect.poll(() => socket.sent.filter((frame) => frame.type === 'ready').length, { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
+      const readyFrames = socket.sent.filter((frame) => frame.type === 'ready');
+      const eventFrames = socket.sent.filter((frame) => frame.type === 'event' && frame.payload?.type === 'server.connected');
 
-    const readyFrames = socket.sent.filter((frame) => frame.type === 'ready');
-    const eventFrames = socket.sent.filter((frame) => frame.type === 'event' && frame.payload?.type === 'server.connected');
-
-    expect(readyFrames).toHaveLength(2);
-    expect(readyFrames.at(-1)).toEqual({
-      type: 'ready',
-      scope: 'global',
-      replayGap: false,
-    });
-    expect(eventFrames.length).toBeGreaterThanOrEqual(2);
-    expect(fetchCalls.slice(0, 2)).toEqual([null, 'evt-1']);
-    expect(triggerHealthCheckCalls).toBe(0);
-
-    socket.close();
-    await runtime.close();
+      expect(readyFrames.length).toBeGreaterThanOrEqual(2);
+      expect(readyFrames[1]).toEqual({
+        type: 'ready',
+        scope: 'global',
+        replayGap: false,
+      });
+      expect(eventFrames.length).toBeGreaterThanOrEqual(2);
+      expect(fetchCalls.slice(0, 2)).toEqual([null, 'evt-1']);
+      expect(triggerHealthCheckCalls).toBe(0);
+    } finally {
+      socket.close();
+      await runtime.close();
+    }
   });
 
   it('flags a replay gap when upstream omits SSE event ids across reconnect', async () => {
