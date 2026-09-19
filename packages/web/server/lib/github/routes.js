@@ -1410,7 +1410,7 @@ export function registerGitHubRoutes(app) {
           return res.json({ connected: true, repo, prs, page: effectivePage, hasMore });
         } catch (error) {
           console.error('Failed to search GitHub PRs:', error);
-          return res.json({ connected: true, repo, prs: [], page: effectivePage, hasMore: false });
+          throw error;
         }
       }
 
@@ -1429,7 +1429,7 @@ export function registerGitHubRoutes(app) {
           return { prs, hasMore };
         } catch (error) {
           console.warn(`Failed to list PRs for ${repoRef.owner}/${repoRef.repo}:`, error?.message || error);
-          return { prs: [], hasMore: false };
+          throw error;
         }
       };
 
