@@ -1281,7 +1281,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 onInitialScrollReady={handleInitialScrollReady}
             />
 
+                {/* Composer screen container: floating panels publish their
+                    height here as --chat-floating-panel-clearance (see
+                    ComposerFloatingPanel) and ScrollToBottomButton rides above
+                    them. */}
                 <div
+                    data-composer-bound
                     className={cn(
                         'relative z-10',
                         isDesktopExpandedInput

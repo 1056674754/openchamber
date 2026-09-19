@@ -23,6 +23,8 @@ import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ComposerFloatingPanel } from './composer/ui/ComposerFloatingPanel';
+import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 
 interface QueuedMessageChipProps {
     message: QueuedMessage;
@@ -114,15 +116,27 @@ const QueuedMessageChip = memo(({ message, sessionId, onEdit, onSend }: QueuedMe
 QueuedMessageChip.displayName = 'QueuedMessageChip';
 
 interface QueuedMessageChipsProps {
+    /** Another floating panel (btw) owns the slot — the queue stays mounted but hidden. */
+    hidden?: boolean;
     onEditMessage: (content: string, attachments?: QueuedMessage['attachments']) => void;
     onSendMessage: (messageId: string) => void;
 }
 
 const EMPTY_QUEUE: QueuedMessage[] = [];
 
-export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
+export const QueuedMessageChips = memo(({ hidden = false, onEditMessage, onSendMessage }: QueuedMessageChipsProps) => {
     const { t } = useI18n();
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
+    // Collapse is local to the mounted session queue and survives temporary
+    // hiding behind btw; switching queue identity resets it.
+    const [collapsed, setCollapsed] = React.useState(false);
+    const [collapseSessionId, setCollapseSessionId] = React.useState(currentSessionId);
+    if (collapseSessionId !== currentSessionId) {
+        setCollapseSessionId(currentSessionId);
+        setCollapsed(false);
+    }
+    const bodyId = React.useId();
+    const bodyRef = React.useRef<HTMLDivElement | null>(null);
     const queuedMessages = useMessageQueueStore(
         React.useCallback(
             (state) => {
@@ -138,6 +152,7 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
     );
     const popToInput = useMessageQueueStore((state) => state.popToInput);
     const reorderQueue = useMessageQueueStore((state) => state.reorderQueue);
+    const availableMaxHeight = useMobileAutocompleteMaxHeight(bodyRef, !hidden && !collapsed && queuedMessages.length > 0, 168 + 48);
     const sensors = useSensors(
         useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
         useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } }),
@@ -167,25 +182,38 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
         onSendMessage(message.id);
     }, [onSendMessage]);
 
-    if (queuedMessages.length === 0 || !currentSessionId) {
+    if (hidden || queuedMessages.length === 0 || !currentSessionId) {
         return null;
     }
 
     return (
-        <div className="pb-2 w-full px-1">
-            <div className="rounded-xl border border-border/60 bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] shadow-sm overflow-hidden">
-                <div className="flex w-full items-center gap-2 px-3 py-2 text-left">
-                    <span className="typography-ui-label font-medium text-foreground flex-shrink-0">
-                        {t('chat.queuedMessage.title')} {queuedMessages.length}
-                    </span>
-                    <Icon name="time" className="ml-auto h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                </div>
+        <ComposerFloatingPanel role="region" ariaLabel={t('chat.queuedMessage.title')} compact={collapsed} header={
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCollapsed((value) => !value)}
+                    aria-expanded={!collapsed}
+                    aria-controls={collapsed ? undefined : bodyId}
+                    className="min-w-0 flex-1 shrink justify-start px-0 normal-case text-muted-foreground hover:!bg-transparent hover:text-foreground has-[>svg]:px-0"
+                >
+                    <Icon name="time" className="size-3.5 shrink-0" aria-hidden="true" />
+                    <Icon name={collapsed ? 'arrow-up-s' : 'arrow-down-s'} className="size-4 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 truncate">{t('chat.queuedMessage.title')} {queuedMessages.length}</span>
+                </Button>
+        }>
+            {!collapsed && (
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                     <SortableContext
                         items={queuedMessages.map((message) => message.id)}
                         strategy={verticalListSortingStrategy}
                     >
-                        <div className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto">
+                        <div
+                            ref={bodyRef}
+                            id={bodyId}
+                            className="px-3 pb-3 flex flex-col gap-1.5 max-h-[10.5rem] overflow-y-auto overscroll-contain"
+                            style={availableMaxHeight === undefined ? undefined : { maxHeight: Math.max(72, availableMaxHeight - 48) }}
+                        >
                             {queuedMessages.map((message) => (
                                 <QueuedMessageChip
                                     key={message.id}
@@ -198,8 +226,8 @@ export const QueuedMessageChips = memo(({ onEditMessage, onSendMessage }: Queued
                         </div>
                     </SortableContext>
                 </DndContext>
-            </div>
-        </div>
+            )}
+        </ComposerFloatingPanel>
     );
 });
 

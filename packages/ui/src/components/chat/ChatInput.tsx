@@ -1155,6 +1155,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             : null
     ), [btwPanel.btwDirectory, btwPanel.btwSessionId, currentSessionId]);
     const isBtwActive = btwSessionRef !== null && !btwPanel.collapsed;
+    // The btw panel owns the floating slot whenever a sheet (expanded or
+    // collapsed) or a creation frame is on screen, hiding queue and suggestion.
+    const isBtwPanelVisible = btwSessionRef !== null || btwPanel.creating;
     React.useEffect(() => {
         setUnsyncedSkillError(null);
     }, [composerDirectoryContext, currentSessionId]);
@@ -4255,7 +4258,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             style={isMobile && inputBarOffset > 0 ? { marginBottom: `${inputBarOffset}px` } : undefined}
         >
             <div className={cn('chat-input-column relative overflow-visible', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
-                {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} /> : null}
                 {showImageFallbackNotice && (
                     <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-surface-elevated px-3 py-1.5">
                         <Icon name="file-image" className="size-3.5 shrink-0 text-muted-foreground" />
@@ -4267,10 +4269,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     </div>
                 )}
                 <AttachedFilesList />
-                <QueuedMessageChips
-                    onEditMessage={handleQueuedMessageEdit}
-                    onSendMessage={handleQueuedMessageSend}
-                />
                 <AutoReviewBanner />
                 {hasDrafts && (
                     <div className="flex flex-wrap items-center gap-2 pb-2">
@@ -4597,13 +4595,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         ) : null}
                     </div>
                 ) : null}
-                <SessionSuggestionChip
-                    sessionId={currentSessionId}
-                    directory={currentSessionDirectoryForSync}
-                    hidden={hasContent || newSessionDraftOpen}
-                    onApply={applyAssistSuggestion}
-                    className="mb-1.5"
-                />
                 <div
                     className={cn(
                         "flex flex-col relative overflow-visible",
@@ -5028,6 +5019,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     {isMobile && <MobileSessionStatusBar />}
                 </div>
             </div>
+            {/* Floating panels share one absolute `bottom-full` dock above the
+                composer form, outside the editor and the collapsed mobile pill.
+                Visibility priority: btw, then a nonempty queue, then suggestion;
+                hiding the queue does not pause its delivery. */}
+            <SessionSuggestionChip
+                sessionId={currentSessionId}
+                directory={currentSessionDirectoryForSync}
+                hidden={hasContent || newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasQueuedMessages}
+                onApply={applyAssistSuggestion}
+            />
+            <QueuedMessageChips
+                hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible}
+                onEditMessage={handleQueuedMessageEdit}
+                onSendMessage={handleQueuedMessageSend}
+            />
+            {currentSessionId ? <BtwPanel parentSessionId={currentSessionId} panel={btwPanel} /> : null}
         </form>
 
         {/* Issue Picker Dialog */}

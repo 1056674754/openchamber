@@ -18,6 +18,10 @@ const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({ visible, on
                 'absolute bottom-full left-1/2 -translate-x-1/2 mb-2 transition-all duration-150',
                 visible ? 'opacity-100 translate-y-0 scale-100 pointer-events-auto' : 'opacity-0 translate-y-2 scale-95 pointer-events-none',
             )}
+            // Ride above the floating composer panels (btw/queue/suggestion):
+            // the shared frame publishes its height here so the button never
+            // hides behind them. Composes with the Tailwind translate classes.
+            style={{ transform: 'translateY(calc(-1 * var(--chat-floating-panel-clearance, 0px)))' }}
         >
             <Button
                 variant="outline"

@@ -3,8 +3,13 @@
 // Purely event-driven (no scans/backfill): on session idle a single quiet
 // timer arms; busy/retry or a fresh user message cancels it. When the timer
 // fires the small model produces a recap + suggested next user message from
-// the last exchange, written to metadata.openchamber.assist with the targeted
-// assistant message id so the UI can freshness-gate it.
+// the last few human turns, written to metadata.openchamber.assist with the
+// targeted assistant message id so the UI can freshness-gate it.
+//
+// Context collection and prompt construction live in context.js / prompt.js
+// (ported from upstream a16d947a0: bounded recent human turns so recaps
+// survive short closing exchanges, annotation-aware attached context, and
+// prompt budgeting against the small model's input budget).
 //
 // Fork boundary (sscity): mirrors session-goal's local-hub authority — the
 // runtime only processes events whose serverId is the local default hub. A
@@ -14,27 +19,19 @@
 // (owner chose policy A: an explicit small-model override is informed consent
 // to cross, see MERGE_V1.12.md batch H).
 
+import { collectRecentTurns } from './context.js';
+import { buildAssistPrompt, buildAssistSystemPrompt } from './prompt.js';
+
 const LOCAL_SERVER_ID = 'default';
 const IDLE_QUIET_MS = 60_000;
 const MESSAGE_FETCH_LIMIT = 12;
+// Context window for turn collection: enough for three human turns with
+// interleaved closing exchanges, trimmed locally by collectRecentTurns.
+const CONTEXT_MESSAGE_LIMIT = 40;
 const RECAP_MAX_CHARS = 320;
 const SUGGESTION_MAX_CHARS = 500;
 const FETCH_TIMEOUT_MS = 10_000;
 const ASSIST_NAMESPACE = 'assist';
-
-const buildAssistSystemPrompt = (targets) => {
-  const parts = ['You assist a coding-agent conversation. Reply with ONE JSON object, no prose, no markdown, no code fences.'];
-  const fields = [];
-  if (targets.includes('recap')) {
-    fields.push('"recap": a <=20-word recap of what the agent just did; direct content only, never narration, never the word "recap"');
-  }
-  if (targets.includes('suggestion')) {
-    fields.push('"suggestion": one immediately sendable next user message to the coding agent (not a question to the user, not a menu)');
-  }
-  parts.push(`Shape: { ${fields.join(', ')} }.`);
-  parts.push('Match the language of the conversation. Omit a field only if you cannot fill it.');
-  return parts.join(' ');
-};
 
 const extractJsonObject = (value) => {
   if (typeof value !== 'string') return null;
@@ -75,19 +72,6 @@ const clampText = (value, max) => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   if (!trimmed) return '';
   return trimmed.length > max ? trimmed.slice(0, max).trim() : trimmed;
-};
-
-const messageText = (message) => {
-  const parts = Array.isArray(message?.parts) ? message.parts : [];
-  const text = parts
-    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text.trim())
-    .filter(Boolean)
-    .join('\n');
-  if (text) return text;
-  const infoText = message?.info?.text;
-  if (typeof infoText === 'string') return infoText;
-  return typeof message?.text === 'string' ? message.text : '';
 };
 
 export const createSessionAssistRuntime = ({
@@ -206,60 +190,72 @@ export const createSessionAssistRuntime = ({
       // Sub-agent / task sessions: skip (parent's conversation drives the recap).
       if (session.parentID) return;
 
-      const messages = await fetchRecentMessages(sessionId, directory);
+      const messages = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
+        directory,
+        query: { limit: String(CONTEXT_MESSAGE_LIMIT) },
+      }).catch(() => null);
       if (!messages || messages.length === 0) return;
 
-      let lastAssistant = null;
-      let parentUser = null;
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const role = messages[i]?.info?.role || messages[i]?.role;
-        if (!lastAssistant && (role === 'assistant')) {
-          lastAssistant = messages[i];
-        } else if (lastAssistant && role === 'user') {
-          parentUser = messages[i];
-          break;
-        }
+      // Bounded recent human turns with annotation-aware attached context;
+      // null when no eligible final answer is inside the window.
+      const context = collectRecentTurns(messages);
+      if (!context) return;
+      const { turns, last } = context;
+
+      const lastAssistantId = last.id;
+      const providerID = last.providerID || null;
+      const modelID = last.modelID || null;
+
+      const targets = { recap: recapEnabled, suggestion: suggestionEnabled };
+      const system = buildAssistSystemPrompt(targets);
+
+      // Budget the prompt against the answering small model's input budget,
+      // reserving room for the system prompt and generation.
+      let charBudget = 24_000;
+      try {
+        const smallModelService = await getSmallModelService();
+        const described = await smallModelService.describeSmallModel({
+          directory,
+          preferredProviderID: providerID ?? undefined,
+          preferredModelID: modelID ?? undefined,
+        });
+        if (Number.isFinite(described?.inputCharBudget)) charBudget = described.inputCharBudget;
+      } catch {
+        // Budgeting is best-effort; the fixed cap keeps generation alive.
       }
-      if (!lastAssistant) return;
-
-      const lastAssistantId = lastAssistant?.id || lastAssistant?.info?.id || null;
-      if (!lastAssistantId) return;
-
-      const lastAssistantInfo = lastAssistant?.info || lastAssistant;
-      const providerID = lastAssistantInfo?.providerID || lastAssistantInfo?.providerId || null;
-      const modelID = lastAssistantInfo?.modelID || lastAssistantInfo?.modelId || null;
-
-      const assistantText = messageText(lastAssistant);
-      const userText = messageText(parentUser);
-      const transcript = userText
-        ? `User: ${userText}\n\nAssistant: ${assistantText}`
-        : `Assistant: ${assistantText}`;
-
-      const targets = [];
-      if (recapEnabled) targets.push('recap');
-      if (suggestionEnabled) targets.push('suggestion');
+      const prompt = buildAssistPrompt(turns, targets, charBudget - system.length - 512);
+      if (!prompt) return;
 
       const smallModelService = await getSmallModelService();
       const result = await smallModelService.generateSmallModelText({
-        prompt: `The latest exchange in the conversation:\n\n${transcript}\n\nWrite ${targets.join(' and ')} in the SAME language as this exchange, as one JSON object.`,
-        system: buildAssistSystemPrompt(targets),
+        prompt: prompt.text,
+        system,
         directory,
         ...(providerID ? { preferredProviderID: providerID } : {}),
         ...(modelID ? { preferredModelID: modelID } : {}),
         restrictToPreferredProvider: true,
+        // The prompt above is pre-budgeted; silent truncation would corrupt
+        // the JSON shape contract, so overflow must fail loudly instead.
+        onOverflow: 'error',
       });
 
       const parsed = extractJsonObject(result?.text);
       if (!parsed) return;
 
+      // Script guard: quoted source and assistant replies cannot authorize a
+      // different script. With no authored language sample, fall back to the
+      // full user-visible text of the collected turns.
+      const languageSample = prompt.language
+        || turns.map((turn) => turn.user.text).filter(Boolean).join('\n');
+
       const assist = {};
       if (recapEnabled) {
         const recap = clampText(parsed.recap, RECAP_MAX_CHARS);
-        if (recap && !hasDisallowedScript(recap, transcript)) assist.recap = recap;
+        if (recap && !hasDisallowedScript(recap, languageSample)) assist.recap = recap;
       }
       if (suggestionEnabled) {
         const suggestion = clampText(parsed.suggestion, SUGGESTION_MAX_CHARS);
-        if (suggestion && !hasDisallowedScript(suggestion, transcript)) assist.suggestion = suggestion;
+        if (suggestion && !hasDisallowedScript(suggestion, languageSample)) assist.suggestion = suggestion;
       }
       if (!assist.recap && !assist.suggestion) return;
 

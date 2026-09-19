@@ -2,6 +2,7 @@ import React from 'react';
 import type { Message, Part } from '@opencode-ai/sdk/v2';
 
 import ChatMessage from '@/components/chat/ChatMessage';
+import { ComposerFloatingPanel } from '@/components/chat/composer/ui/ComposerFloatingPanel';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { PermissionCard } from '@/components/chat/PermissionCard';
 import { QuestionCard } from '@/components/chat/QuestionCard';
@@ -188,9 +189,7 @@ const BtwFrame: React.FC<{
   headerSpinner?: boolean;
   children?: React.ReactNode;
 }> = ({ title, actions, onTitleClick, titleClickLabel, collapsed, headerSpinner, children }) => (
-  <div className="chat-input-column absolute bottom-full left-0 right-0 z-30 mb-3" role="dialog" aria-label="btw">
-    <div className="oc-glass-popover w-full overflow-hidden rounded-lg border border-[var(--interactive-border)] shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]">
-      <div className="flex items-center gap-2 px-3 py-1.5">
+  <ComposerFloatingPanel role="dialog" ariaLabel="btw" compact={collapsed} header={<>
         {onTitleClick ? (
           <button
             type="button"
@@ -211,10 +210,9 @@ const BtwFrame: React.FC<{
         )}
         <div className="min-w-0 flex-1" />
         {actions}
-      </div>
-      {children ? <>{children}<div className="h-2" /></> : null}
-    </div>
-  </div>
+  </>}>
+    {children ? <>{children}<div className="h-2" /></> : null}
+  </ComposerFloatingPanel>
 );
 
 const BtwSheet: React.FC<{
