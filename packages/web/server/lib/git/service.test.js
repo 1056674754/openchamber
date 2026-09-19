@@ -30,6 +30,7 @@ import {
   setLocalIdentity,
   stageFiles,
   unstageFiles,
+  unsupportedRepositoryRootReason,
   validateWorktreeCreate,
 } from './service.js';
 
@@ -369,6 +370,23 @@ async function createTempRepoWithRemoteBranch(branch = 'react') {
 // ---------------------------------------------------------------------------
 // resolveBaseRefForLog
 // ---------------------------------------------------------------------------
+
+describe('unsupportedRepositoryRootReason', () => {
+  it('rejects a repository rooted at a filesystem root or the home directory', () => {
+    const home = path.join(os.tmpdir(), 'unsupported-root-home');
+    expect(unsupportedRepositoryRootReason('/', home)).toBe('filesystem-root');
+    expect(unsupportedRepositoryRootReason(path.parse(process.cwd()).root, home)).toBe('filesystem-root');
+    expect(unsupportedRepositoryRootReason(home, home)).toBe('home');
+    expect(unsupportedRepositoryRootReason(`${home}${path.sep}`, home)).toBe('home');
+  });
+
+  it('accepts an ordinary project root, including one directly under home', () => {
+    const home = path.join(os.tmpdir(), 'unsupported-root-home');
+    expect(unsupportedRepositoryRootReason(path.join(home, 'project'), home)).toBeNull();
+    expect(unsupportedRepositoryRootReason(path.join(os.tmpdir(), 'repo'), home)).toBeNull();
+    expect(unsupportedRepositoryRootReason('', home)).toBeNull();
+  });
+});
 
 describe('resolveBaseRefForLog', () => {
   it('returns the local ref unchanged when it exists, even if origin also exists', async () => {
