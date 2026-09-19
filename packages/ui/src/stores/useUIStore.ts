@@ -747,6 +747,7 @@ interface UIStore {
   walkthroughTocWidth: number;
   setWalkthroughTocWidth: (width: number) => void;
   gitChangesViewMode: 'flat' | 'tree';
+  toolJsonViewMode: 'summary' | 'formatted' | 'raw';
   isTimelineDialogOpen: boolean;
   isPromptNavigatorPanelOpen: boolean;
   isImagePreviewOpen: boolean;
@@ -942,6 +943,7 @@ interface UIStore {
   setDiffWrapLines: (wrap: boolean) => void;
   setDiffViewMode: (mode: 'single' | 'stacked') => void;
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
+  setToolJsonViewMode: (mode: 'summary' | 'formatted' | 'raw') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
   setTimelineDialogOpen: (open: boolean) => void;
   setPromptNavigatorPanelOpen: (open: boolean) => void;
@@ -1095,6 +1097,7 @@ export const useUIStore = create<UIStore>()(
         diffViewMode: 'stacked',
         walkthroughTocWidth: 280,
         gitChangesViewMode: 'flat',
+        toolJsonViewMode: 'summary',
         isTimelineDialogOpen: false,
         isPromptNavigatorPanelOpen: false,
         isImagePreviewOpen: false,
@@ -2074,6 +2077,10 @@ export const useUIStore = create<UIStore>()(
         setGitChangesViewMode: (mode) => {
           set({ gitChangesViewMode: mode });
         },
+
+        setToolJsonViewMode: (mode) => {
+          set({ toolJsonViewMode: mode });
+        },
  
         setInputBarOffset: (offset) => {
           set({ inputBarOffset: offset });
@@ -2704,6 +2711,11 @@ export const useUIStore = create<UIStore>()(
             ? state.contextRailOrder.filter((id) => typeof id === 'string' && id.trim() !== '')
             : [];
           state.fileEditorKeymap = normalizeFileEditorKeymap(state.fileEditorKeymap);
+          if (state.toolJsonViewMode !== 'summary'
+            && state.toolJsonViewMode !== 'formatted'
+            && state.toolJsonViewMode !== 'raw') {
+            state.toolJsonViewMode = 'summary';
+          }
           if (typeof state.autoSaveEnabled !== 'boolean') {
             state.autoSaveEnabled = true;
           }
@@ -2766,6 +2778,7 @@ export const useUIStore = create<UIStore>()(
           diffWrapLines: state.diffWrapLines,
           diffViewMode: state.diffViewMode,
           gitChangesViewMode: state.gitChangesViewMode,
+          toolJsonViewMode: state.toolJsonViewMode,
           nativeNotificationsEnabled: state.nativeNotificationsEnabled,
           notificationMode: state.notificationMode,
           showTerminalQuickKeysOnDesktop: state.showTerminalQuickKeysOnDesktop,

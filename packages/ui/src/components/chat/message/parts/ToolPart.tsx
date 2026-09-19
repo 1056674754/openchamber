@@ -975,29 +975,26 @@ const StreamingPlainTextOutput: React.FC<{ output: string }> = ({ output }) => {
     );
 };
 
-const ToolScrollableTextOutput: React.FC<{
-    output: string;
-    part: ToolPartType;
-    metadata: Record<string, unknown> | undefined;
-    input: Record<string, unknown> | undefined;
+type ToolJsonViewMode = 'summary' | 'formatted' | 'raw';
+
+// The Summary/Tree/Raw choice is remembered across cards and reloads via the
+// persisted UI store instead of resetting with every new tool output.
+const JsonToolOutput: React.FC<{
+    jsonResult: ReturnType<typeof tryParseJsonOutput>;
+    renderedOutput: string;
     syntaxTheme: { [key: string]: React.CSSProperties };
-    isStreaming?: boolean;
-}> = ({ output, part, metadata, input, syntaxTheme, isStreaming = false }) => {
+}> = ({ jsonResult, renderedOutput, syntaxTheme }) => {
     const { t } = useI18n();
-    const renderedOutput = getToolOutputText(output, part, metadata);
-    const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
-    const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
-    const [jsonViewMode, setJsonViewMode] = React.useState<'summary' | 'formatted' | 'raw'>('summary');
+    const jsonViewMode = useUIStore((state) => state.toolJsonViewMode);
     const [copiedJson, setCopiedJson] = React.useState(false);
 
     React.useEffect(() => {
-        setJsonViewMode('summary');
         setCopiedJson(false);
     }, [renderedOutput]);
 
-    const handleJsonViewChange = React.useCallback((view: 'summary' | 'formatted' | 'raw', event: React.MouseEvent<HTMLButtonElement>) => {
+    const handleJsonViewChange = React.useCallback((view: ToolJsonViewMode, event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
-        setJsonViewMode(view);
+        useUIStore.getState().setToolJsonViewMode(view);
     }, []);
 
     const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -1013,12 +1010,7 @@ const ToolScrollableTextOutput: React.FC<{
         }
     }, [renderedOutput, t]);
 
-    if (part.tool === 'bash' && isStreaming) {
-        return <StreamingPlainTextOutput output={renderedOutput} />;
-    }
-
-    if (jsonResult.isJson) {
-        return (
+    return (
             <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
                 <div className="absolute right-2 top-2 z-10 flex items-center gap-1">
                     <Button
@@ -1100,7 +1092,27 @@ const ToolScrollableTextOutput: React.FC<{
                     </div>
                 )}
             </div>
-        );
+    );
+};
+
+const ToolScrollableTextOutput: React.FC<{
+    output: string;
+    part: ToolPartType;
+    metadata: Record<string, unknown> | undefined;
+    input: Record<string, unknown> | undefined;
+    syntaxTheme: { [key: string]: React.CSSProperties };
+    isStreaming?: boolean;
+}> = ({ output, part, metadata, input, syntaxTheme, isStreaming = false }) => {
+    const renderedOutput = getToolOutputText(output, part, metadata);
+    const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
+    const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
+
+    if (part.tool === 'bash' && isStreaming) {
+        return <StreamingPlainTextOutput output={renderedOutput} />;
+    }
+
+    if (jsonResult.isJson) {
+        return <JsonToolOutput jsonResult={jsonResult} renderedOutput={renderedOutput} syntaxTheme={syntaxTheme} />;
     }
 
     return (
