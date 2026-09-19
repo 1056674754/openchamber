@@ -9,6 +9,7 @@ import {
   type VSCodeThemePayload,
 } from '@openchamber/ui/lib/theme/vscode/adapter';
 import { getBootstrapMessages, readStoredLocaleForBootstrap } from '@openchamber/ui/lib/i18n';
+import { hostViewerStateSchema, reportHostViewerState } from '@openchamber/ui/lib/surfaceAttention';
 import type { VSCodeActiveEditorFile } from '@/sync/input-store';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { getAllSyncSessions } from '@/sync/sync-refs';
@@ -1903,10 +1904,12 @@ onCommand('showNotification', (payload) => {
   } | undefined);
 });
 
-onCommand('windowFocusChanged', (payload) => {
-  if (typeof payload === 'object' && payload && typeof (payload as { focused?: unknown }).focused === 'boolean') {
-    window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ = (payload as { focused: boolean }).focused;
-  }
+onCommand('viewerStateChanged', (payload) => {
+  const parsed = hostViewerStateSchema.safeParse(payload);
+  if (!parsed.success) return;
+  window.__OPENCHAMBER_VSCODE_WINDOW_FOCUSED__ = parsed.data.windowFocused;
+  // The webview document's own focus is not whether the user sees the chat.
+  reportHostViewerState(parsed.data);
 });
 
 const describeDiagnosticElement = (element: Element | null) => {

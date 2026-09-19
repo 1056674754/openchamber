@@ -249,6 +249,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     void this._broadcastActiveEditorFile();
 
     const visibilitySubscription = webviewView.onDidChangeVisibility(() => {
+      // Notify on show and on hide: a hidden chat surface must stop counting
+      // the selected session as seen.
+      if (this._view === webviewView) this.notifyViewerStateChanged();
       if (this._view !== webviewView || !webviewView.visible) return;
       this._sendCachedState();
       void this._probeWebviewHealth();
@@ -559,17 +562,18 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public notifyWindowFocusChanged(focused: boolean): void {
+  /** Tells the webview whether the user can see it: VS Code focused and the view shown. */
+  public notifyViewerStateChanged(): void {
     if (!this._view) {
       return;
     }
 
     this._view.webview.postMessage({
       type: 'command',
-      command: 'windowFocusChanged',
-      payload: { focused },
+      command: 'viewerStateChanged',
+      payload: { windowFocused: vscode.window.state.focused, surfaceVisible: this._view.visible },
     });
-    if (focused && this._view.visible) {
+    if (vscode.window.state.focused && this._view.visible) {
       void this._probeWebviewHealth();
     }
   }
@@ -656,7 +660,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
-    this.notifyWindowFocusChanged(vscode.window.state.focused);
+    this.notifyViewerStateChanged();
   }
 
   private async _probeWebviewHealth(): Promise<void> {

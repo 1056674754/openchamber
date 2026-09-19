@@ -70,6 +70,7 @@ import { readRemoteSessionStatuses } from "./remote-session-status"
 import { getPageParts, type MessagePage } from "./message-page-boundary"
 import { loadMessageHistoryBatch } from "./message-history-loader"
 import { isPageActivelyViewed } from "./session-presence"
+import { isSurfaceAttended, hasHostViewerStateReport } from "@/lib/surfaceAttention"
 import { getMissingSteerSideChannelRecords, getSteerSideChannelSignature } from "./steer-side-channel"
 import { getBootstrapFailureAction } from "./bootstrap-retry-policy"
 import { findLatestRealUserMessage, isRealUserMessage } from "@/lib/messages/real-user"
@@ -388,7 +389,13 @@ export function setExternallyViewedSession(directory: string, sessionId: string,
 
 function isViewedInCurrentSession(directory: string, sessionId?: string): boolean {
   if (!sessionId) return false
-  if (!isPageActivelyViewed()) return false
+  // The user must actually see the surface for the active session to count as
+  // "seen". Once the VS Code host reported a viewer state it is authoritative
+  // (the webview document loses focus whenever the editor takes it while the
+  // chat stays on screen); without a host report keep the document
+  // visibility/focus check used on web, desktop, and mobile.
+  if (!isSurfaceAttended()) return false
+  if (!hasHostViewerStateReport() && !isPageActivelyViewed()) return false
   if (_activeDirectory && _activeSession && directory === _activeDirectory && sessionId === _activeSession) return true
   pruneExternallyViewedSessions()
   return externallyViewedSessions.has(viewedSessionKey(directory, sessionId))

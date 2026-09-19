@@ -65,6 +65,10 @@ export class AgentManagerPanelProvider {
     // Send cached connection status
     this._sendCachedState();
 
+    this._panel.onDidChangeViewState(() => {
+      this.notifyViewerStateChanged();
+    }, null, this._context.subscriptions);
+
     // Handle panel disposal
     this._panel.onDidDispose(() => {
       // Clean up SSE streams
@@ -159,15 +163,16 @@ export class AgentManagerPanelProvider {
     });
   }
 
-  public notifyWindowFocusChanged(focused: boolean): void {
+  /** Tells the webview whether the user can see it: VS Code focused and the panel shown. */
+  public notifyViewerStateChanged(): void {
     if (!this._panel) {
       return;
     }
 
     this._panel.webview.postMessage({
       type: 'command',
-      command: 'windowFocusChanged',
-      payload: { focused },
+      command: 'viewerStateChanged',
+      payload: { windowFocused: vscode.window.state.focused, surfaceVisible: this._panel.visible },
     });
   }
 
@@ -181,7 +186,7 @@ export class AgentManagerPanelProvider {
       status: this._cachedStatus,
       error: this._cachedError,
     });
-    this.notifyWindowFocusChanged(vscode.window.state.focused);
+    this.notifyViewerStateChanged();
   }
 
   private _buildSseHeaders(extra?: Record<string, string>): Record<string, string> {
