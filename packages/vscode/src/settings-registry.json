@@ -1,0 +1,709 @@
+{
+  "version": 1,
+  "fields": {
+    "themeId": {
+      "scope": "profile"
+    },
+    "useSystemTheme": {
+      "scope": "profile"
+    },
+    "themeVariant": {
+      "scope": "profile",
+      "derived": true
+    },
+    "lightThemeId": {
+      "scope": "profile"
+    },
+    "darkThemeId": {
+      "scope": "profile"
+    },
+    "splashBgLight": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "splashFgLight": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "splashBgDark": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "splashFgDark": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "lastDirectory": {
+      "scope": "instance",
+      "adopt": "bootstrap-only"
+    },
+    "homeDirectory": {
+      "scope": "instance"
+    },
+    "opencodeBinary": {
+      "scope": "instance"
+    },
+    "agentControlToolEnabled": {
+      "scope": "instance"
+    },
+    "agentMemoryToolEnabled": {
+      "scope": "instance"
+    },
+    "optimizeSystemPrompt": {
+      "scope": "profile"
+    },
+    "desktopLanAccessEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopMacMenuBarEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopMinimizeToTrayEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopKeepAwakeEnabled": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopKeepManagedOpenCodeAliveOnQuit": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "projects": {
+      "scope": "instance"
+    },
+    "activeProjectId": {
+      "scope": "instance",
+      "adopt": "bootstrap-only"
+    },
+    "approvedDirectories": {
+      "scope": "instance"
+    },
+    "securityScopedBookmarks": {
+      "scope": "instance",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "pinnedDirectories": {
+      "scope": "instance"
+    },
+    "pinnedSessions": {
+      "scope": "profile"
+    },
+    "pinnedSessionsByProject": {
+      "scope": "profile"
+    },
+    "pinnedSessionOrder": {
+      "scope": "profile"
+    },
+    "pinnedSessionOrderByProject": {
+      "scope": "profile"
+    },
+    "showReasoningTraces": {
+      "scope": "profile"
+    },
+    "collapsibleThinkingBlocks": {
+      "scope": "profile"
+    },
+    "chatRenderMode": {
+      "scope": "profile"
+    },
+    "activityRenderMode": {
+      "scope": "profile"
+    },
+    "sessionSortMode": {
+      "scope": "profile"
+    },
+    "sessionGroupMinVisible": {
+      "scope": "profile"
+    },
+    "sessionGroupRecentHours": {
+      "scope": "profile"
+    },
+    "userMessageRenderingMode": {
+      "scope": "profile"
+    },
+    "collapsibleUserMessages": {
+      "scope": "profile"
+    },
+    "stickyUserHeader": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "promptNavigatorEnabled": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "wideChatLayoutEnabled": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "showSplitAssistantMessageActions": {
+      "scope": "profile"
+    },
+    "showToolFileIcons": {
+      "scope": "profile"
+    },
+    "codeBlockLineWrap": {
+      "scope": "profile"
+    },
+    "showExpandedBashTools": {
+      "scope": "profile"
+    },
+    "showExpandedEditTools": {
+      "scope": "profile"
+    },
+    "timeFormatPreference": {
+      "scope": "profile"
+    },
+    "weekStartPreference": {
+      "scope": "profile"
+    },
+    "messageStreamTransport": {
+      "scope": "profile"
+    },
+    "diffLayoutPreference": {
+      "scope": "profile"
+    },
+    "diffViewMode": {
+      "scope": "profile"
+    },
+    "gitChangesViewMode": {
+      "scope": "profile"
+    },
+    "gitmojiEnabled": {
+      "scope": "profile"
+    },
+    "defaultFileViewerPreview": {
+      "scope": "profile"
+    },
+    "directoryShowHidden": {
+      "scope": "profile"
+    },
+    "filesViewShowGitignored": {
+      "scope": "profile"
+    },
+    "allowPromptingSubagentSessions": {
+      "scope": "profile"
+    },
+    "showDeletionDialog": {
+      "scope": "profile"
+    },
+    "autoDeleteEnabled": {
+      "scope": "instance"
+    },
+    "autoSaveEnabled": {
+      "scope": "profile"
+    },
+    "autoDeleteAfterDays": {
+      "scope": "instance"
+    },
+    "sessionRetentionAction": {
+      "scope": "instance"
+    },
+    "autoCreateWorktree": {
+      "scope": "profile"
+    },
+    "sessionGoalEnabled": {
+      "scope": "profile"
+    },
+    "sessionGoalDefaultBudgetEnabled": {
+      "scope": "profile"
+    },
+    "sessionGoalDefaultBudget": {
+      "scope": "profile"
+    },
+    "sessionRecapEnabled": {
+      "scope": "profile"
+    },
+    "sessionSuggestionEnabled": {
+      "scope": "profile"
+    },
+    "defaultGitIdentityId": {
+      "scope": "instance"
+    },
+    "openInAppId": {
+      "scope": "instance"
+    },
+    "nativeNotificationsEnabled": {
+      "scope": "profile"
+    },
+    "notificationMode": {
+      "scope": "profile"
+    },
+    "notifyOnSubtasks": {
+      "scope": "profile"
+    },
+    "notifyOnCompletion": {
+      "scope": "profile"
+    },
+    "notifyOnError": {
+      "scope": "profile"
+    },
+    "notifyOnQuestion": {
+      "scope": "profile"
+    },
+    "notificationTemplates": {
+      "scope": "profile"
+    },
+    "reportUsage": {
+      "scope": "profile"
+    },
+    "summarizeLastMessage": {
+      "scope": "profile"
+    },
+    "summaryThreshold": {
+      "scope": "profile"
+    },
+    "summaryLength": {
+      "scope": "profile"
+    },
+    "maxLastMessageLength": {
+      "scope": "profile"
+    },
+    "usageAutoRefresh": {
+      "scope": "profile"
+    },
+    "usageRefreshIntervalMs": {
+      "scope": "profile"
+    },
+    "usageDisplayMode": {
+      "scope": "profile"
+    },
+    "usageShowPredValues": {
+      "scope": "profile"
+    },
+    "usageDropdownProviders": {
+      "scope": "profile"
+    },
+    "usageSelectedModels": {
+      "scope": "profile"
+    },
+    "usageCollapsedFamilies": {
+      "scope": "profile"
+    },
+    "usageExpandedFamilies": {
+      "scope": "profile"
+    },
+    "usageModelGroups": {
+      "scope": "profile"
+    },
+    "tunnelProvider": {
+      "scope": "instance"
+    },
+    "tunnelMode": {
+      "scope": "instance"
+    },
+    "tunnelBootstrapTtlMs": {
+      "scope": "instance"
+    },
+    "tunnelSessionTtlMs": {
+      "scope": "instance"
+    },
+    "managedLocalTunnelConfigPath": {
+      "scope": "instance"
+    },
+    "managedRemoteTunnelHostname": {
+      "scope": "instance"
+    },
+    "managedRemoteTunnelToken": {
+      "scope": "instance",
+      "secret": true
+    },
+    "hasManagedRemoteTunnelToken": {
+      "scope": "instance",
+      "computed": true
+    },
+    "managedRemoteTunnelPresets": {
+      "scope": "instance"
+    },
+    "managedRemoteTunnelSelectedPresetId": {
+      "scope": "instance"
+    },
+    "managedRemoteTunnelPresetTokens": {
+      "scope": "instance",
+      "secret": true
+    },
+    "defaultModel": {
+      "scope": "profile"
+    },
+    "defaultVariant": {
+      "scope": "profile"
+    },
+    "defaultAgent": {
+      "scope": "profile"
+    },
+    "smallModelUseDefault": {
+      "scope": "profile"
+    },
+    "smallModelOverride": {
+      "scope": "profile"
+    },
+    "walkthroughModelOverride": {
+      "scope": "profile"
+    },
+    "zenModel": {
+      "scope": "profile"
+    },
+    "gitProviderId": {
+      "scope": "profile"
+    },
+    "gitModelId": {
+      "scope": "profile"
+    },
+    "favoriteModels": {
+      "scope": "profile"
+    },
+    "hiddenModels": {
+      "scope": "profile"
+    },
+    "collapsedModelProviders": {
+      "scope": "profile"
+    },
+    "modelPickerLayoutByServerId": {
+      "scope": "profile"
+    },
+    "recentModels": {
+      "scope": "profile"
+    },
+    "recentAgents": {
+      "scope": "profile"
+    },
+    "recentEfforts": {
+      "scope": "profile"
+    },
+    "inputSpellcheckEnabled": {
+      "scope": "profile"
+    },
+    "followUpBehavior": {
+      "scope": "profile"
+    },
+    "queueModeEnabled": {
+      "scope": "profile"
+    },
+    "draftStarters": {
+      "scope": "profile"
+    },
+    "draftStartersScheduleTaskAdded": {
+      "scope": "profile"
+    },
+    "draftStartersVisible": {
+      "scope": "profile"
+    },
+    "fontSize": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "terminalFontSize": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "editorFontSize": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "uiFont": {
+      "scope": "profile"
+    },
+    "monoFont": {
+      "scope": "profile"
+    },
+    "padding": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "cornerRadius": {
+      "scope": "profile",
+      "perSurface": true
+    },
+    "globalBehaviorPrompt": {
+      "scope": "profile"
+    },
+    "responseStyleEnabled": {
+      "scope": "profile"
+    },
+    "responseStylePreset": {
+      "scope": "profile"
+    },
+    "responseStyleCustomInstructions": {
+      "scope": "profile"
+    },
+    "pwaAppName": {
+      "scope": "instance",
+      "surfaces": [
+        "web"
+      ]
+    },
+    "pwaOrientation": {
+      "scope": "instance",
+      "surfaces": [
+        "web"
+      ]
+    },
+    "sttProvider": {
+      "scope": "instance"
+    },
+    "sttServerUrl": {
+      "scope": "instance"
+    },
+    "sttModel": {
+      "scope": "instance"
+    },
+    "wasmSttModel": {
+      "scope": "instance"
+    },
+    "sttLanguage": {
+      "scope": "profile"
+    },
+    "sttSilenceThresholdDb": {
+      "scope": "profile"
+    },
+    "sttSilenceHoldMs": {
+      "scope": "profile"
+    },
+    "sttTranscribeOnStop": {
+      "scope": "profile"
+    },
+    "skillCatalogs": {
+      "scope": "instance"
+    },
+    "messageLimit": {
+      "scope": "profile"
+    },
+    "localStore": {
+      "scope": "instance"
+    },
+    "localStorePatch": {
+      "scope": "instance"
+    },
+    "mobileKeyboardMode": {
+      "scope": "device",
+      "surfaces": [
+        "mobile"
+      ]
+    },
+    "desktopWindowControlsPosition": {
+      "scope": "device",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopWindowControlsStyle": {
+      "scope": "device",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "inputBarOffset": {
+      "scope": "device",
+      "surfaces": [
+        "mobile",
+        "web"
+      ]
+    },
+    "dockBadgeEnabled": {
+      "scope": "device",
+      "surfaces": [
+        "desktop"
+      ],
+      "local": true
+    },
+    "multiRunEnabled": {
+      "scope": "device",
+      "local": true
+    },
+    "theme": {
+      "scope": "device",
+      "local": true
+    },
+    "isSidebarOpen": {
+      "scope": "device",
+      "local": true
+    },
+    "sidebarWidth": {
+      "scope": "device",
+      "local": true
+    },
+    "isRightSidebarOpen": {
+      "scope": "device",
+      "local": true
+    },
+    "contextPanelByDirectory": {
+      "scope": "device",
+      "local": true
+    },
+    "contextPanelScope": {
+      "scope": "device",
+      "local": true
+    },
+    "contextRailOrder": {
+      "scope": "device",
+      "local": true
+    },
+    "notesPanelHeight": {
+      "scope": "device",
+      "local": true
+    },
+    "todoPanelHeight": {
+      "scope": "device",
+      "local": true
+    },
+    "isSessionSwitcherOpen": {
+      "scope": "device",
+      "local": true
+    },
+    "isSessionDropdownOpen": {
+      "scope": "device",
+      "local": true
+    },
+    "activeMainTab": {
+      "scope": "device",
+      "local": true
+    },
+    "sidebarSection": {
+      "scope": "device",
+      "local": true
+    },
+    "settingsPage": {
+      "scope": "device",
+      "local": true
+    },
+    "settingsHasOpenedOnce": {
+      "scope": "device",
+      "local": true
+    },
+    "settingsProjectsSelectedId": {
+      "scope": "device",
+      "local": true
+    },
+    "settingsRemoteInstancesSelectedId": {
+      "scope": "device",
+      "local": true
+    },
+    "isSessionCreateDialogOpen": {
+      "scope": "device",
+      "local": true
+    },
+    "autoCollapseThinking": {
+      "scope": "device",
+      "local": true
+    },
+    "autoCollapseThinkingThreshold": {
+      "scope": "device",
+      "local": true
+    },
+    "autoDeleteLastRunAt": {
+      "scope": "device",
+      "local": true
+    },
+    "diffWrapLines": {
+      "scope": "device",
+      "local": true
+    },
+    "showTerminalQuickKeysOnDesktop": {
+      "scope": "device",
+      "local": true
+    },
+    "sessionTabsEnabled": {
+      "scope": "device",
+      "local": true
+    },
+    "streamingAutoFollow": {
+      "scope": "device",
+      "local": true
+    },
+    "doubleClickRenameSession": {
+      "scope": "device",
+      "local": true
+    },
+    "persistChatDraft": {
+      "scope": "device",
+      "local": true
+    },
+    "showOpenCodeUpdateNotifications": {
+      "scope": "device",
+      "local": true
+    },
+    "showTurnChangedFiles": {
+      "scope": "device",
+      "local": true
+    },
+    "toolJsonViewMode": {
+      "scope": "device",
+      "local": true
+    },
+    "showMobileSessionStatusBar": {
+      "scope": "device",
+      "local": true
+    },
+    "isMobileSessionStatusBarCollapsed": {
+      "scope": "device",
+      "local": true
+    },
+    "shortcutOverrides": {
+      "scope": "device",
+      "local": true
+    },
+    "fileEditorKeymap": {
+      "scope": "device",
+      "local": true
+    },
+    "desktopHosts": {
+      "scope": "instance",
+      "owner": "desktop-shell",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopInstallId": {
+      "scope": "instance",
+      "owner": "desktop-shell",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopLocalPort": {
+      "scope": "instance",
+      "owner": "desktop-shell",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopSshInstances": {
+      "scope": "instance",
+      "owner": "desktop-shell",
+      "surfaces": [
+        "desktop"
+      ]
+    },
+    "desktopWindowState": {
+      "scope": "instance",
+      "owner": "desktop-shell",
+      "surfaces": [
+        "desktop"
+      ]
+    }
+  }
+}
