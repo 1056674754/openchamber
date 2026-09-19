@@ -82,6 +82,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveOptionalProjectDirectory,
       validateDirectoryPath,
       readCustomThemesFromDisk,
+      saveImportedTheme,
+      deleteImportedTheme,
       refreshOpenCodeAfterConfigChange,
       getPendingConfigRestart,
       markPendingConfigRestart,
@@ -123,6 +125,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
 
     registerSettingsUtilityRoutes(app, {
       readCustomThemesFromDisk,
+      saveImportedTheme,
+      deleteImportedTheme,
       refreshOpenCodeAfterConfigChange,
       getPendingConfigRestart,
       applyPendingConfigRestart,
