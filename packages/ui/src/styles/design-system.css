@@ -293,7 +293,7 @@
 
 /* The chat composer floating over the transcript. */
 .oc-glass-composer {
-  --oc-glass-color: var(--surface-elevated);
+  --oc-glass-color: var(--surface-subtle);
   --oc-glass-opacity: var(--oc-glass-popover-opacity);
 }
 
@@ -347,15 +347,17 @@
 
   @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
     .oc-glass-popover,
-    .oc-glass-tooltip {
-      background-color: var(--surface-elevated);
+    .oc-glass-tooltip,
+    .oc-glass-composer {
+      background-color: var(--oc-glass-color);
     }
   }
 
   @media (prefers-reduced-transparency: reduce) {
     .oc-glass-popover,
-    .oc-glass-tooltip {
-      background-color: var(--surface-elevated);
+    .oc-glass-tooltip,
+    .oc-glass-composer {
+      background-color: var(--oc-glass-color);
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
     }

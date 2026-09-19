@@ -32,6 +32,7 @@ import { AutoReviewBanner } from '@/components/chat/AutoReviewBanner';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import type { I18nKey } from '@/lib/i18n';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
+import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
 import { QueuedMessageChips } from './QueuedMessageChips';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';
@@ -4392,151 +4393,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     </div>
                 )}
 
-                {/* Linked Issue row */}
-                {linkedIssue && !isVSCode && (
-                    <div className="pb-2 w-full px-1">
-                        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
-                            <button
-                                type="button"
-                                onClick={() => setIssuePickerOpen(true)}
-                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
-                            >
-                                {linkedIssue.author?.avatarUrl && (
-                                    <img
-                                        src={linkedIssue.author.avatarUrl}
-                                        alt={linkedIssue.author.login}
-                                        className="h-5 w-5 rounded-full flex-shrink-0"
-                                    />
-                                )}
-                                <span className="text-muted-foreground flex-shrink-0">
-                                    #{linkedIssue.number}
-                                    {linkedIssue.author && (
-                                        <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedIssue.author.login })}</span>
-                                    )}
-                                </span>
-                                <span className="text-foreground truncate">
-                                    {linkedIssue.title}
-                                </span>
-                            </button>
-                            <span className="flex items-center gap-0.5 flex-shrink-0">
-                                <a
-                                    href={linkedIssue.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label={t('chat.chatInput.linked.issue.openInBrowserAria')}
-                                >
-                                    <Icon name="external-link" className="h-4 w-4 text-muted-foreground" />
-                                </a>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setLinkedIssue(null);
-                                    }}
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label={t('chat.chatInput.linked.issue.removeAria')}
-                                    title={t('chat.chatInput.linked.issue.removeAria')}
-                                >
-                                    <Icon name="close" className="h-4 w-4 text-muted-foreground" />
-                                </button>
-                            </span>
-                        </div>
-                    </div>
-                )}
-                {linkedLinearIssue && !isVSCode && (
-                    <div className="pb-2 w-full px-1">
-                        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
-                            <button
-                                type="button"
-                                onClick={() => setLinearPickerOpen(true)}
-                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
-                            >
-                                <Icon name="linear" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-                                <span className="text-muted-foreground flex-shrink-0 font-mono">
-                                    {linkedLinearIssue.identifier}
-                                </span>
-                                <span className="text-foreground truncate">
-                                    {linkedLinearIssue.title}
-                                </span>
-                            </button>
-                            <span className="flex items-center gap-0.5 flex-shrink-0">
-                                <a
-                                    href={linkedLinearIssue.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label={t('chat.chatInput.linked.linearIssue.openInBrowserAria')}
-                                >
-                                    <Icon name="external-link" className="h-4 w-4 text-muted-foreground" />
-                                </a>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setLinkedLinearIssue(null);
-                                    }}
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label={t('chat.chatInput.linked.linearIssue.removeAria')}
-                                    title={t('chat.chatInput.linked.linearIssue.removeAria')}
-                                >
-                                    <Icon name="close" className="h-4 w-4 text-muted-foreground" />
-                                </button>
-                            </span>
-                        </div>
-                    </div>
-                )}
-                {linkedPr && !isVSCode && (
-                    <div className="pb-2 w-full px-1">
-                        <div className="flex w-full items-center gap-1.5 text-sm h-5 px-1">
-                            <button
-                                type="button"
-                                onClick={() => setPrPickerOpen(true)}
-                                className="flex min-w-0 flex-1 items-center gap-1.5 text-left hover:opacity-80 transition-opacity"
-                            >
-                                {linkedPr.author?.avatarUrl && (
-                                    <img
-                                        src={linkedPr.author.avatarUrl}
-                                        alt={linkedPr.author.login}
-                                        className="h-5 w-5 rounded-full flex-shrink-0"
-                                    />
-                                )}
-                                <span className="text-muted-foreground flex-shrink-0">
-                                    {t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
-                                    {linkedPr.author && (
-                                        <span className="ml-1">{t('chat.chatInput.linked.byAuthor', { author: linkedPr.author.login })}</span>
-                                    )}
-                                </span>
-                                <span className="text-foreground truncate">
-                                    {linkedPr.title}
-                                </span>
-                                <span className="text-muted-foreground flex-shrink-0 typography-meta">
-                                    {linkedPr.head} → {linkedPr.base}
-                                </span>
-                            </button>
-                            <span className="flex items-center gap-0.5 flex-shrink-0">
-                                <a
-                                    href={linkedPr.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label={t('chat.chatInput.linked.pr.openInBrowserAria')}
-                                >
-                                    <Icon name="external-link" className="h-4 w-4 text-muted-foreground" />
-                                </a>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setLinkedPr(null);
-                                    }}
-                                    className="flex items-center justify-center h-6 w-6 hover:bg-[var(--interactive-hover)] rounded-full transition-colors"
-                                    aria-label={t('chat.chatInput.linked.pr.removeAria')}
-                                    title={t('chat.chatInput.linked.pr.removeAria')}
-                                >
-                                    <Icon name="close" className="h-4 w-4 text-muted-foreground" />
-                                </button>
-                            </span>
-                        </div>
-                    </div>
-                )}
                 <RevertedMessageDock
                     sessionId={currentSessionId}
                     directory={currentSessionDirectoryForSync ?? currentDirectory}
@@ -4643,11 +4499,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                         isDesktopExpanded && 'flex-1 min-h-0',
                         "border border-border/80 focus-within:border-interactive-selection-foreground/35",
                         "shadow-[0_4px_16px_-4px_rgb(0_0_0_/_0.12)]",
+                        // The box floats over the transcript, so it is glass.
+                        'oc-glass-composer',
                         isDragging && "ring-2 ring-primary ring-offset-2"
                     )}
                     style={{
                         borderRadius: chatInputRadius,
-                        backgroundColor: currentTheme?.colors?.surface?.subtle,
                     }}
                     ref={dropZoneRef}
                     onDropCapture={handleDropCapture}
@@ -4764,6 +4621,43 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     <div className={cn("overflow-hidden", isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
                         <div className="flex items-center gap-1 px-3 pt-1 flex-wrap relative z-10">
                             <AttachedFilesList />
+                            {linkedIssue && !isVSCode ? (
+                                <LinkedReferenceRow
+                                    numberLabel={`#${linkedIssue.number}`}
+                                    title={linkedIssue.title}
+                                    url={linkedIssue.url}
+                                    author={linkedIssue.author}
+                                    openInBrowserLabel={t('chat.chatInput.linked.issue.openInBrowserAria')}
+                                    removeLabel={t('chat.chatInput.linked.issue.removeAria')}
+                                    onReopenPicker={() => setIssuePickerOpen(true)}
+                                    onRemove={() => setLinkedIssue(null)}
+                                />
+                            ) : null}
+                            {linkedPr && !isVSCode ? (
+                                <LinkedReferenceRow
+                                    numberLabel={t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
+                                    title={linkedPr.title}
+                                    url={linkedPr.url}
+                                    author={linkedPr.author}
+                                    branches={linkedPr.head && linkedPr.base ? { head: linkedPr.head, base: linkedPr.base } : undefined}
+                                    openInBrowserLabel={t('chat.chatInput.linked.pr.openInBrowserAria')}
+                                    removeLabel={t('chat.chatInput.linked.pr.removeAria')}
+                                    onReopenPicker={() => setPrPickerOpen(true)}
+                                    onRemove={() => setLinkedPr(null)}
+                                />
+                            ) : null}
+                            {linkedLinearIssue && !isVSCode ? (
+                                <LinkedReferenceRow
+                                    numberLabel={linkedLinearIssue.identifier}
+                                    title={linkedLinearIssue.title}
+                                    url={linkedLinearIssue.url}
+                                    author={linkedLinearIssue.author}
+                                    openInBrowserLabel={t('chat.chatInput.linked.linearIssue.openInBrowserAria')}
+                                    removeLabel={t('chat.chatInput.linked.linearIssue.removeAria')}
+                                    onReopenPicker={() => setLinearPickerOpen(true)}
+                                    onRemove={() => setLinkedLinearIssue(null)}
+                                />
+                            ) : null}
                             <AttachedVSCodeFileChips />
                             <ActiveEditorFileSuggestion />
                         </div>

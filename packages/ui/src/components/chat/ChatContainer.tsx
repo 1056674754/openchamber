@@ -165,6 +165,9 @@ type ChatViewportProps = {
     sessionDirectory?: string | null;
     isDesktopExpandedInput: boolean;
     isMobile: boolean;
+    /** The composer floats over the transcript and reserves its band via
+        `--chat-composer-inset` on the chat column. */
+    floatingComposer: boolean;
     stickyUserHeader: boolean;
     showPromptNavigator: boolean;
     scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -209,12 +212,23 @@ type ChatViewportProps = {
 // How long the previous timeline stays on screen while a session that is not
 // in memory loads, before the skeleton takes over.
 const SESSION_SWITCH_HOLD_MS = 400;
+/**
+ * Gap between the last transcript row and the floating composer's top edge,
+ * on top of the status row reserve. Generous on purpose: the recap note and
+ * the rows docked above the composer (context chips, linked references, the
+ * queue) land in this band, and a follow glide that trails the live edge
+ * should still leave the last line clear of the glass.
+ */
+const FLOATING_COMPOSER_GAP_PX = 64;
+/** Footer reserve before the floating composer slot has been measured. */
+const FLOATING_COMPOSER_DEFAULT_HEIGHT = 128;
 
 const ChatViewport = React.memo(({
     currentSessionId,
     sessionDirectory = null,
     isDesktopExpandedInput,
     isMobile,
+    floatingComposer,
     stickyUserHeader,
     showPromptNavigator,
     scrollRef,
@@ -378,6 +392,7 @@ const ChatViewport = React.memo(({
                     style={CHAT_SCROLL_STYLE}
                     observeMutations={false}
                     hideTopShadow={stickyUserHeader}
+                    hideBottomShadow={floatingComposer}
                     tabIndex={0}
                     onClick={focusScrollContainer}
                     data-scroll-shadow="true"
@@ -431,9 +446,20 @@ const ChatViewport = React.memo(({
                             <StatusRowContainer />
                         </div>
 
+                        {/* Tail spacer. With a floating composer it reserves the
+                            band the composer covers, so the end of the transcript
+                            stays readable above it; the extra gap is the breathing
+                            room between the last row and the composer's top edge.
+                            The height comes from a CSS variable the composer
+                            slot's observer writes directly, so a growing composer
+                            resizes the footer without a list re-render. */}
                         <div
                             className="flex-shrink-0"
-                            style={{ height: `${isMobile ? CHAT_BOTTOM_SPACER_MOBILE_PX : CHAT_BOTTOM_SPACER_DESKTOP_PX}px` }}
+                            style={{
+                                height: floatingComposer
+                                    ? `calc(var(--chat-composer-inset, ${FLOATING_COMPOSER_DEFAULT_HEIGHT}px) + ${FLOATING_COMPOSER_GAP_PX}px)`
+                                    : `${isMobile ? CHAT_BOTTOM_SPACER_MOBILE_PX : CHAT_BOTTOM_SPACER_DESKTOP_PX}px`,
+                            }}
                             aria-hidden="true"
                         />
                     </div>
@@ -461,6 +487,7 @@ const ChatViewport = React.memo(({
         && prev.sessionDirectory === next.sessionDirectory
         && prev.isDesktopExpandedInput === next.isDesktopExpandedInput
         && prev.isMobile === next.isMobile
+        && prev.floatingComposer === next.floatingComposer
         && prev.stickyUserHeader === next.stickyUserHeader
         && prev.showPromptNavigator === next.showPromptNavigator
         && prev.scrollRef === next.scrollRef
@@ -1114,6 +1141,34 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         void sync.ensureSessionRenderable(currentSessionId, true);
     }, [authSessionState, currentSessionId, sync]);
 
+    // The composer floats over the transcript in a normal session view; the
+    // draft screen and the expanded editor keep it in flow.
+    const floatingComposer = !isDesktopExpandedInput;
+    // The slot's height is published as `--chat-composer-inset` on the chat
+    // column (the viewport's tail spacer reads it), written straight from the
+    // observer so composer growth never re-renders the timeline.
+    const composerSlotRef = React.useRef<HTMLDivElement | null>(null);
+    const [composerSlotNode, setComposerSlotNode] = React.useState<HTMLDivElement | null>(null);
+    const attachComposerSlot = React.useCallback((node: HTMLDivElement | null) => {
+        composerSlotRef.current = node;
+        setComposerSlotNode(node);
+    }, []);
+    React.useLayoutEffect(() => {
+        const slot = composerSlotNode;
+        const column = slot?.parentElement;
+        if (!floatingComposer || !slot || !column || !globalThis.ResizeObserver) return;
+        const update = () => {
+            column.style.setProperty('--chat-composer-inset', `${Math.round(slot.getBoundingClientRect().height)}px`);
+        };
+        const observer = new ResizeObserver(update);
+        observer.observe(slot);
+        update();
+        return () => {
+            observer.disconnect();
+            column.style.removeProperty('--chat-composer-inset');
+        };
+    }, [composerSlotNode, floatingComposer]);
+
 	if (!currentSessionId && !draftOpen) {
 		return (
 			<div className="flex flex-col h-full bg-background">
@@ -1247,6 +1302,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 revealWaited={revealWaited}
                 isDesktopExpandedInput={isDesktopExpandedInput}
                 isMobile={isMobile}
+                floatingComposer={floatingComposer}
                 stickyUserHeader={stickyUserHeader}
                 showPromptNavigator={showPromptNavigator}
                 scrollRef={scrollRef}
@@ -1284,14 +1340,18 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 {/* Composer screen container: floating panels publish their
                     height here as --chat-floating-panel-clearance (see
                     ComposerFloatingPanel) and ScrollToBottomButton rides above
-                    them. */}
+                    them. In a normal session view it is an absolute layer over
+                    the transcript, and the glass input box is the visible end
+                    of the chat. */}
                 <div
+                    ref={attachComposerSlot}
                     data-composer-bound
                     className={cn(
-                        'relative z-10',
-                        isDesktopExpandedInput
-                            ? 'flex-1 min-h-0 bg-background'
-                            : 'bg-background'
+                        'z-10 flex min-h-0',
+                        floatingComposer
+                            ? 'absolute inset-x-0 bottom-0'
+                            : 'relative flex-1 bg-background',
+                        isDesktopExpandedInput && 'min-h-0 bg-background'
                     )}
                 >
                     {!isDesktopExpandedInput && sessionMessages.length > 0 && (
