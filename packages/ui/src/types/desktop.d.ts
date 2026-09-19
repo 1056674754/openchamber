@@ -10,6 +10,10 @@ declare global {
     core?: {
       invoke?: OpenChamberDesktopInvoke;
     };
+    /** Native theme file picker; exposed only to trusted local UI pages. */
+    themeFiles?: {
+      pick?: () => Promise<unknown>;
+    };
     dialog?: {
       open?: (options: Record<string, unknown>) => Promise<unknown>;
     };

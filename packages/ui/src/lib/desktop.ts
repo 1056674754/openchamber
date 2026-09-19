@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ProjectEntry, RuntimeAPIs } from '@/lib/api/types';
 import type { MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -347,6 +348,21 @@ export const hasDesktopInvoke = (): boolean => {
 };
 
 export const canUseElectronDesktopIPC = (): boolean => isElectronShell() && hasDesktopInvoke();
+
+export const createDesktopThemeFileAPI = (): RuntimeAPIs['themeFiles'] => {
+  // Preload exposes this capability only to trusted local UI pages. Unlike the
+  // active API endpoint, that page identity stays local during remote connections.
+  const pick = getDesktopBridge()?.themeFiles?.pick;
+  if (typeof pick !== 'function') return undefined;
+  return {
+    async pick() {
+      const bridgePick = getDesktopBridge()?.themeFiles?.pick;
+      if (typeof bridgePick !== 'function') return { status: 'unsupported' };
+      const file = z.object({ name: z.string(), size: z.number().nonnegative(), text: z.string() }).nullable().parse(await bridgePick());
+      return { status: 'picked' as const, file };
+    },
+  };
+};
 
 export const invokeDesktop = async <T = unknown>(command: string, args?: Record<string, unknown>): Promise<T | null> => {
   const invoke = getDesktopBridge()?.core?.invoke;

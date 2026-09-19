@@ -1,4 +1,5 @@
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
+import { createDesktopThemeFileAPI } from '@openchamber/ui/lib/desktop';
 import { createWebTerminalAPI } from './terminal';
 import { createWebGitAPI } from './git';
 import { createWebFilesAPI } from './files';
@@ -10,6 +11,7 @@ import { createWebPushAPI } from './push';
 import { createWebGitHubAPI } from './github';
 
 export const createWebAPIs = (): RuntimeAPIs => ({
+  themeFiles: createDesktopThemeFileAPI(),
   runtime: { platform: 'web', isDesktop: false, isVSCode: false, label: 'web' },
   terminal: createWebTerminalAPI(),
   git: createWebGitAPI(),

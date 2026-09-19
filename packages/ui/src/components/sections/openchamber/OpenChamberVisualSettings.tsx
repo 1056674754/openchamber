@@ -2,6 +2,8 @@ import React from 'react';
 
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { ThemeImportButton } from './ThemeImportButton';
+import { ThemeSelectItem } from './ThemeSelectItem';
 import type { ThemeMode } from '@/types/theme';
 import { useUIStore } from '@/stores/useUIStore';
 import { useMessageQueueStore } from '@/stores/messageQueueStore';
@@ -798,9 +800,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {lightThemes.map((theme) => (
-                                                    <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                        {formatThemeLabel(theme.metadata.name, 'light')}
-                                                    </SelectItem>
+                                                    <ThemeSelectItem key={theme.metadata.id} id={theme.metadata.id} label={formatThemeLabel(theme.metadata.name, 'light')} />
                                                 ))}
                                             </SelectContent>
                                         </Select>
@@ -817,9 +817,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             </SelectTrigger>
                                             <SelectContent>
                                                 {darkThemes.map((theme) => (
-                                                    <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                        {formatThemeLabel(theme.metadata.name, 'dark')}
-                                                    </SelectItem>
+                                                    <ThemeSelectItem key={theme.metadata.id} id={theme.metadata.id} label={formatThemeLabel(theme.metadata.name, 'dark')} />
                                                 ))}
                                             </SelectContent>
                                         </Select>
@@ -862,6 +860,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                             {t('settings.openchamber.visual.field.themeImportInfoTooltip')}
                                         </TooltipContent>
                                     </Tooltip>
+                                    <ThemeImportButton />
                                 </div>
                             </section>
                         )}

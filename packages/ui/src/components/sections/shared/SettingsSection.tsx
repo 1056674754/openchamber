@@ -1,5 +1,7 @@
 import React from 'react';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
+import { SettingsInfoHint } from './SettingsInfoHint';
 
 interface SettingsSectionProps {
   /** Section content */
@@ -87,7 +89,6 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
 };
 
 // --- Ported shared settings primitives (from upstream SettingsSection) ---
-import { SettingsInfoHint } from './SettingsInfoHint';
 
 export const SETTINGS_FIELD_LABEL_CLASS =
   'typography-settings-field-label text-foreground';
@@ -213,3 +214,77 @@ export const SettingsGroupTitle: React.FC<SettingsGroupTitleProps> = ({
 
 const SETTINGS_GROUP_TITLE_CLASS =
   'typography-settings-group-title text-foreground';
+
+interface SettingsCheckboxRowProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: React.ReactNode;
+  description?: React.ReactNode;
+  disabled?: boolean;
+  ariaLabel?: string;
+  settingsItem?: string;
+  className?: string;
+  labelAccessory?: React.ReactNode;
+  /** Helper text hidden behind an info icon next to the label. */
+  info?: React.ReactNode;
+}
+
+/** Shared checkbox setting row with keyboard support. */
+export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
+  checked,
+  onChange,
+  label,
+  description,
+  disabled = false,
+  ariaLabel,
+  settingsItem,
+  className,
+  labelAccessory,
+  info,
+}) => {
+  const toggle = () => {
+    if (!disabled) onChange(!checked);
+  };
+
+  const hasDescription = description != null;
+
+  return (
+    <div
+      data-settings-item={settingsItem}
+      className={cn(
+        'group flex cursor-pointer gap-2 py-0.5',
+        hasDescription ? 'items-start' : 'items-center',
+        disabled && 'cursor-not-allowed opacity-60',
+        className,
+      )}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-pressed={checked}
+      aria-disabled={disabled || undefined}
+      onClick={toggle}
+      onKeyDown={(event) => {
+        if (event.key === ' ' || event.key === 'Enter') {
+          event.preventDefault();
+          toggle();
+        }
+      }}
+    >
+      <Checkbox
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        ariaLabel={ariaLabel}
+      />
+      <div className="flex min-w-0 flex-col">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className={SETTINGS_FIELD_LABEL_CLASS}>{label}</span>
+          {labelAccessory}
+          {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
+        </div>
+        {hasDescription ? (
+          <span className={SETTINGS_HELPER_CLASS}>{description}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+};

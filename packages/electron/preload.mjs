@@ -148,4 +148,13 @@ contextBridge.exposeInMainWorld('__OPENCHAMBER_DESKTOP__', {
   event: {
     listen: async (event, handler) => addListener(event, handler),
   },
+  // Native theme file picker: local pages only. Reads a single JSON/JSONC
+  // file from disk (bounded text), so remote pages get no such privilege —
+  // the main-process command gate refuses 'desktop_pick_theme_file' for
+  // non-local senders as a second layer.
+  ...(isLocalPage ? {
+    themeFiles: {
+      pick: () => ipcRenderer.invoke('openchamber:invoke', 'desktop_pick_theme_file', {}),
+    },
+  } : {}),
 });
