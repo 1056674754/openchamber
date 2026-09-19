@@ -7,6 +7,7 @@ import { startGlobalEventWatcher, stopGlobalEventWatcher, setChatViewProvider } 
 import { initRemoteConfigDir, namespacePathForUri } from './remoteNamespace';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { registerOpenChamberChatParticipant } from './chatParticipant';
+import { applyConnectAttemptTimeout } from './networkDefaults';
 
 let chatViewProvider: ChatViewProvider | undefined;
 let agentManagerProvider: AgentManagerPanelProvider | undefined;
@@ -59,6 +60,7 @@ const formatDurationMs = (value: number | null | undefined) => {
 };
 
 export async function activate(context: vscode.ExtensionContext) {
+  applyConnectAttemptTimeout();
   outputChannel = vscode.window.createOutputChannel('OpenChamber');
 
   try {
