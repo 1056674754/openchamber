@@ -24,6 +24,12 @@ const splitModel = (value) => {
   return { providerID: model.slice(0, slashIndex), modelID: model.slice(slashIndex + 1) };
 };
 
+// The Auto routing sentinel (see ../routing/defaults.js). As a session default
+// it never reaches OpenCode directly: resolvePromptBody rewrites it before the
+// dispatch leaves, so it is allowed through the default resolution here while
+// every real model stays provider-validated.
+const isAutoModelRef = (model) => model?.providerID === 'openchamber' && model?.modelID === 'auto';
+
 const resolveRequestedModel = (payload) => {
   const model = splitModel(payload?.model);
   if (model) return model;
@@ -168,7 +174,7 @@ const resolveDefaultSelection = ({
   let model = null;
   let variant;
   const settingsModel = splitModel(settings?.defaultModel);
-  if (settingsModel && hasProviderModel(providers, settingsModel.providerID, settingsModel.modelID)) {
+  if (settingsModel && (isAutoModelRef(settingsModel) || hasProviderModel(providers, settingsModel.providerID, settingsModel.modelID))) {
     model = settingsModel;
     variant = resolveVariant(providers, model.providerID, model.modelID, settings?.defaultVariant);
   }
@@ -260,6 +266,10 @@ export const createOpenChamberSessionService = (dependencies) => {
     emitSessionCreatedEvent,
     createSessionGoal: createSessionGoalOverride,
     sessionKnowledgeRuntime = null,
+    // Auto routing. Prompts dispatched here go straight to OpenCode, not
+    // through the proxy that rewrites the Auto sentinel, so the same hook runs
+    // on the body before it is sent. Null when routing is not wired in.
+    resolvePromptBody = null,
     createClient = createOpencodeClient,
     createWorktree: createWorktreeOverride = createWorktree,
     localServerId = 'default',
@@ -438,14 +448,19 @@ export const createOpenChamberSessionService = (dependencies) => {
         const response = await client.command.list({ directory });
         const commands = Array.isArray(response?.data) ? response.data : [];
         if (commands.some((command) => command?.name === parsedCommand.command)) {
-          await client.session.command({
-            sessionID,
-            directory,
+          const commandBody = {
             command: parsedCommand.command,
             arguments: parsedCommand.arguments,
             ...(agent ? { agent } : {}),
             model: `${model.providerID}/${model.modelID}`,
             ...(variant ? { variant } : {}),
+          };
+          // Same sentinel rule as the prompt route: rewrite before the send.
+          await resolvePromptBody?.(commandBody, { sessionId: sessionID, directory });
+          await client.session.command({
+            sessionID,
+            directory,
+            ...commandBody,
           });
           dispatchedAsCommand = true;
         }
@@ -459,25 +474,21 @@ export const createOpenChamberSessionService = (dependencies) => {
         ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
           .catch(() => ({ text: '', signature: '' }))
         : { text: '', signature: '' };
+      const payload = {
+        model,
+        ...(agent ? { agent } : {}),
+        ...(variant ? { variant } : {}),
+        parts: [
+          ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
+          { type: 'text', text: expandedPrompt },
+          ...(goalInput.enabled
+            ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
+            : []),
+        ],
+      };
+      await resolvePromptBody?.(payload, { sessionId: sessionID, directory });
       try {
-        await runPromptAsync({
-          baseUrl,
-          authHeaders,
-          sessionID,
-          directory,
-          payload: {
-            model,
-            ...(agent ? { agent } : {}),
-            ...(variant ? { variant } : {}),
-            parts: [
-              ...(knowledge.text ? [{ type: 'text', text: knowledge.text, synthetic: true }] : []),
-              { type: 'text', text: expandedPrompt },
-              ...(goalInput.enabled
-                ? [{ type: 'text', text: buildGoalIntroText(goalInput.tokenBudget), synthetic: true }]
-                : []),
-            ],
-          },
-        });
+        await runPromptAsync({ baseUrl, authHeaders, sessionID, directory, payload });
       } catch (error) {
         throw markGoalPartial(error);
       }

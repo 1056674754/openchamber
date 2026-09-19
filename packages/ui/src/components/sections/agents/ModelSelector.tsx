@@ -16,6 +16,8 @@ import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
+import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
+import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 
 interface ModelSelectorProps {
     providerId: string;
@@ -28,6 +30,12 @@ interface ModelSelectorProps {
     tooltipsEnabled?: boolean;
     dropdownPortalToBody?: boolean;
     compact?: boolean;
+    /**
+     * Offer the Auto routing row on top, as the composer does. Only for
+     * selections that are later sent through the routing rewrite (Session
+     * Defaults); a routing category or fallback must name a real model.
+     */
+    offerAuto?: boolean;
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -41,8 +49,14 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     tooltipsEnabled = true,
     dropdownPortalToBody = false,
     compact = false,
+    offerAuto = false,
 }) => {
     const { t } = useI18n();
+    const autoReady = useRoutingStore(selectAutoReady);
+    const autoEntry = React.useMemo<ModelPickerEntry | null>(() => (offerAuto && autoReady
+        ? { providerID: AUTO_PROVIDER_ID, modelID: AUTO_MODEL_ID, model: { id: AUTO_MODEL_ID, name: t('chat.modelControls.autoModel') } }
+        : null), [autoReady, offerAuto, t]);
+    const isAutoSelected = isAutoModel(providerId, modelId);
     const { isReady, isUnavailable } = useOpenCodeReadiness();
     const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
     const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
@@ -73,7 +87,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
 
     const handleSelect = React.useCallback((entry: ModelPickerEntry) => {
         onChange(entry.providerID, entry.modelID);
-        addRecentModel(entry.providerID, entry.modelID);
+        // Auto has its own pinned row; it does not belong in Recent.
+        if (!isAutoModel(entry.providerID, entry.modelID)) addRecentModel(entry.providerID, entry.modelID);
         closePicker();
     }, [addRecentModel, closePicker, onChange]);
 
@@ -100,7 +115,13 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     }), [placeholder, t]);
 
     const selectedModel = providerId && modelId ? { providerID: providerId, modelID: modelId } : null;
-    const triggerLabel = providerId && modelId ? `${providerId}/${modelId}` : (placeholder || t('settings.agents.modelSelector.notSelected'));
+    const triggerLabel = React.useMemo(() => {
+        if (!providerId || !modelId) {
+            return placeholder || t('settings.agents.modelSelector.notSelected');
+        }
+        if (isAutoSelected) return t('chat.modelControls.autoModel');
+        return `${providerId}/${modelId}`;
+    }, [isAutoSelected, modelId, placeholder, providerId, t]);
 
     const picker = (
         <ModelPickerList
@@ -113,6 +134,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             onSelect={handleSelect}
             labels={labels}
             selectedModel={selectedModel}
+            leadingEntry={autoEntry}
             hiddenModels={hiddenModels}
             allowedProviderIds={allowedProviderIds}
             isModelAllowed={isModelAllowed}
@@ -150,6 +172,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                                 <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
                                 <span className="typography-meta text-muted-foreground">{isUnavailable ? t('common.unavailable') : t('common.loading')}</span>
                             </>
+                        ) : isAutoSelected ? (
+                            <Icon name="openchamber" className="h-3.5 w-3.5 flex-shrink-0" />
                         ) : providerId ? (
                             <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" />
                         ) : (
@@ -188,7 +212,11 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                         </>
                     ) : (
                         <>
-                            {providerId ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" /> : <Icon name="pencil-ai" className="h-3.5 w-3.5 text-muted-foreground" />}
+                            {isAutoSelected
+                                ? <Icon name="openchamber" className="h-3.5 w-3.5 flex-shrink-0" />
+                                : providerId
+                                    ? <ProviderLogo providerId={providerId} className="h-3.5 w-3.5 flex-shrink-0" />
+                                    : <Icon name="pencil-ai" className="h-3.5 w-3.5 text-muted-foreground" />}
                             <span className="typography-ui-label font-normal whitespace-nowrap text-foreground">{triggerLabel}</span>
                         </>
                     )}

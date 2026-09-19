@@ -8,6 +8,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useViewportStore } from '@/sync/viewport-store';
 import { useDirectorySync, useSessionMessages, useSessionMessagesResolved } from '@/sync/sync-context';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useContextWindowLimits } from '@/hooks/useContextWindowLimits';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
@@ -656,8 +657,6 @@ interface VSCodeHeaderProps {
 
 const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher, layoutOverride, onToggleLayout }) => {
   const { t } = useI18n();
-  const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
-  const providers = useConfigStore((state) => state.providers);
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
   const currentSessionMessages = useSessionMessages(currentSessionId ?? '');
@@ -678,10 +677,8 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
     void loadQuotaSettings();
   }, [loadQuotaSettings]);
 
-  const currentModel = getCurrentModel();
   const headerMessageSummary = React.useMemo(() => {
     type AssistantTokens = { total?: number; input: number; output: number; reasoning: number; cache: { read: number; write: number } };
-    let latestAssistantModel: ReturnType<typeof getCurrentModel> | undefined;
     let lastTokens: AssistantTokens | undefined;
     let lastMessageId: string | undefined;
 
@@ -689,11 +686,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
       const message = currentSessionMessages[i] as { role?: unknown; providerID?: unknown; modelID?: unknown; tokens?: AssistantTokens };
       if (message.role !== 'assistant') {
         continue;
-      }
-
-      if (!latestAssistantModel && typeof message.providerID === 'string' && typeof message.modelID === 'string') {
-        const provider = providers.find((entry) => entry.id === message.providerID);
-        latestAssistantModel = provider?.models.find((entry) => entry.id === message.modelID);
       }
 
       if (!lastTokens && message.tokens) {
@@ -704,20 +696,14 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
         }
       }
 
-      if (latestAssistantModel && lastTokens) {
+      if (lastTokens) {
         break;
       }
     }
 
-    return { latestAssistantModel, lastTokens, lastMessageId };
-  }, [currentSessionMessages, providers]);
-  const latestAssistantModel = headerMessageSummary.latestAssistantModel;
-  const modelForLimits = currentModel?.limit ? currentModel : latestAssistantModel;
-  const limit = modelForLimits && typeof modelForLimits.limit === 'object' && modelForLimits.limit !== null
-    ? (modelForLimits.limit as Record<string, unknown>)
-    : null;
-  const contextLimit = limit && typeof limit.context === 'number' ? limit.context : 0;
-  const outputLimit = limit && typeof limit.output === 'number' ? limit.output : 0;
+    return { lastTokens, lastMessageId };
+  }, [currentSessionMessages]);
+  const { context: contextLimit, output: outputLimit } = useContextWindowLimits(currentSessionId ?? null);
 
   const contextUsage = React.useMemo<SessionContextUsage | null>(() => {
     if (!currentSessionId || !headerMessageSummary.lastTokens) {

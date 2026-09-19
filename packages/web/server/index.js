@@ -1528,6 +1528,7 @@ const openChamberSessionService = createOpenChamberSessionService({
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
   sessionKnowledgeRuntime,
+  resolvePromptBody: (body, target) => routingRuntime.resolvePromptBody(body, target),
   emitSessionCreatedEvent: (event) => {
     broadcastGlobalUiEvent({
       type: 'openchamber:session-created',

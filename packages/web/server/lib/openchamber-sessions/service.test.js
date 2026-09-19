@@ -182,3 +182,89 @@ describe('OpenChamber Session archive batch', () => {
       .rejects.toThrow(/does not support server/i);
   });
 });
+
+describe('OpenChamber Session auto routing default', () => {
+  test('lets the routing hook replace an Auto default before the prompt leaves', async () => {
+    // Given — Session Defaults name the Auto sentinel; no provider lists it.
+    const messages = [
+      {
+        info: {
+          id: 'msg_user_old',
+          role: 'user',
+          model: { providerID: 'old-provider', modelID: 'old-model' },
+          time: { created: 1 },
+        },
+      },
+    ];
+    let promptAccepted = false;
+    const client = {
+      session: {
+        messages: mock(async () => ({
+          data: promptAccepted
+            ? [...messages, { info: { id: 'msg_user_sent', role: 'user', time: { created: 5 } } }]
+            : messages,
+        })),
+      },
+      command: {
+        list: mock(async () => ({ data: [] })),
+      },
+    };
+    const seen = [];
+    const dispatchedBodies = [];
+    globalThis.fetch = mock(async (input, init) => {
+      const url = String(input instanceof URL ? input : input?.url ?? input);
+      if (url.includes('/prompt_async')) {
+        dispatchedBodies.push(JSON.parse(String(init?.body)));
+        promptAccepted = true;
+        return { ok: true, text: async () => '' };
+      }
+      if (url.includes('/session') && (init?.method ?? 'GET') === 'POST') {
+        return { ok: true, json: async () => ({ id: 'ses_auto_default' }) };
+      }
+      if (url.includes('/config/providers')) {
+        return { ok: true, json: async () => ({ providers: [] }) };
+      }
+      if (url.includes('/agent')) {
+        return { ok: true, json: async () => [{ name: 'build', mode: 'primary' }] };
+      }
+      if (url.includes('/config')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    const resolvePromptBody = mock(async (body, target) => {
+      seen.push({ model: body.model, target });
+      if (body.model?.modelID === 'auto') body.model = { providerID: 'openai', modelID: 'gpt-5.5' };
+    });
+    const service = createOpenChamberSessionService({
+      readSettingsFromDiskMigrated: mock(async () => ({
+        defaultModel: 'openchamber/auto',
+        defaultAgent: 'build',
+        projects: [],
+      })),
+      sanitizeProjects: (projects) => projects,
+      validateDirectoryPath: mock(async (directory) => ({ ok: true, directory })),
+      buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => true,
+      createClient: () => client,
+      resolvePromptBody,
+    });
+
+    // When
+    const result = await service.create({
+      serverId: 'default',
+      directory: '/repo/app',
+      prompt: 'Run this',
+    });
+
+    // Then — the hook saw the sentinel and the dispatch carried the rewrite.
+    expect(seen).toEqual([{
+      model: { providerID: 'openchamber', modelID: 'auto' },
+      target: { sessionId: 'ses_auto_default', directory: '/repo/app' },
+    }]);
+    expect(dispatchedBodies[0]?.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
+    expect(result.model).toEqual({ providerID: 'openchamber', modelID: 'auto' });
+    expect(result.promptDispatched).toBe(true);
+  });
+});

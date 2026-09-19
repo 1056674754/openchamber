@@ -974,6 +974,18 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
 
         const savedSessionModel = getSessionModelSelection(currentSessionId);
+        // History can never say "Auto": the server replaces the sentinel with
+        // a real model before OpenCode stores the message. A saved Auto is the
+        // newer truth, so it wins over the model the last turn actually ran on.
+        // Until the routing state has loaded, Auto cannot be applied yet, so
+        // the restore stays pending instead of letting history overwrite it.
+        if (savedSessionModel && isAutoModel(savedSessionModel.providerId, savedSessionModel.modelId)) {
+            if (!autoReady) return;
+            tryApplyModelSelection(AUTO_PROVIDER_ID, AUTO_MODEL_ID, currentAgentName || undefined);
+            latestLoadedUserChoiceRestoreRef.current = restoreKey;
+            return;
+        }
+
         if (shouldPreserveManualModelOverride({
             selectionSource: useConfigStore.getState().selectionSource,
             savedSessionModel,
@@ -1044,8 +1056,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         isKnownAgentName,
         latestLoadedUserChoice,
         latestLoadedUserChoiceKey,
+        autoReady,
         setAgent,
         applyModelSelectionWithVariant,
+        tryApplyModelSelection,
         getAgentModelVariantForSession,
         getModelVariantOptions,
         getSessionModelSelection,
@@ -1211,6 +1225,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         saveSessionAgentSelection,
         contextHydrated,
         providers,
+        // A saved Auto waits in 'waiting' until the routing state reports ready.
+        autoReady,
         sync,
     ]);
 

@@ -13,6 +13,7 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
+import { isAutoModel } from '@/lib/routing/autoModel';
 import { shouldPreserveManualModelOverride } from '@/lib/messages/userModelChoice';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
@@ -184,7 +185,8 @@ export const DefaultsSettings: React.FC = () => {
         setCurrentVariant(undefined);
         if (providerId && modelId) {
           const provider = providers.find((p) => p.id === providerId);
-          if (provider) {
+          // Auto is not a provider OpenCode lists; the picker only offers it while the server can honour it.
+          if (provider || isAutoModel(providerId, modelId)) {
             setProvider(providerId);
             setModel(modelId);
           }
@@ -363,7 +365,7 @@ export const DefaultsSettings: React.FC = () => {
             <span className="typography-ui-label text-foreground">{t('settings.openchamber.defaults.field.defaultModel')}</span>
           </div>
           <div className="flex min-w-0 flex-1 items-center gap-2 sm:w-fit sm:flex-initial">
-            <ModelSelector providerId={parsedModel.providerId} modelId={parsedModel.modelId} onChange={handleModelChange} />
+            <ModelSelector providerId={parsedModel.providerId} modelId={parsedModel.modelId} onChange={handleModelChange} offerAuto />
           </div>
         </div>
 
