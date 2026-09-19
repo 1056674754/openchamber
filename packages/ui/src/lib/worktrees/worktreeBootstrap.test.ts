@@ -5,6 +5,7 @@ import {
   getWorktreeBootstrapState,
   markWorktreeBootstrapPending,
   setWorktreeBootstrapState,
+  subscribeWorktreeBootstrapState,
   waitForWorktreeBootstrap,
   waitForWorktreeGitReady,
 } from './worktreeBootstrap';
@@ -74,5 +75,37 @@ describe('worktree bootstrap phases', () => {
     });
     expect(getWorktreeBootstrapState('/repo/wt-c')?.phase).toBe('directory-created');
     clearWorktreeBootstrapState('/repo/wt-c');
+  });
+});
+
+describe('worktreeBootstrap subscription', () => {
+  test('notifies subscribers as a directory enters and leaves bootstrap', () => {
+    const pendingSnapshots: boolean[] = [];
+    const unsubscribe = subscribeWorktreeBootstrapState(() => {
+      pendingSnapshots.push(getWorktreeBootstrapState('/repo-wt')?.status === 'pending');
+    });
+
+    try {
+      markWorktreeBootstrapPending('/repo-wt');
+      setWorktreeBootstrapState('/repo-wt', { status: 'ready', phase: 'setup-ready', error: null, updatedAt: 2 });
+      clearWorktreeBootstrapState('/repo-wt');
+    } finally {
+      unsubscribe();
+    }
+
+    expect(pendingSnapshots).toEqual([true, false, false]);
+  });
+
+  test('stops notifying after unsubscribe', () => {
+    let notifications = 0;
+    const unsubscribe = subscribeWorktreeBootstrapState(() => {
+      notifications += 1;
+    });
+
+    markWorktreeBootstrapPending('/bootstrap-unsub');
+    unsubscribe();
+    clearWorktreeBootstrapState('/bootstrap-unsub');
+
+    expect(notifications).toBe(1);
   });
 });

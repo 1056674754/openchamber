@@ -7,6 +7,7 @@ import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useShallow } from 'zustand/react/shallow';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useNestedGitDirectory } from '@/hooks/useNestedGitDirectory';
+import { useWorktreeBootstrapPending } from '@/hooks/useWorktreeBootstrapPending';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import {
   useGitStore,
@@ -389,8 +390,15 @@ export const GitView: React.FC = () => {
   const isDraftBootstrapPendingForCurrentDirectory = Boolean(
     currentDirectory && normalizedDraftBootstrapPendingDirectory && normalizedDraftBootstrapPendingDirectory === normalizePath(currentDirectory)
   );
+  // In-app bootstrap evidence reacts instantly to a worktree entering setup —
+  // including one created outside this view — so transient files from the
+  // background population are never reported as uncommitted changes.
+  const sharedWorktreeBootstrapPending = useWorktreeBootstrapPending(currentDirectory ?? null);
   const isPendingWorktreeSetup = Boolean(
-    currentDirectory && (worktreeBootstrapStatus === 'pending' || isDraftBootstrapPendingForCurrentDirectory)
+    currentDirectory
+      && (worktreeBootstrapStatus === 'pending'
+        || sharedWorktreeBootstrapPending
+        || isDraftBootstrapPendingForCurrentDirectory)
   );
   const shouldHideNotGitState = isPendingWorktreeSetup || isWaitingForGitRefreshAfterBootstrap;
 
@@ -2288,6 +2296,23 @@ export const GitView: React.FC = () => {
           <Icon name="loader-4" className="size-4 animate-spin" />
           <span className="typography-ui-label">{t('gitView.loading.checkingRepository')}</span>
         </div>
+      </div>
+    );
+  }
+
+  // While the worktree itself is still being populated its working tree
+  // transiently looks dirty; show the setup state instead of presenting that
+  // noise as real changes on the branch — whatever isGitRepo concluded.
+  if (isPendingWorktreeSetup) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+        <Icon name="loader-4" className="mb-3 size-6 animate-spin text-muted-foreground" />
+        <p className="typography-ui-label font-semibold text-foreground">
+          {t('gitView.empty.worktreeSetupInProgress')}
+        </p>
+        <p className="typography-meta mt-1 text-muted-foreground">
+          {t('gitView.empty.worktreeSetupDescription')}
+        </p>
       </div>
     );
   }
