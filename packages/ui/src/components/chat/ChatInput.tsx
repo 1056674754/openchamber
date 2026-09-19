@@ -4514,6 +4514,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     onDrop={handleDrop}
                     onDragEnd={handleDragEnd}
                 >
+                    {/* The autocomplete popups anchor to this wrapper, not to the
+                        glass box: a backdrop-filter ancestor is a backdrop root,
+                        so a glass popup inside the box would only blur the box's
+                        own contents and read as a flat tint over the transcript. */}
+                    <div className={cn('relative', isDesktopExpanded && 'flex flex-1 min-h-0 flex-col')}>
                     {isDragging && (
                         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/90 rounded-xl">
                             <div className="text-center">
@@ -4954,6 +4959,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
                     {/* order-first inside the composer column — compact header by default */}
                     {isMobile && <MobileSessionStatusBar />}
+                    </div>
                 </div>
             </div>
             {/* Floating panels share one absolute `bottom-full` dock above the
