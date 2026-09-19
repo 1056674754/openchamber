@@ -197,7 +197,7 @@ export const AgentMentionAutocomplete = React.forwardRef<AgentMentionAutocomplet
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[360px] max-h-60 bg-background border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[360px] max-h-60 oc-glass-popover border-2 border-border/60 rounded-xl shadow-none bottom-full mb-2 left-0 flex flex-col"
     >
       {showTabs ? (
         <div className="px-2 pt-2 pb-1 border-b border-border/60">
