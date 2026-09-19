@@ -30,6 +30,8 @@ export type SessionGroup = {
   directory: string | null;
   folderScopeKey?: string | null;
   folderScopes?: SessionGroupFolderScope[];
+  /** [fork-port] Upstream v1.24.2: group-specific empty-state copy. */
+  emptyMessage?: string;
   draftTarget?: 'chat' | 'project';
   sessions: SessionNode[];
 };

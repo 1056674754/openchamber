@@ -46,6 +46,12 @@ interface SessionFolderItemProps<TSessionNode> {
   /** Whether folder belongs to archived section */
   archivedBucket?: boolean;
   collapsedActivityState?: CollapsedActivityState;
+  /**
+   * [fork-port] Row-model mode: render the folder header only. The sidebar row
+   * model emits the folder's session rows itself (upstream v1.24.2
+   * renderBody semantics; sub-folders stay parent-owned as before).
+   */
+  renderBody?: boolean;
 }
 
 const SessionFolderItemBase = <TSessionNode,>({
@@ -62,6 +68,7 @@ const SessionFolderItemBase = <TSessionNode,>({
   mobileVariant = false,
   alwaysShowActions = mobileVariant,
   isRenaming = false,
+  renderBody = true,
   renameDraft = '',
   onRenameDraftChange,
   onRenameSave,
@@ -324,7 +331,7 @@ const SessionFolderItemBase = <TSessionNode,>({
       </div>
 
       {/* Folder body */}
-      {!isCollapsed ? (
+      {renderBody && !isCollapsed ? (
         <div className="pb-1 pl-2">
           {/* Sub-folders first */}
           {subFolderItems}

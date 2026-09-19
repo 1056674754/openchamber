@@ -137,6 +137,12 @@ type Props = {
   onToggleCollapsedGroup: (groupKey: string) => void;
   dragHandleProps?: SortableDragHandleProps | null;
   compactBodyPadding?: boolean;
+  /**
+   * [fork-port] Row-model mode: render the group header only. The row model
+   * emits the group's folder and session rows itself, so the section must not
+   * render its body a second time (upstream v1.24.2 renderBody semantics).
+   */
+  renderBody?: boolean;
   serverId: string;
   activeActivitySessionKeys: ReadonlySet<string>;
   unreadActivitySessionIds: ReadonlySet<string>;
@@ -204,6 +210,7 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
     prVisualStateByDirectoryBranch,
     onToggleCollapsedGroup,
     dragHandleProps,
+  renderBody = true,
     compactBodyPadding = false,
     serverId,
   activeActivitySessionKeys,
@@ -942,6 +949,7 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
   const groupBodyPaddingClass = compactBodyPadding ? 'pb-2 pl-1' : 'pb-3 pl-4';
 
   if (hideGroupLabel) {
+    if (renderBody === false) return null;
     return <div className="oc-group"><div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div></div>;
   }
 
@@ -1202,7 +1210,7 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
            </div>
          ) : null}
       </div>
-      {!isCollapsed ? <div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div> : null}
+      {renderBody !== false && !isCollapsed ? <div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div> : null}
     </div>
   );
 }

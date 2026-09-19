@@ -214,6 +214,12 @@ type Props = {
   mobileVariant: boolean;
   alwaysShowActions: boolean;
   renderSessionNode: (node: SessionNode, depth?: number, groupDirectory?: string | null, projectId?: string | null, archivedBucket?: boolean, secondaryMeta?: SecondaryMeta | null, renderContext?: 'project' | 'recent' | 'global-pinned', renderExtras?: SessionNodeChildRenderExtras) => React.ReactNode;
+  /**
+   * [fork-port] Row-model mode: render this row only. The sidebar row model
+   * emits descendant rows itself, so the node must not walk its children
+   * (upstream v1.24.2 renderChildren semantics).
+   */
+  renderChildren?: boolean;
   secondaryMeta?: SecondaryMeta | null;
   renderContext?: 'project' | 'recent' | 'global-pinned';
   /** Precomputed subtree memo keys (from SessionGroupSection / parent). */
@@ -439,6 +445,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     mobileVariant,
     alwaysShowActions,
     renderSessionNode,
+    renderChildren = true,
     secondaryMeta,
     renderContext = 'project',
     renderExtras,
@@ -1793,7 +1800,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
         </div>
       </DraggableSessionRow>
       </MobileSwipeActionsRow>
-      {hasChildren && isExpanded
+      {renderChildren !== false && hasChildren && isExpanded
         ? node.children.map((child) => {
           const parentExtras = renderExtras as SessionNodeRenderExtras | undefined;
           const childExtras = parentExtras?.childRenderExtrasFor?.(child) ?? renderExtras;

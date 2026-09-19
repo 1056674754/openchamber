@@ -67,6 +67,8 @@ import { SidebarHeader } from './sidebar/SidebarHeader';
 import { SidebarActivitySections, type ActivitySection } from './sidebar/SidebarActivitySections';
 import { SidebarFooter } from './sidebar/SidebarFooter';
 import { SidebarProjectsList } from './sidebar/SidebarProjectsList';
+import { SessionSidebarList } from './sidebar/SessionSidebarList';
+import { SessionSidebarFolderItem } from './sidebar/folders/SessionSidebarFolderItem';
 import { SessionNodeItem } from './sidebar/SessionNodeItem';
 import { TempSessionsSection, type TempSessionEntry } from './sidebar/TempSessionsSection';
 import { useUpdateStore } from '@/stores/useUpdateStore';
@@ -2371,6 +2373,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null } | null,
       renderContext: 'project' | 'recent' | 'global-pinned' = 'project',
       renderExtras?: import('./sidebar/sessionNodeItemUtils').SessionNodeChildRenderExtras,
+      rowOptions?: { renderChildren?: boolean },
     ): React.ReactNode => (
       <SessionNodeItem
         key={`${renderContext}:${projectId ?? 'none'}:${groupDirectory ?? 'none'}:${node.session.id}`}
@@ -2411,6 +2414,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         mobileVariant={mobileVariant}
         alwaysShowActions={alwaysShowSidebarActions}
         renderSessionNode={renderSessionNode}
+        renderChildren={rowOptions?.renderChildren !== false}
         secondaryMeta={secondaryMeta}
         renderContext={renderContext}
         renderExtras={renderExtras}
@@ -2499,13 +2503,14 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   }, [prLookup.displayKeyByLookupKey, prVisualSummaryMap]);
 
   const renderGroupSessions = React.useCallback(
-    (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null, compactBodyPadding?: boolean, serverId?: string) => (
+    (group: SessionGroup, groupKey: string, projectId?: string | null, hideGroupLabel?: boolean, dragHandleProps?: SortableDragHandleProps | null, compactBodyPadding?: boolean, serverId?: string, options?: { renderBody?: boolean }) => (
       <SessionGroupSection
         group={group}
         groupKey={groupKey}
         projectId={projectId}
         hideGroupLabel={hideGroupLabel}
         compactBodyPadding={compactBodyPadding}
+        renderBody={options?.renderBody !== false}
         hasSessionSearchQuery={hasSessionSearchQuery}
         normalizedSessionSearchQuery={normalizedSessionSearchQuery}
         groupSearchDataByGroup={groupSearchDataByGroup}
@@ -2980,6 +2985,108 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     />
   ) : null;
 
+  // [fork-port] Row-model wiring: the flat list renders project/group headers,
+  // folder rows and session rows from buildSessionSidebarRowModel. The group
+  // header renders header-only; folder rows render header-only; session rows
+  // render without walking children — the model owns the row expansion.
+  const baseVisibleCountByGroup = React.useMemo(() => {
+    const map = new Map<string, number>();
+    if (hideDirectoryControls) {
+      for (const section of sectionsForSidebarRender) {
+        for (const group of section.groups) {
+          map.set(`${section.project.id}:${group.id}`, 10);
+        }
+      }
+      return map;
+    }
+    const minVisibleSetting = useUIStore.getState().sessionGroupMinVisible;
+    const recentHoursSetting = useUIStore.getState().sessionGroupRecentHours;
+    const minVisible = typeof minVisibleSetting === 'number' && minVisibleSetting >= 1 ? minVisibleSetting : 7;
+    const recentHoursMs = (typeof recentHoursSetting === 'number' && recentHoursSetting >= 1 ? recentHoursSetting : 48) * 60 * 60 * 1000;
+    const cutoff = Date.now() - recentHoursMs;
+    for (const section of sectionsForSidebarRender) {
+      for (const group of section.groups) {
+        let recentCount = 0;
+        for (const node of group.sessions) {
+          const time = node.session.time;
+          const updated = (typeof time?.updated === 'number' && time.updated > 0) ? time.updated
+            : (typeof time?.created === 'number' && time.created > 0) ? time.created : 0;
+          if (updated > cutoff) recentCount++;
+        }
+        map.set(`${section.project.id}:${group.id}`, Math.max(minVisible, recentCount));
+      }
+    }
+    return map;
+  }, [hideDirectoryControls, sectionsForSidebarRender]);
+
+  const visibleCountByContainer = React.useMemo(() => {
+    const merged = new Map<string, number>();
+    for (const [key, value] of baseVisibleCountByGroup) merged.set(key, value);
+    for (const [key, value] of visibleSessionCountByGroup) {
+      merged.set(key, Math.max(merged.get(key) ?? 0, value));
+    }
+    return merged;
+  }, [baseVisibleCountByGroup, visibleSessionCountByGroup]);
+
+  const renderGroupHeader = React.useCallback<(
+    group: SessionGroup,
+    groupKey: string,
+    projectId: string | null,
+    dragHandleProps: import('./sidebar/sortableItems').SortableDragHandleProps | null,
+  ) => React.ReactNode>(
+    (group, groupKey, projectId, dragHandleProps) => renderGroupSessions(group, groupKey, projectId, false, dragHandleProps, false, serverIdByProjectId.get(projectId ?? '') ?? DEFAULT_SERVER_ID, { renderBody: false }),
+    [renderGroupSessions, serverIdByProjectId],
+  );
+
+  const renderFolderItem = React.useCallback((args: {
+    folder: import('@/stores/useSessionFoldersStore').SessionFolder;
+    scopeKey: string;
+    scopeDirectory: string | null;
+    projectId: string | null;
+    groupDirectory: string | null;
+    archivedBucket: boolean;
+    isCollapsed: boolean;
+    depth: number;
+    droppableRef: (node: HTMLElement | null) => void;
+    isDropTarget: boolean;
+    activityNodes: readonly SessionNode[];
+    deleteSessions: readonly Session[];
+  }) => {
+    const { folder, scopeKey, scopeDirectory, projectId, groupDirectory, archivedBucket, isCollapsed, depth, droppableRef, isDropTarget, activityNodes, deleteSessions } = args;
+    return (
+      <SessionSidebarFolderItem
+        key={folder.id}
+        folder={folder}
+        sessions={[]}
+        renderSessionNode={() => null}
+        activityNodes={activityNodes}
+        notifyOnSubtasks={notifyOnSubtasks}
+        isCollapsed={isCollapsed}
+        collapsedActivityState={null}
+        onToggle={() => toggleFolderCollapse(folder.id)}
+        onRename={(name) => renameFolder(scopeKey, folder.id, name)}
+        onDelete={() => {
+          if (archivedBucket) {
+            if (deleteSessions.length === 0) return;
+            sessionEvents.requestDelete({ sessions: [...deleteSessions], mode: 'session' });
+          } else if (!showDeletionDialog) {
+            deleteFolder(scopeKey, folder.id);
+          } else {
+            setDeleteFolderConfirm({ scopeKey, folderId: folder.id, folderName: folder.name, subFolderCount: 0, sessionCount: deleteSessions.length });
+          }
+        }}
+        onRenameSave={() => undefined}
+        groupDirectory={groupDirectory}
+        projectId={projectId}
+        archivedBucket={archivedBucket}
+        depth={depth}
+        droppableRef={droppableRef}
+        isDropTarget={isDropTarget}
+        renderBody={false}
+      />
+    );
+  }, [deleteFolder, notifyOnSubtasks, showDeletionDialog, toggleFolderCollapse, renameFolder]);
+
   return (
     <div
       ref={sessionSearchContainerRef}
@@ -3014,7 +3121,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         onRefresh={handleRefreshSessions}
       />
 
-      <SidebarProjectsList
+      <SessionSidebarList
         topContent={topContent}
         bottomContent={mobileVariant ? tempSessionsSection : null}
         sectionsForRender={sectionsForSidebarRender}
@@ -3026,9 +3133,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         setSingleProjectId={setSingleProjectId}
         showOnlyMainWorkspace={effectiveShowOnlyMainWorkspace}
         hasSessionSearchQuery={hasSessionSearchQuery}
+        normalizedSessionSearchQuery={normalizedSessionSearchQuery}
         emptyState={emptyState}
         searchEmptyState={searchEmptyState}
-        renderGroupSessions={renderGroupSessions}
         activeActivitySessionKeys={activeActivitySessionKeys}
         unreadActivitySessionIds={unreadActivitySessionIds}
         notifyOnSubtasks={notifyOnSubtasks}
@@ -3036,6 +3143,17 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         hasStandaloneContent={!isVSCode && (!hasSessionSearchQuery || managedChatGroups.length > 0)}
         homeDirectory={homeDirectory}
         collapsedProjects={collapsedProjects}
+        collapsedGroups={collapsedGroups}
+        collapsedFolderIds={collapsedFolderIds}
+        expandedParents={visibleExpandedParents}
+        foldersMap={foldersMap}
+        groupSearchDataByGroup={groupSearchDataByGroup}
+        pinnedSessionIds={effectivePinnedSessionIds}
+        sessionOrderIndex={sessionOrderIndex}
+        visibleCountByContainer={visibleCountByContainer}
+        renderSessionNode={(node, depth, groupDirectory, projectId, archivedBucket, secondaryMeta, renderContext, renderExtras) => renderSessionNode(node, depth, groupDirectory, projectId, archivedBucket, secondaryMeta, renderContext, renderExtras, { renderChildren: false })}
+        renderGroupHeader={renderGroupHeader}
+        renderFolderItem={renderFolderItem}
         hideDirectoryControls={hideDirectoryControls}
         projectRepoStatus={projectRepoStatus}
         isDesktopShellRuntime={isDesktopShellRuntime}
@@ -3058,6 +3176,8 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
         setGroupOrderByProject={setGroupOrderByProject}
         openSidebarMenuKey={openSidebarMenuKey}
         setOpenSidebarMenuKey={setOpenSidebarMenuKey}
+        showMoreGroupSessions={showMoreGroupSessions}
+        resetGroupSessionLimit={resetGroupSessionLimit}
         onRefreshProject={handleRefreshSessions}
         isInlineEditing={isInlineEditing}
       />
