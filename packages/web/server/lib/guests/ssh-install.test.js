@@ -83,14 +83,14 @@ if (!process.env.GUEST_SSH_TEST_HOME) {
       GUEST_SSH_TEST_HOME: home,
     });
     try {
-      const refused = spawnSync(bunExecutable, ['test', testPath], {
+      const refused = spawnSync(bunExecutable, ['test', '--timeout', '30000', testPath], {
         env, cwd: path.dirname(home), stdio: 'pipe', timeout: 60_000,
       });
       expect(refused.status).not.toBe(0);
       expect(refused.stderr.toString()).toContain('SSH fixture refused to run without an isolated home');
       // Bun's default child-process environment can ignore late process.env
       // edits. Establish isolation at process startup and always pass env/cwd.
-      execFileSync(bunExecutable, ['test', testPath], {
+      execFileSync(bunExecutable, ['test', '--timeout', '30000', testPath], {
         env, cwd: home, stdio: 'pipe', timeout: 60_000,
       });
     } finally {
