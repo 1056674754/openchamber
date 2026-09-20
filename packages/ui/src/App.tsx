@@ -1,6 +1,7 @@
 import React from 'react';
 import { AppStartupOverlay } from '@/components/ui/AppStartupOverlay';
 import { MainLayout } from '@/components/layout/MainLayout';
+import { GuestHosts } from '@/components/layout/GuestHosts';
 import { ChatView } from '@/components/views/ChatView';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { Toaster } from '@/components/ui/sonner';
@@ -962,6 +963,8 @@ function App({ apis }: AppProps) {
                   <OpenCodeUpdateToast />
                   <RuntimeFallbackApprovalDialog />
                   <MainLayout />
+                  {/* Extension background/toast frames; renders off-screen fixed nodes only. (upstream 5181bcd33) */}
+                  <GuestHosts />
                   <AppStartupOverlay ready={isInitialized && (!isDesktopRuntime || (bootOutcomeKnown && bootViewIsMain))} />
                   <Toaster />
                   {!isBootShell && (

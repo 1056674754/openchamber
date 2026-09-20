@@ -24,6 +24,9 @@ import { resolvePreviewHeaderDisplayUrl } from '@/lib/previewDisplayUrl';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
+import { useGuestsStore } from '@/lib/guests/store';
+import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
+const PluginPane = lazyWithChunkRecovery(() => import('@/components/layout/PluginPane').then(m => ({ default: m.PluginPane })));
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
@@ -77,7 +80,8 @@ const CONTEXT_PANEL_DEFAULT_WIDTH = 600;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 const CONTEXT_PANEL_SPLIT_HANDLE_HEIGHT = 3;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
-type ContextPanelTabMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes' | 'walkthrough' | 'linear';
+// [fork-port] re-derived from @/lib/surfaces/modes so `plugin:<guestId>` tabs render.
+type ContextPanelTabMode = ContextPanelMode;
 type ContextPanelTabLike = { id: string; mode: ContextPanelTabMode; targetPath: string | null; dedupeKey: string; label: string | null; readOnly: boolean };
 type SplitDropZone = 'top' | 'bottom' | 'middle';
 
@@ -327,6 +331,11 @@ const getModeLabel = (
   if (mode === 'pr') return t('contextPanel.mode.pr');
   if (mode === 'notes') return t('contextRail.surface.notes');
   if (mode === 'linear') return t('contextPanel.mode.linear');
+  if (isPluginContextPanelMode(mode)) {
+    // [fork-port] guest panel label from the catalog; 'contextRail.surface.plugin' rides plugin-panel i18n.
+    const guest = useGuestsStore.getState().guests.find((entry) => entry.id === pluginIdFromMode(mode));
+    return guest?.name ?? t('contextRail.surface.plugin');
+  }
   return t('contextPanel.mode.context');
 };
 
@@ -420,6 +429,10 @@ const getTabIcon = (tab: { mode: ContextPanelMode; targetPath: string | null }):
   }
   if (tab.mode === 'browser') {
     return <Icon name="global" className="h-3.5 w-3.5" />;
+  }
+
+  if (isPluginContextPanelMode(tab.mode)) {
+    return <Icon name="window" className="h-3.5 w-3.5" />;
   }
 
   return undefined;
@@ -2223,6 +2236,16 @@ const ContextPanelTabContent: React.FC<{
 
   if (tab.mode === 'pr') {
     return <PullRequestView />;
+  }
+
+  if (isPluginContextPanelMode(tab.mode)) {
+    // Extension panel iframe; each tab keeps its pane mounted like the
+    // browser/terminal panes. (upstream 5181bcd33)
+    return (
+      <React.Suspense fallback={null}>
+        <PluginPane mode={tab.mode} />
+      </React.Suspense>
+    );
   }
 
   if (tab.mode === 'notes') {

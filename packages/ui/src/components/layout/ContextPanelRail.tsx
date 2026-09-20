@@ -22,6 +22,12 @@ import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useContextPanelKey } from '@/hooks/useContextPanelKey';
 import { useI18n } from '@/lib/i18n';
 import { sortContextSurfaces, type ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
+import { isPluginContextPanelMode } from '@/lib/surfaces/modes';
+import { isVSCodeRuntime } from '@/lib/desktop';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
+import { enabledGuestSurfaces } from '@/lib/guests/surfaces';
+import { useGuestsStore } from '@/lib/guests/store';
+import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { cn } from '@/lib/utils';
@@ -110,6 +116,12 @@ export const ContextPanelRail: React.FC = () => {
   const githubConnected = useGitHubAuthStore((state) => state.status?.connected === true);
   const linearAuthChecked = useLinearAuthStore((state) => state.hasChecked);
   const linearConnected = useLinearAuthStore((state) => state.status?.connected === true);
+  const guestCatalogRuntimeKey = useGuestsStore((state) => state.runtimeKey);
+  const guestRailExtras = React.useMemo(
+    () => enabledGuestSurfaces(useGuestsStore.getState().guests, getRuntimeUrlResolver().authenticatedAsset),
+    // runtimeKey: the asset resolver answers for the active runtime.
+    [guestCatalogRuntimeKey],
+  );
   const gitStatus = useGitStatus(directoryKey || null);
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
@@ -120,19 +132,21 @@ export const ContextPanelRail: React.FC = () => {
   const activeTab = tabs.find((tab) => tab.id === panelState?.activeTabId) ?? null;
   const activeMode = panelState?.isOpen ? activeTab?.mode ?? null : null;
   const surfaces = React.useMemo(() => (
-    sortContextSurfaces(contextRailOrder).filter((surface) => {
+    sortContextSurfaces(contextRailOrder, guestRailExtras).filter((surface) => {
       if (surface.id === 'plan' && !planModeEnabled) return false;
       // The pull-request rail icon stays off until GitHub is connected (OAuth
       // or a detected `gh` CLI login); GitHub is connected from Settings, so
       // hiding the surface removes no entry point.
       if (surface.id === 'pr' && !githubConnected) return false;
       if (surface.id === 'linear' && !linearConnected) return false;
+      // Guest panels never load on VS Code or mobile (upstream parity).
+      if (isPluginContextPanelMode(surface.mode) && (isVSCodeRuntime() || isMobileSurfaceRuntime())) return false;
       if (surface.availability === 'has-content') {
         return tabs.some((tab) => tab.mode === surface.mode);
       }
       return true;
     })
-  ), [contextRailOrder, githubConnected, linearConnected, planModeEnabled, tabs]);
+  ), [contextRailOrder, githubConnected, linearConnected, guestRailExtras, planModeEnabled, tabs]);
 
   // A surface whose integration disconnected closes rather than lingering as
   // an active panel with no rail icon.
