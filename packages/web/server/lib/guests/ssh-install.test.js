@@ -4,24 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
-
-// The inner runs re-execute this file under `bun test` with an isolated
-// HOME, so the outer runner only needs to locate a working bun binary.
-const resolveBunExecutable = () => {
-  const works = (candidate) => {
-    try {
-      const result = spawnSync(candidate, ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-      return result.status === 0 && /^\d+\.\d+/.test(String(result.stdout || '').trim());
-    } catch {
-      return false;
-    }
-  };
-  if (path.basename(process.execPath).toLowerCase().startsWith('bun') && works(process.execPath)) {
-    return process.execPath;
-  }
-  if (works('bun')) return 'bun';
-  return process.execPath;
-};
+import { resolveBunExecutable } from '../../../../../scripts/lib/bun-executable.mjs';
 
 import { cloneGitRepository, parseGitInstallUrl, prepareGuestGitNetwork } from './clone.js';
 import { installGuestFromGitSource, parseInstallRequest } from './install.js';
