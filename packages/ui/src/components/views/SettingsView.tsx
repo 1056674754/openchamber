@@ -60,6 +60,7 @@ import { SnippetsPage } from '@/components/sections/snippets/SnippetsPage';
 import { GitPage } from '@/components/sections/git-identities/GitPage';
 import { IntegrationsPage } from '@/components/sections/integrations/IntegrationsPage';
 import { RoutingPage } from '@/components/sections/routing/RoutingPage';
+import { ExtensionsPage } from '@/components/sections/extensions/ExtensionsPage';
 import type { OpenChamberSection } from '@/components/sections/openchamber/types';
 import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPage';
 import { useDeviceInfo } from '@/lib/device';
@@ -150,6 +151,7 @@ const pageOrder: SettingsPageSlug[] = [
   'usage',
   'subscriptions',
   'integrations',
+  'extensions',
   'skills.installed',
   'skills.catalog',
   'voice',
@@ -635,6 +637,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.subscriptions.title');
       case 'integrations':
         return t('settings.page.integrations.title');
+      case 'extensions':
+        return t('settings.page.extensions.title');
       case 'agents':
         return t('settings.page.agents.title');
       case 'behavior':
@@ -789,6 +793,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             onOpenPluginManager={() => openPage('plugins')}
           />
         );
+      case 'extensions':
+        return <ExtensionsPage />;
       case 'magic-prompts':
         return <MagicPromptsPage />;
       case 'snippets':

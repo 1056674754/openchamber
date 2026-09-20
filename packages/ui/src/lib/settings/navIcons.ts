@@ -58,6 +58,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'shield-keyhole';
     case 'integrations':
       return 'plug';
+    case 'extensions':
+      return 'window';
     case 'voice':
       return 'mic';
     case 'tunnel':

@@ -31,6 +31,7 @@ export type SettingsPageSlug =
   | 'notifications'
   | 'voice'
   | 'integrations'
+  | 'extensions'
   | 'tunnel'
   | 'pairing';
 
@@ -182,7 +183,17 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'general',
     kind: 'single',
     showOn: 'both',
-    keywords: ['integration', 'plugin', 'provider', 'oauth', 'claude', 'cursor', 'subscription', 'github', 'linear'],
+    keywords: ['integration', 'plugin', 'provider', 'oauth', 'claude', 'cursor', 'subscription', 'github', 'linear', 'extension'],
+  },
+  {
+    slug: 'extensions',
+    title: 'Extensions',
+    group: 'general',
+    kind: 'single',
+    showOn: 'both',
+    keywords: ['extension', 'extensions', 'guest', 'panel', 'rail', 'folder', 'zip', 'git', 'url'],
+    // [fork-port] fork's runtime context has no isMobile flag yet.
+    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     slug: 'agents',
@@ -222,7 +233,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'opencode',
     kind: 'split',
     showOn: 'default',
-    keywords: ['plugin', 'plugins', 'extensions', 'addons', 'npm', 'opencode-wakatime'],
+    keywords: ['plugin', 'plugins', 'addons', 'npm', 'opencode-wakatime'],
   },
   {
     slug: 'permissions',

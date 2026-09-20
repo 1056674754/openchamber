@@ -7,6 +7,10 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
+import { GuestIntegrationCard, GuestIntegrationsSection } from './GuestIntegrationsSection';
+import { useGuestsStore } from '@/lib/guests/store';
+import { isGuestActive } from '@/lib/guests/capabilities';
+import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { GitHubIntegration } from './GitHubIntegration';
 import { LinearSettings } from './LinearSettings';
 import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
@@ -27,7 +31,14 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
   // the connected runtime exposes the integration API.
   const hasGitHub = !isVSCodeRuntime();
   const hasLinear = Boolean(getRegisteredRuntimeAPIs()?.linear);
-  const hasBuiltIn = hasGitHub || hasLinear;
+  // Bundled extensions with an integration surface a card here, next to the
+  // first-party GitHub/Linear accounts. (upstream 5181bcd33/b59ab5671)
+  const guests = useGuestsStore((state) => state.guests);
+  const runtimeKey = useGuestsStore((state) => state.runtimeKey);
+  const builtInGuests = !isVSCodeRuntime() && !isMobileSurfaceRuntime()
+    ? guests.filter((guest) => guest.source === 'bundled' && guest.integration && isGuestActive(guest))
+    : [];
+  const hasBuiltIn = hasGitHub || hasLinear || builtInGuests.length > 0;
 
   return (
     <SettingsPageLayout>
@@ -49,15 +60,17 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
       {hasBuiltIn ? (
         <SettingsSection
           title={t('settings.integrations.firstParty.title')}
-          description={t('settings.integrations.firstParty.info')}
+          info={t('settings.integrations.firstParty.info')}
           divider={false}
+          settingsItem="integrations.first-party"
+          contentClassName="space-y-3"
         >
-          <div className="space-y-3">
-            {hasGitHub ? <GitHubIntegration /> : null}
-            {hasLinear ? <LinearSettings /> : null}
-          </div>
+          {hasGitHub ? <GitHubIntegration /> : null}
+          {hasLinear ? <LinearSettings /> : null}
+          {builtInGuests.map((guest) => <GuestIntegrationCard key={`${runtimeKey}:${guest.id}`} guest={guest} />)}
         </SettingsSection>
       ) : null}
+      <GuestIntegrationsSection divider={hasBuiltIn} />
       <ThirdPartyIntegrationsSection
         onOpenProviderSetup={onOpenProviderSetup}
         onOpenPluginManager={onOpenPluginManager}

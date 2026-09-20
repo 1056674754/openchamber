@@ -93,6 +93,13 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
 export const SETTINGS_FIELD_LABEL_CLASS =
   'typography-settings-field-label text-foreground';
 
+/** Compact reset / icon action next to a settings control (matches h-8 controls). (upstream 5181bcd33) */
+export const SETTINGS_ICON_BUTTON_CLASS =
+  'h-8 w-8 px-0 text-muted-foreground hover:text-foreground';
+
+/** Split-pane sidebar panel title. [fork-port] fork has no settings-typography tokens yet. */
+export const SETTINGS_PANEL_TITLE_CLASS = 'text-base font-semibold text-foreground';
+
 const SETTINGS_TRIGGER_WIDTH_CLASS = 'w-full min-w-[22ch] max-w-[40ch]';
 export const SETTINGS_SELECT_TRIGGER_CLASS = SETTINGS_TRIGGER_WIDTH_CLASS;
 export const SETTINGS_SELECT_SIZE = 'sm' as const;
