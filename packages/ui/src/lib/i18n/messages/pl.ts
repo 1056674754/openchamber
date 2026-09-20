@@ -3159,4 +3159,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingSingle': '1 oczekujące pytanie',
 
   'chat.toolPart.moreRows': '+{count} kolejnych wierszy',
+  'chat.messageBody.actions.moreActions': 'Więcej akcji',
 };

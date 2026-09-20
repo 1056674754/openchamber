@@ -19,7 +19,12 @@ import { serverRegistry } from '@/lib/opencode/server-registry';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 
 import type { AnimationHandlers, ContentChangeReason } from '@/hooks/useChatAutoFollow';
-import MessageBody from './message/MessageBody';
+import MessageBody, { type MessageExtraAction } from './message/MessageBody';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import { useGuestActions } from '@/hooks/useGuestSurfaces';
+import { buildGuestMessageItem, guestMessageActionsFor } from '@/lib/guests/actions';
+import { openGuestWithItem } from '@/lib/guests/dialog-store';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import type { AgentMentionInfo } from './message/types';
 import type { StreamPhase, ToolPopupContent } from './message/types';
 import { deriveMessageRole } from './message/messageRole';
@@ -51,7 +56,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { shouldHideAssistantMessageShell } from './messageVisibility';
-import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { continueInterruptedMessage, setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -384,6 +388,31 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         return auxiliaryUserMessageKind !== null;
     }, [auxiliaryUserMessageKind, messageRole.isUser]);
     const isUser = messageRole.isUser && !shouldRenderAsAssistant;
+    // Extension actions for this role. The record is read at click time so a
+    // streaming message does not rebuild the list on every part update.
+    const guestActionEntries = useGuestActions();
+    const messageRecordRef = React.useRef(message);
+    messageRecordRef.current = message;
+    const guestMessageActions = React.useMemo<MessageExtraAction[] | undefined>(() => {
+        if (guestActionEntries.length === 0 || !sessionId) return undefined;
+        const entries = guestMessageActionsFor(guestActionEntries, isUser ? 'user' : 'assistant');
+        if (entries.length === 0) return undefined;
+        return entries.map((entry) => ({
+            id: `guest:${entry.guest.id}:${entry.action.id}`,
+            label: entry.action.label,
+            icon: <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="size-3.5" />,
+            onSelect: () => {
+                // [fork-port] The fork's global store keeps plain session arrays.
+                const global = useGlobalSessionsStore.getState();
+                const sessionTitle = global.activeSessions.find((entry0) => entry0.id === sessionId)?.title
+                    ?? global.archivedSessions.find((entry0) => entry0.id === sessionId)?.title
+                    ?? null;
+                const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
+                const item = buildGuestMessageItem(entry.action.id, { sessionId, sessionTitle, directory }, messageRecordRef.current);
+                openGuestWithItem(entry.guest, item, directory);
+            },
+        }));
+    }, [guestActionEntries, isUser, sessionId]);
     const chatSurfaceMode = useChatSurfaceMode();
     const useExternalUserActionsRow = isUser && (isMobile || !stickyUserHeader);
     const showStickyInlineHoverRow = isUser && !isMobile && stickyUserHeader && !useExternalUserActionsRow;
@@ -1288,6 +1317,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
             messageId={message.info.id}
             parts={visibleParts}
             isUser={isUser}
+            extraActions={guestMessageActions}
             isMessageCompleted={isMessageCompleted}
             messageFinish={messageFinish}
             messageCompletedAt={messageCompletedAt ?? undefined}
@@ -1386,6 +1416,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 messageId={message.info.id}
                                                 parts={displayParts}
                                                 isUser={isUser}
+                                                extraActions={guestMessageActions}
                                                 isMessageCompleted={isMessageCompleted}
                                                 messageFinish={messageFinish}
                                                 syntaxTheme={syntaxTheme}
@@ -1426,6 +1457,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                                 messageId={message.info.id}
                                                 parts={displayParts}
                                                 isUser={isUser}
+                                                extraActions={guestMessageActions}
                                                 isMessageCompleted={isMessageCompleted}
                                                 messageFinish={messageFinish}
                                                 syntaxTheme={syntaxTheme}

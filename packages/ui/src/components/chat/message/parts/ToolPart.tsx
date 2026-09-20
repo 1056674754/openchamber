@@ -52,6 +52,14 @@ import { useInlineBlockingRequestsForTool, usePendingQuestionCallIDs } from '../
 import type { QuestionRequest } from '@/types/question';
 import { serializeQuestionAnswersAsMarkdown } from '../../questionSerializers';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
+import { GuestToolTable } from './GuestToolTable';
+import type { JsonValue } from '@openchamber/sdk';
+import {
+    guestToolTableRows,
+    renderGuestToolHeader,
+    useGuestToolPresentation,
+    type GuestToolRule,
+} from '@/lib/guests/tool-presentation';
 import { MinDurationShineText } from './MinDurationShineText';
 import { ToolRevealOnMount } from './ToolRevealOnMount';
 import { getToolIcon } from './toolPresentation';
@@ -1102,13 +1110,53 @@ const ToolScrollableTextOutput: React.FC<{
     input: Record<string, unknown> | undefined;
     syntaxTheme: { [key: string]: React.CSSProperties };
     isStreaming?: boolean;
-}> = ({ output, part, metadata, input, syntaxTheme, isStreaming = false }) => {
+    /** An extension's rule for this tool; its `output` forces the body mode, `auto` keeps detection. */
+    presentation?: GuestToolRule | null;
+    onShowPopup?: (content: ToolPopupContent) => void;
+}> = ({ output, part, metadata, input, syntaxTheme, isStreaming = false, presentation = null, onShowPopup }) => {
     const renderedOutput = getToolOutputText(output, part, metadata);
     const outputLanguage = getToolOutputLanguage(output, part, metadata, input);
     const jsonResult = React.useMemo(() => tryParseJsonOutput(renderedOutput), [renderedOutput]);
+    const forcedMode = presentation?.output && presentation.output !== 'auto' ? presentation.output : null;
 
     if (part.tool === 'bash' && isStreaming) {
         return <StreamingPlainTextOutput output={renderedOutput} />;
+    }
+
+    if (forcedMode === 'markdown') {
+        return (
+            <div className="w-full min-w-0">
+                <SimpleMarkdownRenderer content={renderedOutput} variant="tool" onShowPopup={onShowPopup} />
+            </div>
+        );
+    }
+
+    if (forcedMode === 'table' && presentation?.columns?.length) {
+        // A declared table whose output is not a list falls through to the
+        // host's own detection, so the user still sees the raw result.
+        // SAFETY: `tryParseJsonOutput` fills `data` from JSON.parse of the tool
+        // output, so a parsed result is a JSON value.
+        const rows = jsonResult.isJson ? guestToolTableRows(jsonResult.data as JsonValue) : null;
+        if (rows) {
+            return <GuestToolTable rows={rows} columns={presentation.columns} />;
+        }
+    }
+
+    if (forcedMode === 'text' || forcedMode === 'code') {
+        return (
+            <div className={part.tool === 'bash' ? 'typography-code text-muted-foreground/90' : undefined}>
+                <SyntaxHighlighter
+                    style={syntaxTheme}
+                    language={forcedMode === 'code' && presentation?.language ? presentation.language : 'text'}
+                    PreTag="div"
+                    customStyle={TOOL_COLLAPSED_CUSTOM_STYLE}
+                    codeTagProps={CODE_TAG_PROPS}
+                    wrapLongLines
+                >
+                    {renderedOutput}
+                </SyntaxHighlighter>
+            </div>
+        );
     }
 
     if (jsonResult.isJson) {
@@ -1840,6 +1888,7 @@ interface ToolExpandedContentProps {
     isMobile: boolean;
     sessionId?: string;
     onShowPopup?: (content: ToolPopupContent) => void;
+    presentation: GuestToolRule | null;
 }
 
 const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
@@ -1850,6 +1899,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     isMobile,
     sessionId,
     onShowPopup,
+    presentation,
 }) => {
     const { t } = useI18n();
     const { pierreTheme, pierreThemeType } = usePierreThemeConfig();
@@ -2020,6 +2070,24 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     );
 
     const renderResultContent = () => {
+        // An extension that declared how this tool's output renders goes
+        // first; `auto` and a missing rule keep every built-in branch below.
+        if (presentation?.output && presentation.output !== 'auto' && hasStringOutput && outputString.trim()) {
+            return renderScrollableBlock(
+                <ToolScrollableTextOutput
+                    output={outputString}
+                    part={part}
+                    metadata={metadata}
+                    input={stateWithData.input}
+                    syntaxTheme={syntaxTheme}
+                    isStreaming={isStreamingBash}
+                    presentation={presentation}
+                    onShowPopup={onShowPopup}
+                />,
+                { className: 'p-1' }
+            );
+        }
+
         const renderDiagnosticsSection = () => {
             if (!diagnosticSection) {
                 return null;
@@ -2188,6 +2256,8 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                     input={input}
                     syntaxTheme={syntaxTheme}
                     isStreaming={isStreamingBash}
+                    presentation={presentation}
+                    onShowPopup={onShowPopup}
                 />,
                 {
                     className: part.tool === 'bash' ? 'p-1 rounded-none' : 'p-1',
@@ -3042,16 +3112,30 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const isMultiFileApplyPatch = normalizedPartTool === 'apply_patch' && Array.isArray(metadata?.files) && (metadata?.files as []).length > 1;
     const normalizedPart = normalizedPartTool !== part.tool ? ({ ...part, tool: normalizedPartTool } as ToolPartType) : part;
     const descriptionPath = getToolDescriptionPath(normalizedPart, state, currentDirectory);
-    const description = getToolDescription(normalizedPart, state, currentDirectory);
+    // The registry sees the full name OpenCode reported (`mcp.jira.search`);
+    // the built-in switches below keep the normalized one.
+    const presentation = useGuestToolPresentation(part.tool);
+    const builtInDescription = getToolDescription(normalizedPart, state, currentDirectory);
+    const stateOutput = typeof stateWithData.output === 'string' ? stateWithData.output : undefined;
+    const guestHeader = React.useMemo(
+        () => (presentation ? renderGuestToolHeader(presentation, { input, output: stateOutput, metadata }) : null),
+        [input, metadata, presentation, stateOutput],
+    );
+    const description = guestHeader?.subtitle ?? builtInDescription;
     const headerInputPresentation = React.useMemo(
         () => buildToolInputPresentation(normalizedPartTool || part.tool, input),
         [input, normalizedPartTool, part.tool],
     );
     const hasMediaInput = headerInputPresentation.media.length > 0;
-    const displayName = getToolMetadata(normalizedPartTool || part.tool).displayName;
+    const displayName = guestHeader?.title ?? getToolMetadata(normalizedPartTool || part.tool).displayName;
     
-    // Tool title/description — shown inline as context
+    // Tool title/description — shown inline as context. A subtitle the
+    // extension declared replaces it, since both land in the same slot.
+    const guestSubtitle = guestHeader?.subtitle ?? null;
     const justificationText = React.useMemo(() => {
+        if (guestSubtitle) {
+            return null;
+        }
         if (normalizedPartTool === 'bash') {
             return null;
         }
@@ -3076,7 +3160,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             return inputDesc;
         }
         return null;
-    }, [descriptionPath, normalizedPartTool, stateWithData, input]);
+    }, [descriptionPath, guestSubtitle, normalizedPartTool, stateWithData, input]);
     const duplicateExpandedMediaJustification = Boolean(
         isExpanded
         && hasMediaInput
@@ -3207,7 +3291,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                             )}
                             style={iconStyle}
                         >
-                            {getToolIcon(normalizedPartTool || part.tool)}
+                            {getToolIcon(normalizedPartTool || part.tool, presentation)}
                         </div>
                         {}
                         <div
@@ -3361,6 +3445,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
                                 isMobile={isMobile}
                                 sessionId={messageSessionId}
                                 onShowPopup={onShowPopup}
+                                presentation={presentation}
                             />
                         </div>
                     ) : null}

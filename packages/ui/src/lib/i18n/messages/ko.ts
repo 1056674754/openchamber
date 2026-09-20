@@ -3141,4 +3141,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingSingle': '대기 중인 질문 1개',
 
   'chat.toolPart.moreRows': '+행 {count}개 더 보기',
+  'chat.messageBody.actions.moreActions': '추가 작업',
 };

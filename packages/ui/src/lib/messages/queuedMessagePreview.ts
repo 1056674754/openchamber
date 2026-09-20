@@ -26,6 +26,8 @@ function contextPreview(payload: ContextPartPayload): string {
         case 'github-issue':
         case 'github-pr':
         case 'linear-issue':
+        case 'guest-issue':
+        case 'guest-pr':
             return readText(payload, 'title').trim() || readText(payload, 'url');
         default:
             return readText(payload, 'text').trim();

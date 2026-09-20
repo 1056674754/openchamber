@@ -497,12 +497,15 @@ interface FilePart {
 
 const GITHUB_ISSUE_LINK_MIME = 'application/vnd.github.issue-link';
 const GITHUB_PR_LINK_MIME = 'application/vnd.github.pull-request-link';
+// Extension attach chips ride the same link rendering (upstream 5181bcd33).
+const GUEST_ISSUE_LINK_MIME = 'application/vnd.openchamber.guest-issue-link';
+const GUEST_PR_LINK_MIME = 'application/vnd.openchamber.guest-pr-link';
 
 const getGitHubLinkKind = (file: FilePart): 'issue' | 'pr' | null => {
-  if (file.mime === GITHUB_ISSUE_LINK_MIME) {
+  if (file.mime === GITHUB_ISSUE_LINK_MIME || file.mime === GUEST_ISSUE_LINK_MIME) {
     return 'issue';
   }
-  if (file.mime === GITHUB_PR_LINK_MIME) {
+  if (file.mime === GITHUB_PR_LINK_MIME || file.mime === GUEST_PR_LINK_MIME) {
     return 'pr';
   }
   return null;

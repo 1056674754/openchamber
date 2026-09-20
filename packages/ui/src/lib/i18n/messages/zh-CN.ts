@@ -3138,4 +3138,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingSingle': '1 个待回答问题',
 
   'chat.toolPart.moreRows': '+{count} 行更多',
+  'chat.messageBody.actions.moreActions': '更多操作',
 };

@@ -3135,4 +3135,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingSingle': '1 ausstehende Frage',
 
   'chat.toolPart.moreRows': '+{count} weitere Zeilen',
+  'chat.messageBody.actions.moreActions': 'Weitere Aktionen',
 };

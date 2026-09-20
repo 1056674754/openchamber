@@ -20,6 +20,19 @@ import {
 } from '@/sync/attachment-files';
 import type { AttachedFile, SessionContextUsage } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
+// Guest surfaces load on demand: VS Code and mobile never mount them, and the
+// composer must not pay for the guest bridge before an extension is installed.
+const GuestAttachDialog = React.lazy(() => import('@/components/layout/GuestAttachDialog').then((module) => ({ default: module.GuestAttachDialog })));
+import { buildLinkedGuestIssue, buildLinkedIssue, buildLinkedLinearIssue } from '@/lib/linkedIssues';
+import type { AttachIssueRequest, JsonValue } from '@openchamber/sdk';
+import { useGuestAttachItems, useGuestCommands } from '@/hooks/useGuestSurfaces';
+import { useGuestDialogStore } from '@/lib/guests/dialog-store';
+import { useGuestItemStore } from '@/lib/guests/item-store';
+import { runGuestCommand } from '@/lib/guests/run-command';
+import { useGuestsStore } from '@/lib/guests/store';
+import { isGuestActive } from '@/lib/guests/capabilities';
+import { routeGuestSlashCommand } from './composer/submit/guestCommands';
+import { pluginModeFromId } from '@/lib/surfaces/modes';
 import type { SendDeliveryMode } from '@/sync/session-actions';
 import { useDirectorySync, useSessionMessages, useSessionMessagesResolved, useSessionRevertMessageID, useUserMessageHistory } from '@/sync/sync-context';
 import { parseSlashInvocation } from '@/sync/slash-routing';
@@ -33,6 +46,8 @@ import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import type { I18nKey } from '@/lib/i18n';
 import { AttachedFilesList, AttachedVSCodeFileChips, ActiveEditorFileSuggestion } from './FileAttachment';
 import { LinkedReferenceRow } from './composer/ui/LinkedReferenceRow';
+import { GuestIcon } from '@/components/layout/GuestRailIcon';
+import type { IconName } from '@/components/icon/icons';
 import { QueuedMessageChips } from './QueuedMessageChips';
 import { FileMentionAutocomplete, type FileMentionHandle } from './FileMentionAutocomplete';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from './CommandAutocomplete';
@@ -497,6 +512,9 @@ type ComposerAttachmentControlsProps = {
     openPrPicker: () => void;
     /** Present only when the connected runtime exposes the Linear integration. */
     openLinearPicker?: () => void;
+    /** Installed extensions that contribute an attach flow (upstream 5181bcd33). */
+    attachGuests?: readonly { id: string; name: string; icon: IconName; iconSrc?: string; mode: 'dialog' | 'panel' }[];
+    onOpenGuestAttach?: (guestId: string) => void;
     onOpenSettings?: () => void;
 };
 
@@ -514,6 +532,8 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
         openIssuePicker,
         openPrPicker,
         openLinearPicker,
+        attachGuests,
+        onOpenGuestAttach,
         onOpenSettings,
     } = props;
 
@@ -618,6 +638,17 @@ const ComposerAttachmentControls = React.memo(function ComposerAttachmentControl
                                     {t('chat.chatInput.actions.linkLinearIssue')}
                                 </DropdownMenuItem>
                             ) : null}
+                            {(attachGuests ?? []).map((guest) => (
+                                <DropdownMenuItem
+                                    key={guest.id}
+                                    onSelect={() => {
+                                        requestAnimationFrame(() => onOpenGuestAttach?.(guest.id));
+                                    }}
+                                >
+                                    <GuestIcon icon={guest.icon} iconSrc={guest.iconSrc} className="size-4" />
+                                    {guest.name}
+                                </DropdownMenuItem>
+                            ))}
                         </DropdownMenuContent>
                     </DropdownMenu>
                 )}
@@ -1186,6 +1217,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const pendingInputText = useInputStore((s) => s.pendingInputText);
     const pendingPresetSubmit = useInputStore((s) => s.pendingPresetSubmit);
     const consumePendingPresetSubmit = useInputStore((s) => s.consumePendingPresetSubmit);
+    const pendingGuestIssue = useInputStore((s) => s.pendingGuestIssue);
+    const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
     const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
     const getContextUsage = useSessionUIStore((s) => s.getContextUsage);
     const openContextOverview = useUIStore((state) => state.openContextOverview);
@@ -1429,6 +1462,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return names;
     }, [availableCommands, availableSkills, isMobile]);
 
+    // Extension slash commands. Built-ins, OpenCode commands, and skills are
+    // reserved: an extension command with one of those names is ignored.
+    const guestCommands = useGuestCommands(knownSlashNames);
+    const knownSlashNamesWithGuests = React.useMemo(() => {
+        if (guestCommands.length === 0) return knownSlashNames;
+        const names = new Set(knownSlashNames);
+        for (const entry of guestCommands) names.add(entry.command.name);
+        return names;
+    }, [guestCommands, knownSlashNames]);
+
     const availableSnippets = useSnippetsStore((s) => s.snippets);
     const knownSnippetTriggers = React.useMemo(() => {
         const triggers = new Set<string>();
@@ -1447,10 +1490,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         inputMode,
         knownAgentNames,
         confirmedMentions: confirmedMentionsRef.current,
-        knownSlashNames,
+        knownSlashNames: knownSlashNamesWithGuests,
         knownSnippetTriggers,
         attachmentFilenames,
-    }), [attachmentFilenames, inputMode, knownAgentNames, knownSlashNames, knownSnippetTriggers]);
+    }), [attachmentFilenames, inputMode, knownAgentNames, knownSlashNamesWithGuests, knownSnippetTriggers]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: AttachedFile[] | undefined): AttachedFile[] => (files ?? [])
@@ -1570,6 +1613,22 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         instructionsText: string;
         contextText: string;
         author?: { login: string; avatarUrl?: string };
+    } | null>(null);
+    // The chip the attach dialog was opened from; null when opened from the + menu.
+    const [attachDialogItem, setAttachDialogItem] = React.useState<AttachIssueRequest | null>(null);
+    const [attachDialogGuestId, setAttachDialogGuestId] = React.useState<string | null>(null);
+    const [linkedGuestIssue, setLinkedGuestIssue] = React.useState<{
+        providerId: string;
+        id: string;
+        title: string;
+        url: string;
+        contextText: string;
+        thread?: 'issue' | 'pull';
+        author?: string;
+        head?: string;
+        base?: string;
+        /** Opaque guest payload from `attach`; handed back on chip click, never shown. */
+        data?: JsonValue;
     } | null>(null);
 
     // Message queue
@@ -2047,6 +2106,89 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         setPrPickerOpen(true);
     }, []);
 
+    // --- Guest attach (upstream 5181bcd33) ---
+    const guestAttachItems = useGuestAttachItems();
+    const openGuestAttach = React.useCallback((guestId: string) => {
+        const item = guestAttachItems.find((guest) => guest.id === guestId);
+        if (item?.mode === 'dialog') {
+            setAttachDialogItem(null);
+            setAttachDialogGuestId(guestId);
+            return;
+        }
+        useUIStore.getState().openContextSurface(currentDirectory || '', pluginModeFromId(guestId));
+    }, [currentDirectory, guestAttachItems]);
+    // Clicking the guest chip reopens that guest with the chip as `ready.item`,
+    // so it can show the item's details instead of its whole list. A panel
+    // guest gets it through the rail hand-off store; a dialog guest as a prop.
+    const reopenGuestItem = React.useCallback(() => {
+        if (!linkedGuestIssue) return;
+        const issue: AttachIssueRequest = {
+            providerId: linkedGuestIssue.providerId,
+            id: linkedGuestIssue.id,
+            title: linkedGuestIssue.title,
+            url: linkedGuestIssue.url,
+            text: linkedGuestIssue.contextText,
+            kind: linkedGuestIssue.thread ?? 'issue',
+        };
+        if (linkedGuestIssue.author) issue.author = linkedGuestIssue.author;
+        if (linkedGuestIssue.head && linkedGuestIssue.base) {
+            issue.branches = { head: linkedGuestIssue.head, base: linkedGuestIssue.base };
+        }
+        if (linkedGuestIssue.data !== undefined) issue.data = linkedGuestIssue.data;
+        // A chip can outlive the place it was attached in: the session may be
+        // open on mobile or VS Code, where extensions never load, or the
+        // extension may be paused or removed here. Say so instead of opening
+        // an empty surface.
+        const installed = useGuestsStore.getState().guests.find((entry) => entry.id === issue.providerId);
+        if (!installed || !isGuestActive(installed)) {
+            toast.info(t('chat.chatInput.toast.guestUnavailableHere'));
+            return;
+        }
+        const guest = guestAttachItems.find((entry) => entry.id === issue.providerId);
+        // Only an extension that declared a dialog gets one; everything else
+        // (panel mode, no attach declared) opens the rail with the item.
+        if (guest?.mode !== 'dialog') {
+            useGuestItemStore.getState().setPendingItem(issue.providerId, issue);
+            useUIStore.getState().openContextSurface(currentDirectory || '', pluginModeFromId(issue.providerId));
+            return;
+        }
+        setAttachDialogItem(issue);
+        setAttachDialogGuestId(issue.providerId);
+    }, [currentDirectory, guestAttachItems, linkedGuestIssue, t]);
+    const handleGuestAttach = React.useCallback((issue: AttachIssueRequest) => {
+        const contextText = issue.text
+            ?? `Attached ${issue.providerId} ${issue.id}: ${issue.title}\n${issue.url}`;
+        setLinkedGuestIssue({
+            providerId: issue.providerId,
+            id: issue.id,
+            title: issue.title,
+            url: issue.url,
+            contextText,
+            thread: issue.kind === 'pull' ? 'pull' : 'issue',
+            author: issue.author,
+            head: issue.branches?.head,
+            base: issue.branches?.base,
+            data: issue.data,
+        });
+        setLinkedIssue(null);
+        setLinkedPr(null);
+        setLinkedLinearIssue(null);
+        setAttachDialogGuestId(null);
+        setAttachDialogItem(null);
+        // A message or session action may have opened the guest in the
+        // layout-level dialog; attaching from there closes it the same way.
+        useGuestDialogStore.getState().close();
+    }, []);
+    React.useEffect(() => {
+        if (!pendingGuestIssue) {
+            return;
+        }
+        const issue = consumePendingGuestIssue();
+        if (issue) {
+            handleGuestAttach(issue);
+        }
+    }, [consumePendingGuestIssue, handleGuestAttach, pendingGuestIssue]);
+
     const lastSoftNetworkErrorToastAtRef = React.useRef(0);
 
     const handleSubmit = async (options?: SubmitOptions) => {
@@ -2061,6 +2203,37 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             : getCurrentInputSnapshot();
         const submittedSessionId = currentSessionId;
         const routedSessionId = isBtwActive ? btwPanel.btwSessionId : submittedSessionId;
+
+        // An extension command never reaches the model: the extension turns
+        // `/name args` into a chip, which lands through the same pending slot
+        // a guest panel's `attach` uses. Nothing else in the composer moves.
+        const guestRoute = !queuedOnly && !isBtwActive && inputSnapshot.hasContent
+            ? routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)
+            : null;
+        if (guestRoute) {
+            const guestRouteText = inputSnapshot.message;
+            setMessage('');
+            messageRef.current = '';
+            confirmedMentionsRef.current.clear();
+            const outcome = await runGuestCommand(guestRoute);
+            if (outcome.ok) {
+                if (outcome.item) {
+                    useInputStore.getState().setPendingGuestIssue(outcome.item);
+                } else {
+                    // Nothing matched: give the command back so the user can fix the argument.
+                    setMessage(guestRouteText);
+                    messageRef.current = guestRouteText;
+                    toast.info(t('chat.chatInput.toast.guestCommandNothing', { name: guestRoute.entry.guestName }));
+                }
+                return;
+            }
+            setMessage(guestRouteText);
+            messageRef.current = guestRouteText;
+            toast.error(outcome.reason === 'error'
+                ? t('chat.chatInput.toast.guestCommandFailed', { command: guestRoute.entry.command.name, reason: outcome.message })
+                : t('chat.chatInput.toast.guestCommandUnavailable', { name: guestRoute.entry.guestName }));
+            return;
+        }
         const submittedNewSessionDraftOpen = newSessionDraftOpen;
         const submittedDraftSnapshot = submittedNewSessionDraftOpen ? { ...newSessionDraft } : null;
         const submittedDirectory = submittedSessionId
@@ -2302,6 +2475,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         if (linkedIssue) {
             additionalParts.push({
                 text: linkedIssue.contextText,
+                synthetic: true,
+            });
+        }
+
+        if (linkedGuestIssue) {
+            additionalParts.push({
+                text: linkedGuestIssue.contextText,
                 synthetic: true,
             });
         }
@@ -2727,6 +2907,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             }
             if (linkedLinearIssue) {
                 setLinkedLinearIssue(null);
+            }
+            if (linkedGuestIssue) {
+                setLinkedGuestIssue(null);
             }
         }).catch((error: unknown) => {
             const rawMessage =
@@ -4638,6 +4821,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                     onRemove={() => setLinkedIssue(null)}
                                 />
                             ) : null}
+                            {linkedGuestIssue && !isVSCode ? (
+                                <LinkedReferenceRow
+                                    numberLabel={linkedGuestIssue.thread === 'pull'
+                                        ? t('chat.chatInput.linked.guest.pr.number', { id: linkedGuestIssue.id })
+                                        : linkedGuestIssue.id}
+                                    title={linkedGuestIssue.title}
+                                    url={linkedGuestIssue.url}
+                                    author={linkedGuestIssue.author ? { login: linkedGuestIssue.author } : undefined}
+                                    branches={linkedGuestIssue.thread === 'pull' && linkedGuestIssue.head && linkedGuestIssue.base
+                                        ? { head: linkedGuestIssue.head, base: linkedGuestIssue.base }
+                                        : undefined}
+                                    openInBrowserLabel={t('chat.chatInput.linked.guest.openInBrowserAria', { id: linkedGuestIssue.id })}
+                                    removeLabel={t('chat.chatInput.linked.guest.removeAria', { id: linkedGuestIssue.id })}
+                                    onReopenPicker={reopenGuestItem}
+                                    onRemove={() => setLinkedGuestIssue(null)}
+                                />
+                            ) : null}
                             {linkedPr && !isVSCode ? (
                                 <LinkedReferenceRow
                                     numberLabel={t('chat.chatInput.linked.pr.number', { number: linkedPr.number })}
@@ -4796,6 +4996,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             openIssuePicker={openIssuePicker}
                                             openPrPicker={openPrPicker}
                                             openLinearPicker={linearAvailable ? openLinearPicker : undefined}
+                                            attachGuests={isMobile ? [] : guestAttachItems}
+                                            onOpenGuestAttach={openGuestAttach}
                                             onOpenSettings={onOpenSettings}
                                         />
                                         <PermissionAutoAcceptButton
@@ -4888,6 +5090,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         openIssuePicker={openIssuePicker}
                                         openPrPicker={openPrPicker}
                                         openLinearPicker={linearAvailable ? openLinearPicker : undefined}
+                                        attachGuests={isMobile ? [] : guestAttachItems}
+                                        onOpenGuestAttach={openGuestAttach}
                                         onOpenSettings={onOpenSettings}
                                     />
                                     <FocusModeButton
@@ -4997,6 +5201,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             onSelect={(issue) => {
                 setLinkedIssue(issue);
                 setLinkedPr(null);
+                setLinkedGuestIssue(null);
             }}
         />
         <GitHubPrPickerDialog
@@ -5005,8 +5210,23 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             onSelect={(pr) => {
                 setLinkedPr(pr);
                 setLinkedIssue(null);
+                setLinkedGuestIssue(null);
             }}
         />
+        {attachDialogGuestId && !isMobile ? (
+            <React.Suspense fallback={null}>
+                <GuestAttachDialog
+                    guestId={attachDialogGuestId}
+                    item={attachDialogItem}
+                    onOpenChange={(open) => {
+                        if (!open) {
+                            setAttachDialogGuestId(null);
+                            setAttachDialogItem(null);
+                        }
+                    }}
+                />
+            </React.Suspense>
+        ) : null}
         <LinearIssuePickerDialog
             open={linearPickerOpen}
             onOpenChange={setLinearPickerOpen}
@@ -5014,6 +5234,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             onSelect={(issue) => {
                 setLinkedLinearIssue(issue);
                 setLinkedIssue(null);
+                setLinkedGuestIssue(null);
                 setLinkedPr(null);
             }}
         />

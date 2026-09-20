@@ -3141,4 +3141,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingSingle': '1 pregunta pendiente',
 
   'chat.toolPart.moreRows': '+{count} filas más',
+  'chat.messageBody.actions.moreActions': 'Más acciones',
 };

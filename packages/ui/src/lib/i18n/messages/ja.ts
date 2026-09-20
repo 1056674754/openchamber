@@ -3139,4 +3139,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingSingle': '保留中の質問が1件あります',
 
   'chat.toolPart.moreRows': '+{count}行',
+  'chat.messageBody.actions.moreActions': 'その他の操作',
 };

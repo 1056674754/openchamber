@@ -3137,5 +3137,6 @@ export const dict = {
   'sessions.sidebar.session.status.questionPendingSingle': '1 pending question',
 
   'chat.toolPart.moreRows': '+{count} more rows',
+  'chat.messageBody.actions.moreActions': 'More actions',
 };
 export type I18nKey = keyof typeof dict;

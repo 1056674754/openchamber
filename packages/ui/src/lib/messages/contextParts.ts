@@ -31,6 +31,8 @@ const CONTEXT_PAYLOAD_KINDS = [
     'github-issue',
     'github-pr',
     'linear-issue',
+    'guest-issue',
+    'guest-pr',
 ] as const;
 
 export const contextPartMetadataSchema = z.object({

@@ -3135,4 +3135,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingSingle': '1 bekleyen soru',
 
   'chat.toolPart.moreRows': '+{count} satır daha',
+  'chat.messageBody.actions.moreActions': 'Diğer işlemler',
 };

@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { SaveProjectPlanDialog } from '@/components/session/SaveProjectPlanDialog';
 import { ForkSessionDialog, type ForkSessionExecution } from '@/components/session/ForkSessionDialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { ContentChangeReason } from '@/hooks/useChatAutoFollow';
 
@@ -345,6 +346,8 @@ interface MessageBodyProps {
     isContinuing?: boolean;
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
+    /** Actions installed extensions contribute for this message's role; rendered after the built-ins. */
+    extraActions?: MessageExtraAction[];
     footerProviderID?: string | null;
     footerModelName?: string;
     footerAgentName?: string;
@@ -370,7 +373,53 @@ const writeRevealedToolIds = (messageId: string, value: Set<string>): void => {
     revealedToolIdsByMessage.set(messageId, new Set(value));
 };
 
-const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userActionsMode = 'inline', stickyUserHeaderEnabled = true }: {
+/** One extension action on a message: an icon button on hover, a labelled row in the touch sheet. (upstream 5181bcd33) */
+export type MessageExtraAction = {
+    id: string;
+    label: string;
+    icon: React.ReactNode;
+    onSelect: () => void;
+};
+
+/** Extension actions on desktop live behind one "more" button, so several extensions never stretch the hover row. */
+const MessageExtraActionButtons: React.FC<{ actions?: MessageExtraAction[] }> = ({ actions }) => {
+    const { t } = useI18n();
+    if (!actions || actions.length === 0) return null;
+    return (
+        <DropdownMenu>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-muted-foreground bg-transparent hover:text-foreground hover:!bg-transparent active:!bg-transparent focus-visible:!bg-transparent focus-visible:ring-2 focus-visible:ring-primary/50"
+                            aria-label={t('chat.messageBody.actions.moreActions')}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => event.stopPropagation()}
+                        >
+                            <Icon name="more" className="h-3.5 w-3.5" />
+                        </Button>
+                    </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.moreActions')}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" onPointerDown={(event) => event.stopPropagation()}>
+                {actions.map((action) => (
+                    <DropdownMenuItem key={action.id} className="typography-meta" onSelect={() => action.onSelect()}>
+                        <span className="flex items-center gap-2 min-w-0">
+                            <span className="flex size-4 shrink-0 items-center justify-center">{action.icon}</span>
+                            <span className="truncate">{action.label}</span>
+                        </span>
+                    </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+};
+
+const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alwaysShowActions = isMobile, hasTouchInput, hasTextContent, onCopyMessage, copiedMessage, onShowPopup, agentMention, onRevert, onFork, contextPinned, contextPinPending, onToggleContextPin, userActionsMode = 'inline', stickyUserHeaderEnabled = true, extraActions }: {
     sessionId?: string;
     messageId: string;
     parts: Part[];
@@ -389,6 +438,7 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
     onToggleContextPin?: () => void;
     userActionsMode?: 'inline' | 'external-content' | 'external-actions';
     stickyUserHeaderEnabled?: boolean;
+    extraActions?: MessageExtraAction[];
 }) => {
     const { t } = useI18n();
     const chatSurfaceMode = useChatSurfaceMode();
@@ -466,7 +516,8 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
     );
 
     const effectiveOnFork = chatSurfaceMode === 'mini-chat' || chatSurfaceMode === 'peek' ? undefined : onFork;
-    const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || (onToggleContextPin && hasCopyableText)) && showUserActions ? (
+    const hasExtraActions = Boolean(extraActions && extraActions.length > 0);
+    const actionsBlock = chatSurfaceMode !== 'peek' && ((canCopyMessage && hasCopyableText) || onRevert || effectiveOnFork || (onToggleContextPin && hasCopyableText) || hasExtraActions) && showUserActions ? (
         <div className={cn(
             'group/user-actions',
             isMobile
@@ -536,6 +587,7 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
                         <TooltipContent sideOffset={6}>{t('chat.messageBody.actions.fork')}</TooltipContent>
                     </Tooltip>
                 )}
+                <MessageExtraActionButtons actions={extraActions} />
                 {onToggleContextPin && hasCopyableText && (
                     <Tooltip>
                         <TooltipTrigger asChild>
@@ -663,6 +715,7 @@ const UserMessageBody = React.memo(({ sessionId, messageId, parts, isMobile, alw
 });
 
 interface AssistantMessageActionButtonsProps {
+    extraActions?: MessageExtraAction[];
     hasCopyableText: boolean;
     isTouchContext: boolean;
     onCopyMessage?: () => void | boolean | Promise<void | boolean>;
@@ -679,6 +732,7 @@ interface AssistantMessageActionButtonsProps {
 }
 
 const AssistantMessageActionButtons = React.memo(({
+    extraActions,
     hasCopyableText,
     isTouchContext,
     onCopyMessage,
@@ -870,6 +924,7 @@ const AssistantMessageActionButtons = React.memo(({
                     <TooltipContent sideOffset={6}>{t(contextPinned ? 'chat.messageBody.actions.unpinContext' : 'chat.messageBody.actions.pinContext')}</TooltipContent>
                 </Tooltip>
             ) : null}
+            <MessageExtraActionButtons actions={extraActions} />
             {onCopyMessage && (
                 <Tooltip>
                     <TooltipTrigger asChild>
@@ -1013,6 +1068,7 @@ const AssistantMessageBody = React.memo(({
     onContentChange,
     hasTextContent = false,
     onCopyMessage,
+    extraActions,
     onAuxiliaryContentComplete,
     showReasoningTraces = false,
     turnGroupingContext,
@@ -1660,8 +1716,9 @@ const AssistantMessageBody = React.memo(({
             contextPinned={contextPinned}
             contextPinPending={contextPinPending}
             onToggleContextPin={onToggleContextPin}
+            extraActions={extraActions}
         />
-    ), [assistantPlanText, contextPinPending, contextPinned, hasCopyableText, isTouchContext, onCopyMessage, onToggleContextPin, reviewTransferAction, shareMessageAsImage]);
+    ), [assistantPlanText, contextPinPending, contextPinned, extraActions, hasCopyableText, isTouchContext, onCopyMessage, onToggleContextPin, reviewTransferAction, shareMessageAsImage]);
 
     const renderJustificationActions = React.useCallback((activity: NonNullable<TurnGroupingContext['activityParts']>[number]) => {
         if (!showSplitAssistantMessageActions || !isSortedRenderMode) {
@@ -2428,6 +2485,7 @@ const MessageBody = React.memo(({ isUser, ...props }: MessageBodyProps) => {
                 onToggleContextPin={props.onToggleContextPin}
                 userActionsMode={props.userActionsMode}
                 stickyUserHeaderEnabled={props.stickyUserHeaderEnabled}
+                extraActions={props.extraActions}
             />
         );
     }
