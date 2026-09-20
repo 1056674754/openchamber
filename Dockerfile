@@ -9,11 +9,16 @@ COPY packages/ui/package.json ./packages/ui/
 COPY packages/web/package.json ./packages/web/
 COPY packages/desktop/package.json ./packages/desktop/
 COPY packages/vscode/package.json ./packages/vscode/
+COPY packages/sdk/package.json ./packages/sdk/
 RUN bun install --ignore-scripts
 
 FROM deps AS builder
 WORKDIR /app
 COPY . .
+# The server imports @openchamber/sdk at runtime, and deps installed with
+# --ignore-scripts, so the root postinstall never built it. Build it here
+# so the runtime stage can copy the output.
+RUN bun run --cwd packages/sdk build
 RUN bun run build:web
 
 FROM oven/bun:1 AS runtime
@@ -58,6 +63,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/packages/web/node_modules ./packages/web/node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/packages/web/package.json ./packages/web/package.json
+COPY --from=builder /app/packages/sdk/package.json ./packages/sdk/package.json
+COPY --from=builder /app/packages/sdk/dist ./packages/sdk/dist
 COPY --from=builder /app/packages/web/bin ./packages/web/bin
 COPY --from=builder /app/packages/web/server ./packages/web/server
 COPY --from=builder /app/packages/web/dist ./packages/web/dist
