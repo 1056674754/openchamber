@@ -275,7 +275,7 @@
   "dependencies": {
     "@openchamber/shared": "workspace:*",
     "@openchamber/ui": "workspace:*",
-    "@opencode-ai/sdk": "^1.18.4",
+    "@opencode-ai/sdk": "1.18.31",
     "adm-zip": "^0.6.0",
     "jsonc-parser": "^3.3.1",
     "react": "^19.1.1",
