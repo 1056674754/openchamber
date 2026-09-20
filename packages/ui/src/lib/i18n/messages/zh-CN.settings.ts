@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': '全选',
@@ -2182,4 +2184,6 @@ export const settingsDict = {
   'settings.openchamber.appLinks.empty': '本设备上暂无受信任的应用链接。打开链接时选择“信任并打开”即可添加到这里。',
   'settings.openchamber.appLinks.removeAria': '移除受信任的 {scheme} 链接',
   'settings.providers.page.actions.tryAgain': 'Try again',
+  ...extensionsSettingsI18n['zh-CN'],
+  ...guestIntegrationsI18n['zh-CN'],
 } as const;

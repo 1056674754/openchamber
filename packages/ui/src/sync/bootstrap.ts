@@ -181,7 +181,9 @@ export async function bootstrapDirectory(input: {
   // Seed from global state while we fetch directory-specific data
   const seededProject = projectID(directory, g.projects)
   if (seededProject) set({ project: seededProject })
-  if (state.provider.all.length === 0 && g.providers.all.length > 0) {
+  // [fork-port] guard: the providers snapshot can be malformed outside the
+  // normal provider (e.g. thin test doubles).
+  if (state.provider?.all && g.providers?.all && state.provider.all.length === 0 && g.providers.all.length > 0) {
     set({ provider: g.providers as State["provider"] })
   }
   if (Object.keys(state.config ?? {}).length === 0 && Object.keys(g.config ?? {}).length > 0) {

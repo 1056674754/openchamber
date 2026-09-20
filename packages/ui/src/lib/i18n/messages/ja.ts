@@ -8,6 +8,7 @@ import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
 import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ja,
@@ -19,6 +20,7 @@ export const dict: Record<I18nKey, string> = {
   ...btwI18n.ja,
   ...chatsI18n.ja,
   ...routingI18n.ja,
+  ...pluginPanelI18n.ja,
   'planView.error.loadFailed': 'この計画を読み込めませんでした',
   'common.loading': '読み込み中...',
   'common.unavailable': '利用できません',
@@ -3136,4 +3138,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingMany': '保留中の質問が{count}件あります',
   'sessions.sidebar.session.status.questionPendingSingle': '保留中の質問が1件あります',
 
+  'chat.toolPart.moreRows': '+{count}行',
 };

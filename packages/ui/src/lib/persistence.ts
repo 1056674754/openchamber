@@ -1633,8 +1633,13 @@ export const syncDesktopSettings = async (): Promise<void> => {
     const webSettings = await fetchWebSettings();
     if (webSettings) {
       await applySettingsAndDispatch(webSettings);
+    } else {
+      // No settings document arrived: let listeners (project registry) mark
+      // the server snapshot as failed so extensions show a load error.
+      window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
     }
   } catch (error) {
+    window.dispatchEvent(new Event('openchamber:settings-sync-failed'));
     console.warn('Failed to synchronise settings:', error);
   }
 };
@@ -1937,13 +1942,65 @@ export const initializeAppearancePreferences = async (): Promise<void> => {
   }
 };
 
-/** Quiet save-state signal for settings widgets that manage their own saves
- *  (e.g. Linear preferences): 'saved' is the normal case and reports nothing;
- *  only in-flight saves and failures surface in the UI. */
-export const reportSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
+type SettingsSaveState = 'idle' | 'saving' | 'error';
+
+let _settingsSaveState: SettingsSaveState = 'idle';
+let _settingsSaveStateResetTimer: ReturnType<typeof setTimeout> | null = null;
+const _settingsSaveStateListeners = new Set<() => void>();
+
+export const getSettingsSaveState = (): SettingsSaveState => _settingsSaveState;
+
+export const subscribeToSettingsSaveState = (listener: () => void): (() => void) => {
+  _settingsSaveStateListeners.add(listener);
+  return () => {
+    _settingsSaveStateListeners.delete(listener);
+  };
+};
+
+const dispatchSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
+  if (_settingsSaveStateResetTimer) {
+    clearTimeout(_settingsSaveStateResetTimer);
+    _settingsSaveStateResetTimer = null;
+  }
+
+  // Quiet indicator: success is the normal case and renders nothing ('saved' → idle);
+  // only in-flight saves and failures surface in the UI.
+  const nextState: SettingsSaveState = state === 'saved' ? 'idle' : state;
+  if (nextState !== _settingsSaveState) {
+    _settingsSaveState = nextState;
+    _settingsSaveStateListeners.forEach((listener) => listener());
+  }
+
+  if (nextState === 'error') {
+    _settingsSaveStateResetTimer = setTimeout(() => dispatchSettingsSaveState('saved'), 6000);
+  }
+
+  // [fork-port] keep the fork's app-wide save-failure toast channel.
   if (state === 'error') {
     window.dispatchEvent(new CustomEvent<SettingsSaveFailure>('openchamber:settings-save-failed', {
       detail: { kind: 'unknown', message: 'Settings save failed' },
     }));
   }
+};
+
+// A runtime switch abandons whatever save indicator was in flight (upstream
+// parity). Installed lazily: at module import time `window` may not exist yet
+// (bun test installs happy-dom in beforeEach).
+let _saveStateRuntimeHookInstalled = false;
+const ensureSettingsSaveStateRuntimeHook = (): void => {
+  if (_saveStateRuntimeHookInstalled || typeof window === 'undefined') return;
+  _saveStateRuntimeHookInstalled = true;
+  subscribeRuntimeEndpointChanged((detail) => {
+    if (detail.runtimeKey !== detail.previousRuntimeKey) {
+      dispatchSettingsSaveState('saved');
+    }
+  });
+};
+
+/** Quiet save-state signal for settings widgets that manage their own saves
+ *  (e.g. Linear preferences): 'saved' is the normal case and reports nothing;
+ *  only in-flight saves and failures surface in the UI. */
+export const reportSettingsSaveState = (state: 'saving' | 'saved' | 'error'): void => {
+  ensureSettingsSaveStateRuntimeHook();
+  dispatchSettingsSaveState(state);
 };

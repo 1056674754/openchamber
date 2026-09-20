@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@opencode-ai/sdk/v2';
 import { buildLinkedIssue, buildLinkedIssueId, buildLinkedLinearIssue, canOpenLinearIssueInContextPanel, getLinkedIssues, withLinkedIssue, type LinkedIssue } from './linkedIssues';
 
-type LinkedGitHubIssue = Exclude<LinkedIssue, { kind: 'linear' }>;
+type LinkedGitHubIssue = Exclude<LinkedIssue, { kind: 'linear' } | { kind: 'guest' }>;
 
 const issue = (overrides: Partial<LinkedGitHubIssue> = {}): LinkedGitHubIssue => ({
   id: 'owner/repo#12',

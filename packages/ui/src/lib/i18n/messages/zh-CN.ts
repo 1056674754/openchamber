@@ -8,6 +8,7 @@ import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
 import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n["zh-CN"],
@@ -19,6 +20,7 @@ export const dict: Record<I18nKey, string> = {
   ...btwI18n['zh-CN'],
   ...chatsI18n['zh-CN'],
   ...routingI18n['zh-CN'],
+  ...pluginPanelI18n['zh-CN'],
   'planView.error.loadFailed': '无法加载此计划',
   'common.loading': '加载中...',
   'common.unavailable': '不可用',
@@ -3135,4 +3137,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingMany': '{count} 个待回答问题',
   'sessions.sidebar.session.status.questionPendingSingle': '1 个待回答问题',
 
+  'chat.toolPart.moreRows': '+{count} 行更多',
 };

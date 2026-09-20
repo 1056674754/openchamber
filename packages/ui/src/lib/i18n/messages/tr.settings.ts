@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Tümünü seç',
@@ -2174,4 +2176,6 @@ export const settingsDict = {
   "settings.openchamber.visual.field.sessionRecapAria": "Agent işini bitirdikten sonra özet oluşturur",
   "settings.openchamber.visual.field.sessionSuggestion": "Sonraki Kullanıcı Mesajı Önerisi Oluştur",
   "settings.openchamber.visual.field.sessionSuggestionAria": "Agent işini bitirdikten sonra sonraki kullanıcı mesajı için öneri oluşturur",
+  ...extensionsSettingsI18n.tr,
+  ...guestIntegrationsI18n.tr,
 } as const;

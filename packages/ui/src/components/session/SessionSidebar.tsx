@@ -949,7 +949,15 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
               project: queueEntry,
               worktrees,
             });
-            return next ?? state;
+            // [fork-port] topology phase feed for extension workspace reads:
+            // a published project has completed discovery.
+            const worktreeDiscoveryByProject = new Map(state.worktreeDiscoveryByProject);
+            worktreeDiscoveryByProject.set(queueEntry.normalizedPath, 'ready');
+            if (!next) {
+              if (worktreeDiscoveryByProject.size === state.worktreeDiscoveryByProject.size) return state;
+              return { ...state, worktreeDiscoveryByProject };
+            }
+            return { ...next, worktreeDiscoveryByProject };
           });
         },
         getRuntimeKey,

@@ -8,6 +8,7 @@ import { routingI18n } from './routing.i18n';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 export const dict = {
   ...linearIssuePickerI18n.en,
   ...linearIntegrationI18n.en,
@@ -18,6 +19,7 @@ export const dict = {
   ...btwI18n.en,
   ...chatsI18n.en,
   ...routingI18n.en,
+  ...pluginPanelI18n.en,
   'planView.error.loadFailed': 'Could not load this plan',
   'common.loading': 'Loading...',
   'common.unavailable': 'Unavailable',
@@ -3134,5 +3136,6 @@ export const dict = {
   'sessions.sidebar.session.status.questionPendingMany': '{count} pending questions',
   'sessions.sidebar.session.status.questionPendingSingle': '1 pending question',
 
+  'chat.toolPart.moreRows': '+{count} more rows',
 };
 export type I18nKey = keyof typeof dict;

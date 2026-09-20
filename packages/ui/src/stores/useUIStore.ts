@@ -10,6 +10,7 @@ import type { DesktopWindowControlsPosition, DesktopWindowControlsStyle } from '
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
+import { isContextPanelMode, type ContextPanelMode } from '@/lib/surfaces/modes';
 import {
   EMPTY_MODEL_PICKER_LAYOUT,
   areModelPickerLayoutsEqual,
@@ -25,7 +26,9 @@ import {
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 /** Diff navigation scope. Fork has no staged selector; `turn` is last-turn snapshot mode. */
 export type PendingDiffScope = 'working' | 'turn' | 'branch';
-export type ContextPanelMode = 'diff' | 'file' | 'context' | 'plan' | 'chat' | 'preview' | 'terminal' | 'browser' | 'git' | 'pr' | 'notes' | 'walkthrough' | 'linear';
+// [fork-port] ContextPanelMode moved to @/lib/surfaces/modes so plugin surfaces
+// (`plugin:<guestId>`) extend the built-in union; fork keeps its `preview` mode.
+export type { ContextPanelMode };
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
 export type ActivityRenderMode = 'collapsed' | 'summary';
@@ -198,23 +201,8 @@ export const setContextPanelSessionIdProvider = (provider: (() => string | null)
 const readContextPanelSessionId = (): string | null =>
   contextPanelSessionIdProvider ? contextPanelSessionIdProvider() : null;
 
-const CONTEXT_PANEL_MODES = new Set<ContextPanelMode>([
-  'diff',
-  'file',
-  'context',
-  'plan',
-  'chat',
-  'preview',
-  'terminal',
-  'browser',
-  'git',
-  'pr',
-  'notes',
-]);
-
-const isContextPanelMode = (value: unknown): value is ContextPanelMode => (
-  typeof value === 'string' && CONTEXT_PANEL_MODES.has(value as ContextPanelMode)
-);
+// [fork-port] Mode validation now lives in @/lib/surfaces/modes so persisted
+// tabs may also carry `plugin:<guestId>` modes alongside the built-ins.
 
 const clampContextPanelWidth = (width: number): number => {
   if (!Number.isFinite(width)) {
@@ -711,6 +699,8 @@ interface UIStore {
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
   worktreesPageProjectId: string | null;
+  /** Open full-page guest (extension) in the main content area; mutual-exclusive with the other main surfaces. */
+  openGuestPageId: string | null;
   isNewWorktreeDialogOpen: boolean;
   isSettingsDialogOpen: boolean;
   isModelSelectorOpen: boolean;
@@ -909,6 +899,7 @@ interface UIStore {
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setArchivePageOpen: (open: boolean) => void;
   setWorktreesPageProjectId: (projectId: string | null) => void;
+  setOpenGuestPage: (id: string | null) => void;
   closeMainSurfaces: () => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
   setSettingsDialogOpen: (open: boolean) => void;
@@ -1078,6 +1069,7 @@ export const useUIStore = create<UIStore>()(
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
         worktreesPageProjectId: null,
+        openGuestPageId: null,
         isNewWorktreeDialogOpen: false,
         isSettingsDialogOpen: false,
         isModelSelectorOpen: false,
@@ -1712,6 +1704,7 @@ export const useUIStore = create<UIStore>()(
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
             isMultiRunLauncherOpen: false,
+            openGuestPageId: null,
           });
         },
 
@@ -1821,6 +1814,7 @@ export const useUIStore = create<UIStore>()(
                 isArchivePageOpen: false,
                 worktreesPageProjectId: null,
                 isMultiRunLauncherOpen: false,
+                openGuestPageId: null,
               }
             : { isScheduledTasksDialogOpen: false });
         },
@@ -1832,6 +1826,7 @@ export const useUIStore = create<UIStore>()(
                 isScheduledTasksDialogOpen: false,
                 worktreesPageProjectId: null,
                 isMultiRunLauncherOpen: false,
+                openGuestPageId: null,
               }
             : { isArchivePageOpen: false });
         },
@@ -1843,8 +1838,21 @@ export const useUIStore = create<UIStore>()(
                 isScheduledTasksDialogOpen: false,
                 isArchivePageOpen: false,
                 isMultiRunLauncherOpen: false,
+                openGuestPageId: null,
               }
             : { worktreesPageProjectId: null });
+        },
+
+        setOpenGuestPage: (id) => {
+          set(id
+            ? {
+                openGuestPageId: id,
+                isScheduledTasksDialogOpen: false,
+                isArchivePageOpen: false,
+                worktreesPageProjectId: null,
+                isMultiRunLauncherOpen: false,
+              }
+            : { openGuestPageId: null });
         },
 
         closeMainSurfaces: () => {
@@ -1854,6 +1862,7 @@ export const useUIStore = create<UIStore>()(
             && !state.isArchivePageOpen
             && !state.worktreesPageProjectId
             && !state.isMultiRunLauncherOpen
+            && !state.openGuestPageId
           ) {
             return;
           }
@@ -1863,6 +1872,7 @@ export const useUIStore = create<UIStore>()(
             worktreesPageProjectId: null,
             isMultiRunLauncherOpen: false,
             multiRunLauncherPrefillPrompt: '',
+            openGuestPageId: null,
           });
         },
 
@@ -2403,6 +2413,7 @@ export const useUIStore = create<UIStore>()(
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
+            openGuestPageId: null,
           });
         },
 
@@ -2416,6 +2427,7 @@ export const useUIStore = create<UIStore>()(
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
+            openGuestPageId: null,
           });
         },
 

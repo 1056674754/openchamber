@@ -46,6 +46,8 @@ function getRuntimeFilesAPI(): FilesAPI | null {
 export interface OpenChamberConfig {
   projectPath?: string;
   'setup-worktree'?: string[];
+  /** [fork-port] upstream e0cb68fc6's `setupWorktreeWait`, flat-config spelling. */
+  'setup-worktree-wait'?: boolean;
   projectNotes?: string;
   projectTodos?: OpenChamberProjectTodoItem[];
   projectPlanFiles?: OpenChamberProjectPlanFileLink[];
@@ -793,6 +795,16 @@ export async function getWorktreeSetupCommands(project: ProjectRef): Promise<str
 export async function saveWorktreeSetupCommands(project: ProjectRef, commands: string[]): Promise<boolean> {
   const filtered = commands.filter((cmd) => cmd.trim().length > 0);
   return updateOpenChamberConfig(project, { 'setup-worktree': filtered });
+}
+
+/** Whether new worktrees for this project wait for their setup commands to finish before use. */
+export async function getWorktreeSetupWaitEnabled(project: ProjectRef): Promise<boolean> {
+  const config = await readOpenChamberConfig(project);
+  return config?.['setup-worktree-wait'] ?? false;
+}
+
+export async function saveWorktreeSetupWaitEnabled(project: ProjectRef, enabled: boolean): Promise<boolean> {
+  return updateOpenChamberConfig(project, { 'setup-worktree-wait': enabled });
 }
 
 // Upstream 82a0ee757: project starters come from the merged setup view

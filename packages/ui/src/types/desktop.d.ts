@@ -10,6 +10,8 @@ declare global {
     core?: {
       invoke?: OpenChamberDesktopInvoke;
     };
+    /** On-disk path of a File dropped from the OS onto the desktop window (upstream 5181bcd33). */
+    pathForFile?: (file: File) => string;
     /** Native theme file picker; exposed only to trusted local UI pages. */
     themeFiles?: {
       pick?: () => Promise<unknown>;

@@ -1,8 +1,11 @@
 import type { IconName } from '@/components/icon/icons';
 import type { I18nKey } from '@/lib/i18n';
-import type { ContextPanelMode } from '@/stores/useUIStore';
+import {
+  isPluginContextPanelMode,
+  type ContextPanelMode,
+} from '@/lib/surfaces/modes';
 
-export type ContextSurfaceId =
+export type BuiltInContextSurfaceId =
   | 'context'
   | 'git'
   | 'pr'
@@ -17,10 +20,16 @@ export type ContextSurfaceId =
   | 'chat'
   | 'linear';
 
+export type ContextSurfaceId = BuiltInContextSurfaceId | `plugin:${string}`;
+
 export type ContextSurfaceDescriptor = {
   id: ContextSurfaceId;
   mode: ContextPanelMode;
   icon: IconName;
+  /** Authenticated package SVG for a guest rail mark. Prefer over `icon` when set. */
+  iconSrc?: string;
+  /** Guest-provided name. When set, the rail prefers this over `labelKey`. */
+  label?: string;
   labelKey: I18nKey;
   descriptionKey: I18nKey;
   availability: 'always' | 'has-content';
@@ -138,31 +147,41 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
   },
 ];
 
-const surfaceById = new Map(CONTEXT_SURFACES.map((surface) => [surface.id, surface]));
-const surfaceIds: ReadonlySet<string> = new Set(CONTEXT_SURFACES.map((surface) => surface.id));
+const surfaceById = new Map<string, ContextSurfaceDescriptor>(CONTEXT_SURFACES.map((surface) => [surface.id, surface]));
 const widthFractionByMode = new Map(CONTEXT_SURFACES.map((surface) => [surface.mode, surface.defaultWidthFraction]));
 
-export const getContextSurfaceWidthFraction = (mode: ContextPanelMode): number => (
-  widthFractionByMode.get(mode) ?? 0.5
-);
+export const getContextSurfaceWidthFraction = (mode: ContextPanelMode): number => {
+  if (isPluginContextPanelMode(mode)) return 0.45;
+  return widthFractionByMode.get(mode) ?? 0.5;
+};
 
-const isContextSurfaceId = (value: unknown): value is ContextSurfaceId => (
-  typeof value === 'string' && surfaceIds.has(value)
-);
+const isKnownSurfaceId = (value: string, byId: ReadonlyMap<string, ContextSurfaceDescriptor>): boolean => {
+  return byId.has(value);
+};
 
-export const sortContextSurfaces = (railOrder: readonly string[]): ContextSurfaceDescriptor[] => {
+/**
+ * Applies a persisted user reorder on top of the default registry order:
+ * unknown ids are dropped, missing surfaces are appended in default order.
+ * `extras` are dynamic (guest) surfaces registered alongside the built-ins.
+ */
+export const sortContextSurfaces = (
+  railOrder: readonly string[],
+  extras: readonly ContextSurfaceDescriptor[] = [],
+): ContextSurfaceDescriptor[] => {
+  const all = extras.length === 0 ? CONTEXT_SURFACES : [...CONTEXT_SURFACES, ...extras];
+  const byId = new Map<string, ContextSurfaceDescriptor>(all.map((surface) => [surface.id, surface]));
   const ordered: ContextSurfaceDescriptor[] = [];
-  const seen = new Set<ContextSurfaceId>();
+  const seen = new Set<string>();
 
   for (const id of railOrder) {
-    if (!isContextSurfaceId(id) || seen.has(id)) continue;
-    const surface = surfaceById.get(id);
+    if (!isKnownSurfaceId(id, byId) || seen.has(id)) continue;
+    const surface = byId.get(id);
     if (!surface) continue;
     seen.add(id);
     ordered.push(surface);
   }
 
-  for (const surface of CONTEXT_SURFACES) {
+  for (const surface of all) {
     if (!seen.has(surface.id)) ordered.push(surface);
   }
 

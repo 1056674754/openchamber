@@ -10,10 +10,15 @@ interface UseProviderLogoReturn {
     hasLogo: boolean;
 }
 
-const localLogoModules = import.meta.glob<string>('../assets/provider-logos/*.svg', {
-    eager: true,
-    import: 'default',
-});
+// Vite expands import.meta.glob at build time. Guard for non-vite contexts
+// (bun test) where the glob function does not exist, so importing this hook
+// never crashes the module graph.
+const localLogoModules: Record<string, string> = typeof import.meta.glob === 'function'
+    ? import.meta.glob<string>('../assets/provider-logos/*.svg', {
+        eager: true,
+        import: 'default',
+    })
+    : {};
 
 const LOCAL_PROVIDER_LOGO_MAP = new Map<string, string>();
 

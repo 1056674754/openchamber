@@ -1,3 +1,5 @@
+import { extensionsSettingsI18n } from './extensions.settings.i18n';
+import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
   'settings.themeImport.selectAll': 'Seleccionar todo',
@@ -2188,4 +2190,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.sessionRecapAria': 'Generate a recap after the agent finishes',
   'settings.openchamber.visual.field.sessionSuggestion': 'Generate Next User Message Suggestion',
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
+  ...extensionsSettingsI18n.es,
+  ...guestIntegrationsI18n.es,
 } as const;

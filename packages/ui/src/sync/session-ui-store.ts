@@ -380,6 +380,8 @@ export type SessionUIState = {
   worktreeMetadata: Map<string, WorktreeMetadata>
   availableWorktrees: WorktreeMetadata[]
   availableWorktreesByProject: Map<string, WorktreeMetadata[]>
+  /** Per-project topology discovery phase ('loading' | 'ready' | 'error') for extension workspace reads. */
+  worktreeDiscoveryByProject: ReadonlyMap<string, 'loading' | 'ready' | 'error'>
   webUICreatedSessions: Set<string>
   // Sessions mid-delete: stay in store with disabled row + red wave text
   deletingSessionIds: Set<string>
@@ -998,6 +1000,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
   worktreeMetadata: new Map(),
   availableWorktrees: [],
   availableWorktreesByProject: new Map(),
+  worktreeDiscoveryByProject: new Map(),
     webUICreatedSessions: new Set(),
     deletingSessionIds: new Set(),
   sessionAbortFlags: new Map(),

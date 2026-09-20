@@ -8,6 +8,7 @@ import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
 import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ko,
@@ -19,6 +20,7 @@ export const dict: Record<I18nKey, string> = {
   ...btwI18n.ko,
   ...chatsI18n.ko,
   ...routingI18n.ko,
+  ...pluginPanelI18n.ko,
   'planView.error.loadFailed': '이 계획을 불러오지 못했습니다',
   'common.loading': '로딩 중...',
   'common.unavailable': '사용할 수 없음',
@@ -3138,4 +3140,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingMany': '대기 중인 질문 {count}개',
   'sessions.sidebar.session.status.questionPendingSingle': '대기 중인 질문 1개',
 
+  'chat.toolPart.moreRows': '+행 {count}개 더 보기',
 };

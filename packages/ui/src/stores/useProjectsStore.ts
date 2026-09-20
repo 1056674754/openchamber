@@ -50,6 +50,9 @@ interface VSCodeWorkspaceFolderConfig {
 }
 
 interface ProjectsStore {
+  /** True once a server-backed snapshot has been applied at least once (upstream e0cb68fc6). */
+  hasServerSnapshot: boolean;
+  serverSnapshotFailed: boolean;
   projects: ProjectEntry[];
   activeProjectId: string | null;
   hasLoadedSharedSettings: boolean;
@@ -436,6 +439,8 @@ if (isVSCodeProjectsRuntime) {
 export const useProjectsStore = create<ProjectsStore>()(
   devtools((set, get) => ({
     projects: effectiveInitialProjects,
+    hasServerSnapshot: false,
+    serverSnapshotFailed: false,
     activeProjectId: initialActiveProjectId,
     hasLoadedSharedSettings: false,
 
@@ -928,6 +933,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         : null;
 
       const current = get();
+      if (!current.hasServerSnapshot || current.serverSnapshotFailed) set({ hasServerSnapshot: true, serverSnapshotFailed: false });
       const sessionState = useSessionUIStore.getState();
       const preserveActiveProject = Boolean(sessionState.currentSessionId || sessionState.newSessionDraft.open);
       const nextActive = preserveActiveProject && current.activeProjectId && incomingProjects.some((project) => project.id === current.activeProjectId)
@@ -1042,5 +1048,9 @@ if (typeof window !== 'undefined') {
     if (detail && typeof detail === 'object') {
       useProjectsStore.getState().synchronizeFromSettings(detail);
     }
+  });
+
+  window.addEventListener('openchamber:settings-sync-failed', () => {
+    useProjectsStore.setState({ serverSnapshotFailed: true });
   });
 }

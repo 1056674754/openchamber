@@ -613,6 +613,24 @@ export const isDesktopShell = (): boolean => {
 };
 
 export const canRequestNativeDirectoryAccess = (): boolean => canUseDesktopNativeApi();
+/**
+ * On-disk path of a File dropped from the OS onto the desktop app.
+ * Null outside the desktop local origin (browser drops carry no usable path).
+ * (upstream 5181bcd33)
+ */
+const droppedFilePathSchema = z.string().min(1);
+
+export const pathForDroppedFile = (file: File): string | null => {
+  if (!canRequestNativeDirectoryAccess()) return null;
+  try {
+    const parsed = droppedFilePathSchema.safeParse(getDesktopBridge()?.pathForFile?.(file));
+    return parsed.success ? parsed.data : null;
+  } catch (error) {
+    console.warn('Failed to resolve dropped file path', error);
+    return null;
+  }
+};
+
 
 export const startDesktopWindowDrag = async (): Promise<boolean> => {
   if (!isDesktopShell() || !hasDesktopInvoke()) {

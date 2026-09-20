@@ -8,6 +8,7 @@ import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
 import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.de,
@@ -19,6 +20,7 @@ export const dict: Record<I18nKey, string> = {
   ...btwI18n.de,
   ...chatsI18n.de,
   ...routingI18n.de,
+  ...pluginPanelI18n.de,
   'planView.error.loadFailed': 'Plan konnte nicht geladen werden',
   'common.loading': 'Wird geladen...',
   'common.unavailable': 'Nicht verfügbar',
@@ -3132,4 +3134,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingMany': '{count} ausstehende Fragen',
   'sessions.sidebar.session.status.questionPendingSingle': '1 ausstehende Frage',
 
+  'chat.toolPart.moreRows': '+{count} weitere Zeilen',
 };

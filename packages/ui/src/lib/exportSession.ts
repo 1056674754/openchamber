@@ -3,7 +3,7 @@ import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeRuntime, openDesktopPath, revealDesktopPath, saveDesktopMarkdownFile } from '@/lib/desktop';
 import { getRevealLabelKey } from '@/lib/utils';
 
-type SessionMessageRecord = { info: Message; parts: Part[] };
+export type SessionMessageRecord = { info: Message; parts: Part[] };
 
 export type ChildSessionExport = {
   title: string;
@@ -64,9 +64,18 @@ function extractTextFromParts(parts: Part[]): string {
     .join('');
 }
 
+/**
+ * A message's text the way the Markdown export renders it. Guest message and
+ * session items carry the same text, so an extension sees what the export
+ * file would. (upstream 5181bcd33)
+ */
+export function formatMessageRecordText(record: SessionMessageRecord): string {
+  return extractTextFromParts(record.parts).trim();
+}
+
 function formatMessageAsMarkdown(record: SessionMessageRecord): string {
   const role = formatMessageHeader(record);
-  const text = extractTextFromParts(record.parts).trim();
+  const text = formatMessageRecordText(record);
 
   if (!text) return '';
   return `${role}\n\n${text}`;

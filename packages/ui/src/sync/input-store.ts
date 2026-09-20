@@ -8,6 +8,7 @@
  */
 
 import { create } from "zustand"
+import type { AttachIssueRequest } from "@openchamber/sdk"
 import type { AttachedFile } from "@/stores/types/sessionTypes"
 import { prepareAttachmentFiles } from "./attachment-files"
 
@@ -141,6 +142,8 @@ export type InputState = {
   /** Session/draft key currently mirrored into attachedFiles. */
   attachmentSessionKey: string | null
   activeEditorFile: VSCodeActiveEditorFile | null
+  /** Guest rail/dialog attach. ChatInput consumes this into the composer chip. */
+  pendingGuestIssue: AttachIssueRequest | null
 
   setPendingInputText: (text: string | null, mode?: "replace" | "append" | "append-inline") => void
   consumePendingInputText: () => { text: string; mode: "replace" | "append" | "append-inline" } | null
@@ -157,6 +160,8 @@ export type InputState = {
   addVSCodeFileAttachment: (path: string, name: string, fileSize: number | null) => void
   addVSCodeSelectionAttachment: (path: string, label: string, startLine: number, endLine: number) => void
   setActiveEditorFile: (file: VSCodeActiveEditorFile | null) => void
+  setPendingGuestIssue: (issue: AttachIssueRequest | null) => void
+  consumePendingGuestIssue: () => AttachIssueRequest | null
   addRestoredAttachment: (file: { url: string; mimeType: string; filename: string }) => void
 }
 
@@ -169,6 +174,7 @@ export const useInputStore = create<InputState>()((set, get) => ({
   attachedBySession: {},
   attachmentSessionKey: null,
   activeEditorFile: null,
+  pendingGuestIssue: null,
 
   setPendingInputText: (text, mode = "replace") =>
     set({ pendingInputText: text, pendingInputMode: mode }),
@@ -181,6 +187,15 @@ export const useInputStore = create<InputState>()((set, get) => ({
   },
 
   requestPresetSubmit: (text, type) => set({ pendingPresetSubmit: { text, type } }),
+
+  setPendingGuestIssue: (issue) => set({ pendingGuestIssue: issue }),
+
+  consumePendingGuestIssue: () => {
+    const { pendingGuestIssue } = get()
+    if (pendingGuestIssue === null) return null
+    set({ pendingGuestIssue: null })
+    return pendingGuestIssue
+  },
 
   consumePendingPresetSubmit: () => {
     const { pendingPresetSubmit } = get()

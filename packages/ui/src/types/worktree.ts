@@ -41,7 +41,7 @@ export interface WorktreeMetadata {
   /** Canonical root path for the worktree (same as path for secondary worktrees). */
   worktreeRoot?: string;
 
-  /** Operational status of this worktree. */
+  /** Operational status of this worktree. [fork-port] upstream's 'pending' discovery phase is not modeled. */
   worktreeStatus?: 'ready' | 'missing' | 'invalid' | 'not-a-repo';
 
   /** Git HEAD state classification. */

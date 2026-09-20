@@ -120,6 +120,11 @@ export function getSyncSessions(directory?: string) {
 
 /** Read sessions across all initialized child stores */
 export function getAllSyncSessions() {
+  return Array.from(getAllSyncSessionMap().values())
+}
+
+/** Read the deduped cross-directory session index (sessionId → session), covering every connected server. */
+export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][number]> {
   const deduped = new Map<string, State["session"][number]>()
 
   if (_childStores) {
@@ -140,7 +145,7 @@ export function getAllSyncSessions() {
     }
   }
 
-  return Array.from(deduped.values())
+  return deduped
 }
 
 /**

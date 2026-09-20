@@ -8,6 +8,7 @@ import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
 import { routingI18n } from './routing.i18n';
+import { pluginPanelI18n } from './plugin-panel.i18n';
 
 export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.uk,
@@ -19,6 +20,7 @@ export const dict: Record<I18nKey, string> = {
   ...btwI18n.uk,
   ...chatsI18n.uk,
   ...routingI18n.uk,
+  ...pluginPanelI18n.uk,
   "planView.error.loadFailed": "Не вдалося завантажити цей план",
   "common.loading": "Завантаження...",
   "common.unavailable": "Недоступно",
@@ -3138,4 +3140,5 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.questionPendingMany': 'Кількість запитань, що очікують відповіді: {count}',
   'sessions.sidebar.session.status.questionPendingSingle': '1 запитання очікує відповіді',
 
+  'chat.toolPart.moreRows': '+ ще рядків: {count}',
 };
