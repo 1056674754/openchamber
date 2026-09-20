@@ -13,6 +13,7 @@ const PACKAGES = [
   'packages/electron/package.json',
   'packages/vscode/package.json',
   'packages/mobile/package.json',
+  'packages/sdk/package.json',
 ];
 
 const newVersion = process.argv[2];

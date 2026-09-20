@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/mobile",
-  "version": "1.22.0-sscity",
+  "version": "1.24.2-sscity",
   "private": true,
   "type": "module",
   "scripts": {
