@@ -62,6 +62,10 @@ workspaces/
 *.pid
 .worktrees/
 
+# Generated built-in guest extensions (scripts/build-builtin-extensions.mjs)
+packages/web/server/built-in-extensions/
+packages/web/server/built-in-extensions.previous-*/
+
 # Linux build artifacts (local builds, not tracked)
 openchamber-linux
 /artifacts/
