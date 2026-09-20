@@ -3580,3 +3580,9 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 **验证**：signature token 30/30 存活（temp-session-tracker 为移植前已失，文档过时项）；全量 type-check 0 错；web vitest 201 文件/1735 测试；build 全绿。**待人工回归**：多服务器切换、remote session、queue mode（Ctrl+Enter）、全局置顶拖拽、移动端 shared UI、terminal、git hunk 操作、routing 页、VSIX 重装实测。
 
 **已知 flake**：session-assist/runtime.test.js 与 git/service.test.js 满载偶发超时（隔离跑稳过）；ui 全量套件约 290 失败为基线并行/环境问题（与移植文件零交集，多 agent 基线对照复核过）。
+
+## v1.24.2 扩展/SDK 轮：guests + @openchamber/sdk（2026-09-20）
+
+主轮延后的扩展系统本轮回补：16 commits（E1 server guests 40 文件 +7933 行/23 端点、E2 sdk 100 文件 + extensions registry + build 脚本 + Docker、E3 ui 集成 154 文件 +13417：Extensions 页/GuestHosts 家族/guest 渲染/guestCommands 接 ChatInput（B5 后结构）/plugins 对齐/i18n 3 模块 × 11 locale）。**SDK 升级**：`@opencode-ai/sdk` ^1.18.4 → 精确 1.18.31（对照实验排除回归，D13 落地）。计划与契约：[`docs/COMMUNITY_1_24_EXTENSIONS_ROUND.md`](COMMUNITY_1_24_EXTENSIONS_ROUND.md)。
+
+验证：三绿（type-check 0 错 / web vitest / build）；E1 guests 149 测试、E3 触及域 268 测试全绿。**有意分叉**：ssh-install.test 满载加固 timeout（E1）、bun-test-shim 保留 mock.restore（fork routes.test.js 使用）。待人工回归：Extensions 设置页、guest 安装/审批流、guest 面板 iframe、集成的 OAuth 流。
