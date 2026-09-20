@@ -9,6 +9,8 @@ interface SettingsPageLayoutProps {
   title?: React.ReactNode;
   /** Optional supporting description under the page title. */
   description?: React.ReactNode;
+  /** Content rendered beside the title (e.g. a scope badge). (upstream parity) */
+  titleAccessory?: React.ReactNode;
   /** Accepted for upstream parity: save failures already surface app-wide
    *  through the settings-save-failed toast (`useSettingsSaveFailureToast`). */
   showSaveStatus?: boolean;
@@ -38,6 +40,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   outerClassName,
   title,
   description,
+  titleAccessory,
 }) => {
   return (
     <ScrollableOverlay
@@ -51,9 +54,12 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
         )}
       >
         {title != null || description != null ? (
-          <div className="space-y-1">
-            {title != null ? <h1 className="typography-ui-header font-semibold text-foreground">{title}</h1> : null}
-            {description != null ? <p className="typography-meta text-muted-foreground">{description}</p> : null}
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1 min-w-0">
+              {title != null ? <h1 className="typography-ui-header font-semibold text-foreground">{title}</h1> : null}
+              {description != null ? <p className="typography-meta text-muted-foreground">{description}</p> : null}
+            </div>
+            {titleAccessory != null ? <span className="shrink-0">{titleAccessory}</span> : null}
           </div>
         ) : null}
         {children}

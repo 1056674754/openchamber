@@ -22,6 +22,7 @@ import {
   type PluginEntry,
   type PluginFile,
 } from '@/stores/usePluginsStore';
+import { SETTINGS_PANEL_TITLE_CLASS } from '@/components/sections/shared/SettingsSection';
 
 interface PluginsSidebarProps {
   onItemSelect?: () => void;
@@ -67,6 +68,12 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
   React.useEffect(() => {
     void loadPlugins();
   }, [loadPlugins]);
+
+  React.useEffect(() => {
+    const handleOpenAdd = () => setIsAddOpen(true);
+    window.addEventListener('openchamber:settings-open-plugin-add', handleOpenAdd);
+    return () => window.removeEventListener('openchamber:settings-open-plugin-add', handleOpenAdd);
+  }, []);
 
   const updateCounts = React.useMemo(() => {
     const counts = { userEntries: 0, projectEntries: 0 };
@@ -271,7 +278,7 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
         header={
           <div className="border-b px-3 pt-4 pb-3">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold text-foreground">
+              <h2 className={SETTINGS_PANEL_TITLE_CLASS}>
                 {t('settings.plugins.sidebar.title')}
               </h2>
             </div>
@@ -282,6 +289,7 @@ export const PluginsSidebar: React.FC<PluginsSidebarProps> = ({
               <div className="flex items-center gap-1">
                 <Button
                   type="button"
+                  data-settings-item="plugins.create"
                   variant="ghost"
                   size="icon"
                   className="h-7 w-7 -my-1 text-muted-foreground"
