@@ -1,4 +1,5 @@
 import { substituteCommandVariables } from '@/lib/openchamberConfig';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { toast } from '@/components/ui';
 import { formatMessage, useI18nStore } from '@/lib/i18n/store';
 import type { WorktreeMetadata } from '@/types/worktree';
@@ -457,14 +458,37 @@ export type CreateWorktreeArgs = {
 };
 
 export async function createWorktree(project: ProjectRef, args: CreateWorktreeArgs): Promise<WorktreeMetadata> {
+  // A background extension launch must not keep creating a worktree against a
+  // server that changed mid-flight. (upstream e0cb68fc6)
+  const runtime = getRuntimeKey();
+  let cancelled = false;
+  const unsubscribe = subscribeRuntimeEndpointChanged(() => { cancelled = true; });
+  const assertCurrent = () => { if (cancelled || getRuntimeKey() !== runtime) throw new Error('Server changed during worktree creation'); };
+  try {
+    assertCurrent();
+    const created = await createWorktreeOnCurrentRuntime(project, args, assertCurrent);
+    assertCurrent();
+    return created;
+  } finally {
+    unsubscribe();
+  }
+}
+
+async function createWorktreeOnCurrentRuntime(
+  project: ProjectRef,
+  args: CreateWorktreeArgs,
+  assertCurrent: () => void,
+): Promise<WorktreeMetadata> {
   const projectDirectory = normalizePath(project.path);
   const baseUrl = getProjectBaseUrl(project);
   const metadataProjectDirectory = await resolvePrimaryWorktreeDirectory(projectDirectory, baseUrl).catch(() => projectDirectory);
+  assertCurrent();
   const payload = toCreatePayload(args, projectDirectory);
 
   const created = baseUrl
     ? await gitHttp.createGitWorktree(projectDirectory, payload, baseUrl)
     : await git.worktree.create(projectDirectory, payload);
+  assertCurrent();
   if (created?.sourceFetchFailed) {
     toast.warning(
       formatMessage(useI18nStore.getState().dictionary, 'session.newWorktree.toast.fetchSourceFailed'),
