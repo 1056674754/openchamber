@@ -6,7 +6,8 @@
   "type": "module",
   "packageManager": "bun@1.3.5",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/sdk/examples/*"
   ],
   "engines": {
     "node": ">=20.0.0"
