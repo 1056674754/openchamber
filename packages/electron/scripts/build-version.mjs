@@ -1,8 +1,8 @@
-const BUILD_VERSION_PREFIX = '1.22.0-sscity';
+const SSITY_SUFFIX = '-sscity';
 
 export const createBuildVersion = (sourceVersion, builtAt = new Date(), timeZone = 'Asia/Shanghai') => {
-  if (sourceVersion !== BUILD_VERSION_PREFIX) {
-    throw new Error(`OpenChamber build version must start with ${BUILD_VERSION_PREFIX}`);
+  if (typeof sourceVersion !== 'string' || !sourceVersion.endsWith(SSITY_SUFFIX)) {
+    throw new Error(`OpenChamber build version must end with ${SSITY_SUFFIX}: got ${sourceVersion}`);
   }
   if (Number.isNaN(builtAt.getTime())) {
     throw new Error('OpenChamber build timestamp must be a valid Date');
@@ -25,5 +25,5 @@ export const createBuildVersion = (sourceVersion, builtAt = new Date(), timeZone
   // Use `YYYYMMDD-HHMMSS` as one prerelease identifier. A dotted time segment
   // like `.012323` is invalid semver (numeric identifiers cannot have leading
   // zeros), which crashes electron-updater for builds between 00:00 and 09:59.
-  return `${BUILD_VERSION_PREFIX}.${date}-${time}`;
+  return `${sourceVersion}.${date}-${time}`;
 };
