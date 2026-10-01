@@ -2650,7 +2650,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 providers={providers as ModelPickerProvider[]}
                                 favoriteModels={isRemoteInstance ? [] : favoriteModelsList}
                                 recentModels={isRemoteInstance ? [] : recentModelsList}
-                                modelsMetadata={useConfigStore.getState().modelsMetadata}
                                 searchQuery={desktopModelQuery}
                                 onSearchQueryChange={setDesktopModelQuery}
                                 onSelect={handleSharedModelSelect}

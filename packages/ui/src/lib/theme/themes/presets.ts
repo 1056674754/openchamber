@@ -12,8 +12,8 @@ import carbonfox_dark_Raw from './carbonfox-dark.json';
 import carbonfox_light_Raw from './carbonfox-light.json';
 import catppuccin_dark_Raw from './catppuccin-dark.json';
 import catppuccin_light_Raw from './catppuccin-light.json';
-// import cursor_dark_Raw from './cursor-dark.json';
-// import cursor_light_Raw from './cursor-light.json';
+import cursor_dark_Raw from './cursor-dark.json';
+import cursor_light_Raw from './cursor-light.json';
 import dracula_dark_Raw from './dracula-dark.json';
 import dracula_light_Raw from './dracula-light.json';
 // import github_dark_Raw from './github-dark.json';
@@ -32,6 +32,8 @@ import nightowl_dark_Raw from './nightowl-dark.json';
 import nightowl_light_Raw from './nightowl-light.json';
 import nord_dark_Raw from './nord-dark.json';
 import nord_light_Raw from './nord-light.json';
+import osaka_jade_refined_dark_Raw from './osaka-jade-refined-dark.json';
+import osaka_jade_refined_light_Raw from './osaka-jade-refined-light.json';
 // import oc_2_dark_Raw from './oc-2-dark.json';
 // import oc_2_light_Raw from './oc-2-light.json';
 import openchamber_dark_Raw from './fields-of-the-shire-dark.json';
@@ -74,8 +76,8 @@ export const presetThemes: Theme[] = [
   carbonfox_light_Raw,
   catppuccin_dark_Raw,
   catppuccin_light_Raw,
-  // cursor_dark_Raw,
-  // cursor_light_Raw,
+  cursor_dark_Raw,
+  cursor_light_Raw,
   dracula_dark_Raw,
   dracula_light_Raw,
   // github_dark_Raw,
@@ -94,6 +96,8 @@ export const presetThemes: Theme[] = [
   nightowl_light_Raw,
   nord_dark_Raw,
   nord_light_Raw,
+  osaka_jade_refined_dark_Raw,
+  osaka_jade_refined_light_Raw,
   // oc_2_dark_Raw,
   // oc_2_light_Raw,
   onedarkpro_dark_Raw,

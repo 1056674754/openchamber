@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { sortProvidersByOrder } from '@/lib/modelPickerLayout';
 import { cn } from '@/lib/utils';
+import { useConfigStore } from '@/stores/useConfigStore';
 import type { ModelMetadata } from '@/types';
 
 export type ProviderModel = Record<string, unknown> & { id?: string; name?: string };
@@ -318,7 +319,6 @@ interface ModelPickerListProps {
   providers: ModelPickerProvider[];
   favoriteModels: ModelPickerFavoriteEntry[];
   recentModels: ModelPickerFavoriteEntry[];
-  modelsMetadata: Map<string, ModelMetadata>;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
   onSelect: (entry: ModelPickerEntry) => void;
@@ -383,7 +383,6 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   providers,
   favoriteModels,
   recentModels,
-  modelsMetadata,
   searchQuery,
   onSearchQueryChange,
   onSelect,
@@ -423,6 +422,12 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   renderVersion,
   tooltipsEnabled = true,
 }) => {
+  // getModelMetadata falls back to the provider's own model record for models
+  // models.dev does not list. Subscribe to both sources it reads so rows
+  // re-render when either arrives.
+  const getModelMetadata = useConfigStore((state) => state.getModelMetadata);
+  useConfigStore((state) => state.modelsMetadata);
+  useConfigStore((state) => state.providers);
   const selectionStoreRef = React.useRef<IndexSelectionStore | null>(null);
   if (!selectionStoreRef.current) selectionStoreRef.current = createIndexSelectionStore();
   const selectionStore = selectionStoreRef.current;
@@ -579,7 +584,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   let currentFlatIndex = 0;
 
   const renderRow = (entry: ModelPickerEntry, keyPrefix: string, showProviderLogo: boolean, rowIndex: number, dragHandleProps?: SortableFavoriteHandleProps | null) => {
-    const metadata = mergeModelMetadataWithLiveModel(entry.providerID, entry.model, modelsMetadata.get(`${entry.providerID}/${entry.modelID}`));
+    const metadata = mergeModelMetadataWithLiveModel(entry.providerID, entry.model, getModelMetadata(entry.providerID, entry.modelID));
     const contextTokens = formatModelContextTokens(metadata?.limit?.context);
     const count = selectionCount?.(entry) ?? 0;
     const isSelected = selectedModel?.providerID === entry.providerID && selectedModel.modelID === entry.modelID;

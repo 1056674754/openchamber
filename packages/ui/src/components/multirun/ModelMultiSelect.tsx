@@ -111,7 +111,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
 }) => {
   const { t } = useI18n();
   const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
-  const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
   const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
   const isFavoriteModel = useUIStore((state) => state.isFavoriteModel);
   const { favoriteModelsList, recentModelsList, hiddenModels } = useModelLists();
@@ -276,7 +275,6 @@ export const ModelMultiSelect: React.FC<ModelMultiSelectProps> = ({
                 providers={providers}
                 favoriteModels={favoriteModelsList}
                 recentModels={recentModelsList}
-                modelsMetadata={modelsMetadata}
                 hiddenModels={hiddenModels}
                 searchQuery={searchQuery}
                 onSearchQueryChange={setSearchQuery}

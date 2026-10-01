@@ -59,7 +59,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     const isAutoSelected = isAutoModel(providerId, modelId);
     const { isReady, isUnavailable } = useOpenCodeReadiness();
     const providers = useConfigStore((state) => state.providers) as ModelPickerProvider[];
-    const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
     const isMobile = useUIStore((state) => state.isMobile);
     const hiddenModels = useUIStore((state) => state.hiddenModels);
     const toggleFavoriteModel = useUIStore((state) => state.toggleFavoriteModel);
@@ -128,7 +127,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
             providers={providers}
             favoriteModels={favoriteModelsList}
             recentModels={recentModelsList}
-            modelsMetadata={modelsMetadata}
             searchQuery={searchQuery}
             onSearchQueryChange={setSearchQuery}
             onSelect={handleSelect}
