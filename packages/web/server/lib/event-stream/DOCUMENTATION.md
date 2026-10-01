@@ -9,6 +9,7 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `packages/web/server/lib/event-stream/global-ws-bridge.js`: browser-facing global WS bridge that subscribes clients to the shared global hub.
 - `packages/web/server/lib/event-stream/directory-ws-bridge.js`: browser-facing per-directory WS bridge that owns one scoped upstream reader per connection.
 - `packages/web/server/lib/event-stream/protocol.js`: path constants, SSE envelope parsing, and WebSocket frame serialization helpers.
+- `packages/web/server/lib/event-stream/translate-v2.js`: pure v2-wire → server-v1-vocabulary translator (spine OC2-S2, upstream `654705f7d`); consumed by the global hub's translated intake.
 - `packages/web/server/lib/event-stream/upstream-reader.js`: reusable upstream SSE reader with event-id tracking, stall recovery, and reconnect handling.
 - `packages/web/server/lib/event-stream/runtime.js`: thin WebSocket server runtime for upgrade handling and path dispatch to the global/directory bridges.
 - `packages/web/server/lib/remote-instances/global-event-fanout.js`: optional remote-instance fan-in owner that keeps one upstream global event stream per healthy remote while global browser WS clients are connected.
@@ -22,12 +23,13 @@ This module contains the OpenChamber message-stream WebSocket protocol and runti
 - `MESSAGE_STREAM_GLOBAL_WS_PATH`: `/api/global/event/ws`
 - `MESSAGE_STREAM_DIRECTORY_WS_PATH`: `/api/event/ws`
 - `MESSAGE_STREAM_WS_HEARTBEAT_INTERVAL_MS`: heartbeat interval for browser-facing WS connections.
-- `parseSseEventEnvelope(block)`: parses an SSE block into `{ eventId, directory, payload }`.
+- `parseSseEventEnvelope(block)`: parses an SSE block into `{ eventId, directory, payload }`. Dual-protocol: v1 envelopes (`id:` SSE lines, wrapper/`properties.directory`) parse exactly as before; v2 envelopes (no `id:` line, `payload.id`, `payload.location.directory`) are read through fallbacks that are no-ops on the v1 wire.
+- `translateWireEvent(payload)` / `forwardTranslatedWireEvent(payload, handle)` / `wireEventDirectory(payload)`: translate one OpenCode v2 wire event into zero or more v1-vocabulary events for the server's own consumers.
 - `sendMessageStreamWsFrame(socket, payload)`: serializes and sends a JSON WS frame.
 - `sendMessageStreamWsEvent(socket, payload, options)`: sends an event frame with optional `eventId`, `directory`, and `serverId`.
 
 ### Runtime helpers
-- `createGlobalMessageStreamHub(...)`: creates a shared `/global/event` upstream SSE hub with event/status subscribers and bounded event-id replay.
+- `createGlobalMessageStreamHub(...)`: creates a shared `/global/event` upstream SSE hub with event/status subscribers and bounded event-id replay. Dual-track intake (spine OC2-S2): `subscribeEvent` keeps delivering raw wire payloads (browser WS bridges); `subscribeTranslatedEvent` delivers the v1 vocabulary — the very same event objects on v1 mode, `translateWireEvent` output on v2 mode. The upstream path is `/global/event` on v1 and `/api/event` on v2; the mode comes from `resolveProtocolMode('default')` (injectable via `resolveUpstreamProtocolMode`). Translated events never enter the replay buffer.
 - `createGlobalUiEventBroadcaster({ sseClients, wsClients, writeSseEvent })`: returns a broadcaster that fans out the same synthetic UI event to SSE and WS clients.
 - `createMessageStreamWsRuntime(...)`: mounts the message-stream WS server, upgrade handler, and SSE-to-WS bridge onto the web HTTP server.
 - A global Electron client may add `browser=1`; the runtime records this ephemeral capability on that socket for Browser-control dispatch. Directory sockets and ordinary browser clients never inherit it.

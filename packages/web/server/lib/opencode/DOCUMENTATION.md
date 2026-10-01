@@ -7,6 +7,9 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/opencode/index.js`: public entrypoint (currently baseline placeholder).
 - `packages/web/server/lib/opencode/auth.js`: provider authentication file operations.
 - `packages/web/server/lib/opencode/auth-state-runtime.js`: managed OpenCode server auth password/header runtime.
+- `packages/web/server/lib/opencode/credential-db.js`: read-only view of the OpenCode 2.x SQLite credential table, projected into the legacy `auth.json` entry shape (v2 track only; spine OC2-S2).
+- `packages/web/server/lib/opencode/managed-config-file.js`: v2-track managed config file runtime (`opencode.managed.json`) whose plugin list the running OpenCode 2 hot-reloads; lifecycle wiring is OC2-S3/S8.
+- `packages/web/server/lib/opencode/managed-plugin-config.js`: v2-track `plugins` merge helper (directory-form plugin entries, folds the legacy `plugin` key).
 - `packages/web/server/lib/opencode/cli-options.js`: CLI/environment option parsing for server startup arguments.
 - `packages/web/server/lib/opencode/cli-entry-runtime.js`: CLI entrypoint runtime that detects direct execution, parses CLI options, and starts server bootstrap.
 - `packages/web/server/lib/opencode/routes.js`: OpenCode/provider settings and auth-related route registration.
@@ -91,7 +94,7 @@ This module provides OpenCode server integration utilities for the web server ru
 - `packages/web/server/lib/ui-auth/ui-passkeys.js`: UI passkey storage and WebAuthn registration/authentication helpers (outside OpenCode module).
 
 ## Public exports (auth.js)
-- `readAuthFile()`: Reads and parses `~/.local/share/opencode/auth.json`.
+- `readAuthFile()`: Reads provider credentials. v1 track (default): parses `~/.local/share/opencode/auth.json`. v2 track (`protocolMode: 'v2'`, test seam `options.protocolMode`): answers from the OpenCode 2.x SQLite database (`credential-db.js`) authoritatively and falls back to the file only when the database cannot be read.
 - `writeAuthFile(auth)`: Writes auth file with automatic backup.
 - `removeProviderAuth(providerId)`: Removes a provider's auth entry.
 - `getProviderAuth(providerId)`: Returns auth for a specific provider or null.

@@ -45,6 +45,43 @@ describe('event stream protocol helpers', () => {
     });
   });
 
+  it('reads the event id and directory out of a v2 payload without id lines', () => {
+    // OpenCode 2.x sends no `id:` line: the id is `payload.id` and the
+    // directory is `payload.location.directory` (spine OC2-S2).
+    const envelope = parseSseEventEnvelope(
+      'data: {"id":"evt_1","created":1000,"type":"session.renamed","location":{"directory":"/tmp/project"},"data":{"sessionID":"s1"}}\n',
+    );
+
+    expect(envelope.eventId).toBe('evt_1');
+    expect(envelope.directory).toBe('/tmp/project');
+    expect(envelope.payload.type).toBe('session.renamed');
+  });
+
+  it('reads a v2 payload id out of a wrapped frame and keeps the wrapper directory first', () => {
+    const envelope = parseSseEventEnvelope(
+      'event: message\n' +
+      'data: {"directory":"/tmp/project","payload":{"id":"evt_9","type":"session.updated","location":{"directory":"/other"}}}\n',
+    );
+
+    expect(envelope.eventId).toBe('evt_9');
+    expect(envelope.directory).toBe('/tmp/project');
+    expect(envelope.payload.id).toBe('evt_9');
+  });
+
+  it('keeps v1 id-less and location-less events exactly as before', () => {
+    // The v2 fallbacks must be no-ops on the v1 wire (v1 regression red line).
+    const flat = parseSseEventEnvelope(
+      'data: {"type":"session.status","properties":{"sessionID":"s1","status":{"type":"busy"}}}\n',
+    );
+    expect(flat.eventId).toBeNull();
+    expect(flat.directory).toBeNull();
+
+    const withIdLine = parseSseEventEnvelope(
+      'id: v1-line-id\ndata: {"type":"session.updated","id":"payload-id-ignored","properties":{}}\n',
+    );
+    expect(withIdLine.eventId).toBe('v1-line-id');
+  });
+
   it('returns null for malformed SSE blocks', () => {
     expect(parseSseEventEnvelope('event: message\n')).toBeNull();
     expect(parseSseEventEnvelope('data: {oops}\n')).toBeNull();

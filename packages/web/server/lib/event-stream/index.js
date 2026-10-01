@@ -23,3 +23,9 @@ export {
   UPSTREAM_STALL_TIMEOUT_CONCURRENT_MS,
   createUpstreamSseReader,
 } from './upstream-reader.js';
+
+export {
+  forwardTranslatedWireEvent,
+  translateWireEvent,
+  wireEventDirectory,
+} from './translate-v2.js';

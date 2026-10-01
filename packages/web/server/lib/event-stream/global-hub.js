@@ -1,4 +1,6 @@
 import { createUpstreamSseReader } from './upstream-reader.js';
+import { translateWireEvent, wireEventDirectory } from './translate-v2.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from '../opencode/protocol-mode.js';
 
 // Raised from 512 → 2048 to improve recovery after brief disconnects during
 // long-running agent sessions where many events accumulate quickly.
@@ -11,8 +13,10 @@ export function createGlobalMessageStreamHub({
   upstreamStallTimeoutMs,
   upstreamReconnectDelayMs,
   replayLimit = MESSAGE_STREAM_GLOBAL_REPLAY_LIMIT,
+  resolveUpstreamProtocolMode = () => resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID),
 }) {
   const eventSubscribers = new Set();
+  const translatedEventSubscribers = new Set();
   const statusSubscribers = new Set();
   const replay = [];
 
@@ -53,6 +57,48 @@ export function createGlobalMessageStreamHub({
     };
   };
 
+  /**
+   * Server-consumer intake (spine plan OC2-S2). The browser path keeps the raw
+   * wire payload; this second subscriber set receives the v1 vocabulary the
+   * server's own runtimes (message queue, permissions, goals, notifications,
+   * session activity) were written against.
+   *
+   * v1 mode forwards the very same normalized event objects, so consumers
+   * behave exactly as before the dual-track split. v2 mode translates each
+   * wire event into zero or more v1 events and notifies once per translated
+   * event. Translated events never enter the replay buffer: replay only feeds
+   * browser clients, which read the raw wire.
+   */
+  const notifyTranslated = (normalized) => {
+    if (translatedEventSubscribers.size === 0) {
+      return;
+    }
+    if (resolveUpstreamProtocolMode() !== 'v2') {
+      for (const subscriber of Array.from(translatedEventSubscribers)) {
+        notifySubscriber('event', subscriber, normalized);
+      }
+      return;
+    }
+
+    const translatedEvents = translateWireEvent(normalized.payload);
+    const wireDirectory = wireEventDirectory(normalized.payload);
+    for (const [index, translated] of translatedEvents.entries()) {
+      const directory = wireDirectory || 'global';
+      const eventId = normalized.eventId !== undefined
+        ? `${normalized.eventId}#${index}`
+        : undefined;
+      const entry = {
+        envelope: { eventId, directory, payload: translated },
+        payload: translated,
+        directory,
+        eventId,
+      };
+      for (const subscriber of Array.from(translatedEventSubscribers)) {
+        notifySubscriber('event', subscriber, entry);
+      }
+    }
+  };
+
   const start = () => {
     if (reader) {
       return;
@@ -67,7 +113,10 @@ export function createGlobalMessageStreamHub({
       buildUrl: () => {
         buildUrlFailed = false;
         try {
-          return new URL(buildOpenCodeUrl('/global/event', ''));
+          // OpenCode 2 moved the global event stream from `/global/event` to
+          // `/api/event`; the branch keeps the v1 track byte-identical.
+          const upstreamPath = resolveUpstreamProtocolMode() === 'v2' ? '/api/event' : '/global/event';
+          return new URL(buildOpenCodeUrl(upstreamPath, ''));
         } catch {
           buildUrlFailed = true;
           throw new Error('OpenCode service unavailable');
@@ -100,6 +149,7 @@ export function createGlobalMessageStreamHub({
         for (const subscriber of Array.from(eventSubscribers)) {
           notifySubscriber('event', subscriber, normalized);
         }
+        notifyTranslated(normalized);
       },
       onError(error) {
         if (controller?.signal.aborted) {
@@ -142,6 +192,12 @@ export function createGlobalMessageStreamHub({
       eventSubscribers.add(subscriber);
       return () => {
         eventSubscribers.delete(subscriber);
+      };
+    },
+    subscribeTranslatedEvent(subscriber) {
+      translatedEventSubscribers.add(subscriber);
+      return () => {
+        translatedEventSubscribers.delete(subscriber);
       };
     },
     subscribeStatus(subscriber) {

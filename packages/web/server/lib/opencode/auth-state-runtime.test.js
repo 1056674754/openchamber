@@ -38,4 +38,30 @@ describe('OpenCode auth state runtime', () => {
       Authorization: basicAuth('opencode', 'secret'),
     });
   });
+
+  test('pins the opencode username on the v2 track, ignoring OPENCODE_SERVER_USERNAME', () => {
+    // Upstream 8dd842a3b, mode-gated (spine OC2-S2): OpenCode 2 only accepts
+    // `opencode`; the configurable username keeps working on v1 (above).
+    const runtime = createRuntime({
+      OPENCODE_SERVER_USERNAME: 'custom-user',
+      OPENCODE_SERVER_PASSWORD: 'secret',
+      OPENCHAMBER_PROTOCOL_MODE: 'v2',
+    });
+
+    expect(runtime.getOpenCodeAuthHeaders()).toEqual({
+      Authorization: basicAuth('opencode', 'secret'),
+    });
+  });
+
+  test('ignores an invalid protocol-mode override and keeps the v1 username behavior', () => {
+    const runtime = createRuntime({
+      OPENCODE_SERVER_USERNAME: 'custom-user',
+      OPENCODE_SERVER_PASSWORD: 'secret',
+      OPENCHAMBER_PROTOCOL_MODE: 'v3',
+    });
+
+    expect(runtime.getOpenCodeAuthHeaders()).toEqual({
+      Authorization: basicAuth('custom-user', 'secret'),
+    });
+  });
 });

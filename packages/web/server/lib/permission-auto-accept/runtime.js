@@ -243,7 +243,11 @@ export function createPermissionAutoAcceptRuntime({
   };
 
   const start = () => {
-    const unsubscribeEvent = globalEventHub.subscribeEvent(processEvent);
+    // Translated intake (spine OC2-S2): the hub hands v1 vocabulary on a v2
+    // upstream and the same events on v1; mock hubs without the method keep
+    // the direct subscription.
+    const unsubscribeEvent = (globalEventHub.subscribeTranslatedEvent ?? globalEventHub.subscribeEvent)
+      .call(globalEventHub, processEvent);
     const unsubscribeStatus = globalEventHub.subscribeStatus((status) => {
       if (status?.type === 'connect') void reconcilePending();
     });

@@ -11,6 +11,17 @@ export const MESSAGE_STREAM_WS_MAX_BUFFERED_BYTES = 16 * 1024 * 1024;
 // proactively start shedding low-priority updates before the hard disconnect.
 export const MESSAGE_STREAM_WS_BACKPRESSURE_WARN_BYTES = 12 * 1024 * 1024;
 
+/**
+ * Parses one SSE block from OpenCode's event stream.
+ *
+ * Dual-protocol (spine plan OC2-S2): OpenCode v1 sends `id:` SSE lines and
+ * carries the directory at the wrapper level or in `properties.directory`.
+ * OpenCode v2 sends no `id:` lines — the event id lives in the JSON payload as
+ * `payload.id` and the directory as `payload.location.directory`. Both shapes
+ * are read here so the replay buffer and per-directory routing keep working
+ * unchanged on either track. v1 events never carry a payload `id` or a
+ * `location`, so the v2 fallbacks are no-ops on the v1 wire.
+ */
 export function parseSseEventEnvelope(block) {
   if (!block || typeof block !== 'string') {
     return null;
@@ -46,23 +57,25 @@ export function parseSseEventEnvelope(block) {
     ) {
       const serverId = typeof parsed.serverId === 'string' && parsed.serverId.length > 0 ? parsed.serverId : null;
       return {
-        eventId,
+        eventId: eventId ?? readEventId(parsed.payload) ?? readEventId(parsed),
         ...(serverId ? { serverId } : {}),
-        directory: typeof parsed.directory === 'string' && parsed.directory.length > 0 ? parsed.directory : null,
+        directory: (typeof parsed.directory === 'string' && parsed.directory.length > 0
+          ? parsed.directory
+          : readDirectory(parsed.payload)) ?? null,
         payload: parsed.payload,
       };
     }
 
     const directory =
-      typeof parsed?.directory === 'string' && parsed.directory.length > 0
+      (typeof parsed?.directory === 'string' && parsed.directory.length > 0
         ? parsed.directory
         : typeof parsed?.properties?.directory === 'string' && parsed.properties.directory.length > 0
           ? parsed.properties.directory
-          : null;
+          : readDirectory(parsed)) ?? null;
 
     const serverId = typeof parsed?.serverId === 'string' && parsed.serverId.length > 0 ? parsed.serverId : null;
     return {
-      eventId,
+      eventId: eventId ?? readEventId(parsed),
       ...(serverId ? { serverId } : {}),
       directory,
       payload: parsed,
@@ -70,6 +83,18 @@ export function parseSseEventEnvelope(block) {
   } catch {
     return null;
   }
+}
+
+function readEventId(payload) {
+  return payload && typeof payload === 'object' && typeof payload.id === 'string' && payload.id.length > 0
+    ? payload.id
+    : null;
+}
+
+function readDirectory(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const directory = payload.location?.directory;
+  return typeof directory === 'string' && directory.length > 0 ? directory : null;
 }
 
 export function sendMessageStreamWsFrame(socket, payload) {

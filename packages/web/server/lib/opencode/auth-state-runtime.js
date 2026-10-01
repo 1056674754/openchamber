@@ -1,3 +1,5 @@
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
+
 export const createOpenCodeAuthStateRuntime = (dependencies) => {
   const {
     crypto,
@@ -51,7 +53,13 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
       return {};
     }
 
-    const username = process.env.OPENCODE_SERVER_USERNAME?.trim() || 'opencode';
+    // Spine OC2-S2 (upstream 8dd842a3b, gated): OpenCode 2 accepts only the
+    // `opencode` username and ignores OPENCODE_SERVER_USERNAME. On the v1
+    // track the configurable username keeps working unchanged.
+    const v2Track = resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID, process.env) === 'v2';
+    const username = v2Track
+      ? 'opencode'
+      : process.env.OPENCODE_SERVER_USERNAME?.trim() || 'opencode';
     const credentials = Buffer.from(`${username}:${password}`).toString('base64');
     return { Authorization: `Basic ${credentials}` };
   };

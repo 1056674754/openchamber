@@ -41,7 +41,11 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     const signal = abortController.signal;
 
     if (globalEventHub) {
-      unsubscribeEvent = globalEventHub.subscribeEvent((event) => {
+      // Translated intake (spine OC2-S2): the hub hands v1 vocabulary on a v2
+      // upstream and the same events on v1; hubs without the method keep the
+      // direct subscription.
+      const subscribe = globalEventHub.subscribeTranslatedEvent ?? globalEventHub.subscribeEvent.bind(globalEventHub);
+      unsubscribeEvent = subscribe((event) => {
         const payload = unwrapGlobalEventPayload(event.payload);
         if (!payload || typeof payload !== 'object') {
           return;
