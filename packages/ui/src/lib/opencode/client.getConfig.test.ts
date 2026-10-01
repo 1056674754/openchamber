@@ -47,6 +47,7 @@ mock.module('@/lib/startupTrace', () => ({
 
 mock.module('@/sync/session-routing', () => ({
   resolveSdkForDirectory: mock(() => ({})),
+  resolveRouteForDirectory: mock(() => ({ serverId: 'default', client: {} })),
   resolveBaseUrlForSession: mock(() => undefined),
   resolveBaseUrl: mock(() => undefined),
   resolveApiUrl: mock(() => undefined),

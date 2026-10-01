@@ -29,6 +29,10 @@ import {
 } from "./provider-tracker";
 import { markStartupTrace } from "@/lib/startupTrace";
 import { registerOpencodeDirectorySetter } from './directoryBridge';
+import {
+  resolveProtocolSdkHandleForDirectory,
+  type ProtocolSdkHandle,
+} from './protocol-handle';
 
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
@@ -315,6 +319,26 @@ class OpencodeService {
     const scoped = createOpencodeClient({ baseUrl: this.baseUrl, directory: normalized });
     this.scopedClients.set(key, scoped);
     return scoped;
+  }
+
+  /**
+   * Dual-track SDK handle for a request (OC2 spine S5). Resolves the owning
+   * server exactly like the v1 routing above, then returns either the v1 SDK
+   * client (identical object, v1 mode default) or a directory-scoped
+   * `@opencode/client` handle when that server's protocol mode is v2. The
+   * sync/S6 boundary branches on the handle; UI components must not.
+   */
+  resolveSdkHandle(
+    directory: string,
+    sessionID?: string,
+    explicitServerId?: string | null,
+  ): ProtocolSdkHandle {
+    return resolveProtocolSdkHandleForDirectory(
+      directory,
+      sessionID ?? undefined,
+      explicitServerId ?? undefined,
+      this.client,
+    );
   }
 
   private normalizeCandidatePath(path?: string | null): string | null {
@@ -2160,3 +2184,4 @@ if (import.meta.hot) {
 // Exported types
 export type { Session, Message, Part, Provider, Config, Model };
 export type { App };
+export type { ProtocolSdkHandle } from './protocol-handle';

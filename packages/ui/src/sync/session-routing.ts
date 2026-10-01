@@ -142,7 +142,17 @@ function defaultSdkClient(fallbackClient?: OpencodeClient | null): OpencodeClien
   throw new Error("Default OpenCode SDK client is not registered")
 }
 
-/** Resolve the correct SDK client for a request.
+/** Resolved routing target: the owning server instance and its v1 SDK client.
+ *  `resolveSdkForDirectory` is a thin wrapper over this so callers that also
+ *  need the serverId (the OC2 dual-track protocol handle keys the protocol
+ *  mode and the provider circuit on it) resolve through the exact same
+ *  decision path — there is deliberately no second routing implementation. */
+export type ResolvedSdkRoute = {
+  serverId: string
+  client: OpencodeClient
+}
+
+/** Resolve the correct SDK client and its owning server for a request.
  *
  *  IMPORTANT: sessionID is authoritative when present. Do not prefer directory
  *  over the session-server index: multiple remote instances can legitimately
@@ -156,23 +166,32 @@ export function resolveSdkForDirectory(
   explicitServerId?: string,
   fallbackClient?: OpencodeClient | null,
 ): OpencodeClient {
+  return resolveRouteForDirectory(directory, sessionID, explicitServerId, fallbackClient).client
+}
+
+export function resolveRouteForDirectory(
+  directory: string,
+  sessionID?: string,
+  explicitServerId?: string,
+  fallbackClient?: OpencodeClient | null,
+): ResolvedSdkRoute {
   const normalizedDir = normalizeDirectoryKey(directory)
 
   if (explicitServerId && explicitServerId !== DEFAULT_SERVER_ID) {
-    return getOrRegisterRemoteConnection(explicitServerId).client
+    return { serverId: explicitServerId, client: getOrRegisterRemoteConnection(explicitServerId).client }
   }
   if (explicitServerId === DEFAULT_SERVER_ID) {
-    return defaultSdkClient(fallbackClient)
+    return { serverId: DEFAULT_SERVER_ID, client: defaultSdkClient(fallbackClient) }
   }
 
   // Authoritative source: serverRegistry session index. No path matching.
   if (sessionID) {
     const sessionServerId = serverRegistry.getServerForSession(sessionID)
     if (sessionServerId && sessionServerId !== DEFAULT_SERVER_ID) {
-      return getOrRegisterRemoteConnection(sessionServerId).client
+      return { serverId: sessionServerId, client: getOrRegisterRemoteConnection(sessionServerId).client }
     }
     if (sessionServerId === DEFAULT_SERVER_ID) {
-      return defaultSdkClient(fallbackClient)
+      return { serverId: DEFAULT_SERVER_ID, client: defaultSdkClient(fallbackClient) }
     }
     // No authoritative server index for this session yet. The directory is an
     // explicit request context, so its ownership resolves the server: project
@@ -183,23 +202,23 @@ export function resolveSdkForDirectory(
     // require an indexed server.
     const project = findProjectForDirectory(normalizedDir)
     if (project?.serverId && project.serverId !== DEFAULT_SERVER_ID) {
-      return getOrRegisterRemoteConnection(project.serverId, project.label).client
+      return { serverId: project.serverId, client: getOrRegisterRemoteConnection(project.serverId, project.label).client }
     }
     if (project) {
-      return defaultSdkClient(fallbackClient)
+      return { serverId: DEFAULT_SERVER_ID, client: defaultSdkClient(fallbackClient) }
     }
     const cachedServerId = getCachedServerIdForDirectory(normalizedDir)
     if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
-      return getOrRegisterRemoteConnection(cachedServerId).client
+      return { serverId: cachedServerId, client: getOrRegisterRemoteConnection(cachedServerId).client }
     }
     const allEntries = getAllSyncStores()
     for (const e of allEntries) {
       if (e.serverId === DEFAULT_SERVER_ID) continue
       if (e.childStores.children.has(normalizedDir)) {
-        return getOrRegisterRemoteConnection(e.serverId).client
+        return { serverId: e.serverId, client: getOrRegisterRemoteConnection(e.serverId).client }
       }
     }
-    return defaultSdkClient(fallbackClient)
+    return { serverId: DEFAULT_SERVER_ID, client: defaultSdkClient(fallbackClient) }
   }
 
   // Project ownership is stronger than stale remote child stores/cache. If a
@@ -207,15 +226,15 @@ export function resolveSdkForDirectory(
   // let an old remote store for the same path hijack new turns.
   const project = findProjectForDirectory(normalizedDir)
   if (project?.serverId && project.serverId !== DEFAULT_SERVER_ID) {
-    return getOrRegisterRemoteConnection(project.serverId, project.label).client
+    return { serverId: project.serverId, client: getOrRegisterRemoteConnection(project.serverId, project.label).client }
   }
   if (project) {
-    return defaultSdkClient(fallbackClient)
+    return { serverId: DEFAULT_SERVER_ID, client: defaultSdkClient(fallbackClient) }
   }
 
   const cachedServerId = getCachedServerIdForDirectory(normalizedDir)
   if (cachedServerId && cachedServerId !== DEFAULT_SERVER_ID) {
-    return getOrRegisterRemoteConnection(cachedServerId).client
+    return { serverId: cachedServerId, client: getOrRegisterRemoteConnection(cachedServerId).client }
   }
 
   // Check if any remote SyncProvider already has a child store for this directory.
@@ -223,11 +242,11 @@ export function resolveSdkForDirectory(
   for (const e of allEntries) {
     if (e.serverId === DEFAULT_SERVER_ID) continue
     if (e.childStores.children.has(normalizedDir)) {
-      return getOrRegisterRemoteConnection(e.serverId).client
+      return { serverId: e.serverId, client: getOrRegisterRemoteConnection(e.serverId).client }
     }
   }
 
-  return defaultSdkClient(fallbackClient)
+  return { serverId: DEFAULT_SERVER_ID, client: defaultSdkClient(fallbackClient) }
 }
 
 /** Resolve the base URL (including /api suffix) for a directory's remote server.
