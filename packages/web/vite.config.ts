@@ -78,7 +78,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
   optimizeDeps: {
-    include: ['@opencode-ai/sdk/v2'],
+    include: ['@opencode-ai/sdk/v2', '@opencode/client'],
   },
   server: {
     port: 45173,
@@ -136,6 +136,9 @@ export default defineConfig({
           if (packageName === 'zustand' || packageName === 'zustand/middleware') return 'vendor-zustand';
 
           if (packageName === '@opencode-ai/sdk') return 'vendor-opencode-sdk';
+          // Dual-stack (spine S1): OC2 client gets its own chunk; the v1 SDK
+          // chunk above stays until the cleanup batch removes it.
+          if (packageName === '@opencode/client' || packageName === '@opencode/schema' || packageName === '@opencode/protocol') return 'vendor-opencode-client';
           if (packageName.includes('remark') || packageName.includes('rehype') || packageName === 'react-markdown') return 'vendor-markdown';
           if (packageName === '@base-ui/react' || packageName.startsWith('@base-ui')) return 'vendor-base-ui';
           // Fork keeps react-syntax-highlighter (no Shiki migration), so this rule

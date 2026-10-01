@@ -30,6 +30,8 @@
     "@openchamber/sdk": "workspace:*",
     "@openchamber/shared": "workspace:*",
     "@opencode-ai/sdk": "1.18.31",
+    "@opencode/client": "2.0.14",
+    "@opencode/schema": "2.0.14",
     "@simplewebauthn/server": "13.3.1",
     "adm-zip": "^0.6.0",
     "better-sqlite3": "^11.7.0",
