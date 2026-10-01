@@ -1799,11 +1799,11 @@ export const PullRequestSection: React.FC<{
                   />
                 </label>
 
-                <label className="space-y-1">
+                <div className="space-y-1">
                   <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.baseBranch')}</div>
                   {availableBaseBranches.length > 0 ? (
                     <Select value={targetBaseBranch} onValueChange={setTargetBaseBranch}>
-                      <SelectTrigger className="h-9">
+                      <SelectTrigger className="h-9" aria-label={t('gitView.pr.field.baseBranch')}>
                         <SelectValue placeholder={t('gitView.pr.placeholder.selectBaseBranch')} />
                       </SelectTrigger>
                       <SelectContent>
@@ -1817,9 +1817,10 @@ export const PullRequestSection: React.FC<{
                       value={targetBaseBranch}
                       onChange={(e) => setTargetBaseBranch(e.target.value)}
                       placeholder={t('gitView.pr.placeholder.main')}
+                      aria-label={t('gitView.pr.field.baseBranch')}
                     />
                   )}
-                </label>
+                </div>
 
                 <label className="space-y-1">
                   <div className="typography-micro text-muted-foreground">{t('gitView.pr.field.description')}</div>
