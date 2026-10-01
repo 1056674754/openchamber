@@ -60,8 +60,13 @@ describe('LongErrorText interaction', () => {
   let windowInstance: Window;
   let host: HTMLDivElement;
   let root: Root;
+  // bun test runs every file in one process: restore the room's globals so
+  // later files do not see a half-installed DOM.
+  const globalNames = ['window', 'document', 'HTMLElement', 'Element', 'Node'] as const;
+  let savedGlobals: Array<[string, PropertyDescriptor | undefined]> = [];
 
   beforeEach(() => {
+    savedGlobals = globalNames.map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
     windowInstance = new Window();
     Object.assign(globalThis, {
       window: windowInstance,
@@ -79,6 +84,12 @@ describe('LongErrorText interaction', () => {
   afterEach(async () => {
     await act(async () => root.unmount());
     await windowInstance.happyDOM.close();
+    for (const [name, descriptor] of savedGlobals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+    // IS_REACT_ACT_ENVIRONMENT was added by Object.assign, not captured.
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
   });
 
   const render = async (text: string) => {

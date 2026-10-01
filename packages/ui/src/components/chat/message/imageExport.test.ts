@@ -1,9 +1,28 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 
 import { cloneMessageImageExportSource, MESSAGE_IMAGE_EXPORT_EXCLUDE_ATTRIBUTE } from './imageExport';
 
-Object.assign(globalThis, { document: new Window().document });
+// bun test runs every file in one process: install the DOM for this file and
+// restore the previous globals afterwards.
+let savedDocument: PropertyDescriptor | undefined;
+let windowInstance: Window;
+
+beforeEach(() => {
+  savedDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+  windowInstance = new Window();
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    writable: true,
+    value: windowInstance.document,
+  });
+});
+
+afterEach(() => {
+  if (savedDocument) Object.defineProperty(globalThis, 'document', savedDocument);
+  else Reflect.deleteProperty(globalThis, 'document');
+  void windowInstance.happyDOM.close();
+});
 
 describe('message image export', () => {
     test('omits marked decoration from the clone without removing content or mutating the source', () => {

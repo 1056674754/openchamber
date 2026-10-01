@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { spawnSync as realSpawnSync } from 'node:child_process';
 
+// Keep the real spawnSync export: this mock outlives the file in bun's
+// single-process runner, and later files import spawnSync from this module.
 mock.module('node:child_process', () => ({
   execFileSync: () => { throw new Error('No Keychain fixture'); },
+  spawnSync: realSpawnSync,
 }));
 
 mock.module('node:fs', () => ({
