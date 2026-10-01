@@ -1,4 +1,5 @@
 import { readAuthFile } from '../../opencode/auth.js';
+import { readConfigLayers } from '../../opencode/shared.js';
 import {
   getAuthEntry,
   normalizeAuthEntry,
@@ -6,14 +7,44 @@ import {
   toUsageWindow,
   toNumber,
   asObject,
+  asNonEmptyString,
   formatMoney
 } from '../utils/index.js';
 
 export const providerId = 'openrouter';
 export const providerName = 'OpenRouter';
 export const aliases = ['openrouter'];
-const OPENROUTER_QUOTA_URL = 'https://openrouter.ai/api/v1/key';
+const OPENROUTER_API_BASE = 'https://openrouter.ai/api/v1';
 const PERIOD_SECONDS = { daily: 86400, weekly: 604800, monthly: 30 * 86400 };
+
+const asRecord = (value) => (value && typeof value === 'object' ? value : null);
+
+// The stored key is valid for whichever gateway the configured baseURL points
+// at, so the usage lookup must ride the same base as chat. The endpoint shape
+// stays `<base>/key`; with nothing configured the base is OpenRouter itself.
+// OpenCode takes the address from `settings.baseURL` (v2), legacy `api`, or
+// legacy `options.baseURL`. Each config section is read on its own so a v2
+// entry without an address cannot hide a v1 address that another file sets.
+// (Fork note: upstream folds these through OC2's toProviderEntity; the fork
+// reads the three accepted spellings directly to stay independent of the
+// config-v2 module.)
+const resolveQuotaBase = () => {
+  try {
+    const { mergedConfig } = readConfigLayers();
+    const readAddress = (entry) => {
+      const source = asRecord(entry);
+      if (!source) return null;
+      return asNonEmptyString(asRecord(source.settings)?.baseURL)
+        ?? asNonEmptyString(source.api)
+        ?? asNonEmptyString(asRecord(source.options)?.baseURL);
+    };
+    const base = readAddress(mergedConfig?.providers?.openrouter) ?? readAddress(mergedConfig?.provider?.openrouter);
+    return base?.replace(/\/+$/, '') || null;
+  } catch {
+    // A config read failure must not take the default-endpoint lookup down.
+    return null;
+  }
+};
 
 export const resolveResetAt = (limitReset, nowMs) => {
   const now = new Date(nowMs);
@@ -54,7 +85,7 @@ export const fetchQuota = async () => {
   const timeoutSignal = AbortSignal.timeout(15_000);
 
   try {
-    const response = await fetch(OPENROUTER_QUOTA_URL, {
+    const response = await fetch(`${resolveQuotaBase() ?? OPENROUTER_API_BASE}/key`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,

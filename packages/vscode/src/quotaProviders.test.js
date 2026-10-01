@@ -26,6 +26,7 @@ mock.module('node:fs', () => ({
         kimi: { key: 'test-token' },
         neuralwatt: { key: 'test-token' },
         'zai-coding-plan': { key: 'test-token' },
+        'zhipuai-coding-plan': { key: 'test-token' },
         'command-code': { key: 'command-token' },
         'opencode-go': { key: 'go-token' },
       });
@@ -35,6 +36,7 @@ mock.module('node:fs', () => ({
 }));
 
 const {
+  fetchKimiQuota,
   fetchOllamaCloudQuota,
   fetchQuotaForProvider,
   listConfiguredQuotaProviders,
@@ -186,6 +188,111 @@ describe('VS Code quota provider parity', () => {
     expect(result.usage?.windows.weekly.valueLabel).toBe('65 / 60k credits');
   });
 
+  it('maps Zhipu CREDIT_LIMIT entries to windows with credit labels and plan level', async () => {
+    globalThis.fetch = mock(async () => response({
+      code: 200,
+      msg: '操作成功',
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 2000, currentValue: 900, remaining: 1100, percentage: 45, nextResetTime: 1797930060000 },
+          { type: 'CREDIT_LIMIT', unit: 6, number: 1, usage: 10000, currentValue: 6000, remaining: 4000, percentage: 60, nextResetTime: 1798425600000 },
+          { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 5, nextResetTime: 1798425600000 },
+        ],
+        level: 'lite',
+      },
+    }));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+    const windows = result.usage?.windows;
+
+    expect(result.ok).toBe(true);
+    expect(result.planLabel).toBe('lite');
+    expect(windows?.['5h']).toMatchObject({ usedPercent: 45, windowSeconds: 5 * 60 * 60, resetAt: 1797930060000, valueLabel: '900 / 2k credits' });
+    expect(windows?.weekly).toMatchObject({ usedPercent: 60, windowSeconds: 7 * 24 * 60 * 60, resetAt: 1798425600000, valueLabel: '6k / 10k credits' });
+    expect(windows?.['MCP Tools']).toMatchObject({ usedPercent: 5, windowSeconds: 30 * 24 * 60 * 60 });
+  });
+
+  it('still maps legacy Zhipu TOKENS_LIMIT entries without credit labels', async () => {
+    globalThis.fetch = mock(async () => response({
+      data: {
+        limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 30 },
+        ],
+      },
+    }));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    expect(result.ok).toBe(true);
+    expect(result.usage?.windows['5h']).toMatchObject({ usedPercent: 30, windowSeconds: 5 * 60 * 60 });
+    expect(result.usage?.windows['5h'].valueLabel).toBeUndefined();
+  });
+
+  it('derives the Zhipu used percent from currentValue/usage when percentage is missing', async () => {
+    globalThis.fetch = mock(async () => response({
+      code: 200,
+      success: true,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, usage: 2000, currentValue: 900 },
+        ],
+      },
+    }));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    expect(result.ok).toBe(true);
+    expect(result.usage?.windows['5h'].usedPercent).toBe(45);
+    expect(result.usage?.windows['5h'].valueLabel).toBe('900 / 2k credits');
+  });
+
+  it('surfaces Zhipu business failures reported inside HTTP 200 bodies', async () => {
+    globalThis.fetch = mock(async () => response({
+      code: 401,
+      msg: '令牌已过期或验证不正确',
+      success: false,
+    }));
+
+    const result = await fetchQuotaForProvider('zhipuai-coding-plan');
+
+    expect(result).toMatchObject({ ok: false, configured: true, error: '令牌已过期或验证不正确', usage: null });
+  });
+
+  it('parses the Zhipu envelope like the web provider', async () => {
+    globalThis.fetch = mock(async () => response({
+      code: null,
+      data: {
+        limits: [
+          { type: 'CREDIT_LIMIT', unit: 3, number: 5, percentage: 20 },
+        ],
+      },
+    }));
+    await expect(fetchQuotaForProvider('zhipuai-coding-plan')).resolves.toMatchObject({
+      ok: true,
+      usage: { windows: { '5h': { usedPercent: 20 } } },
+    });
+
+    globalThis.fetch = mock(async () => response({
+      code: 1002,
+      msg: 42,
+      success: false,
+    }));
+    await expect(fetchQuotaForProvider('zhipuai-coding-plan')).resolves.toMatchObject({
+      ok: false,
+      error: 'API error: 1002',
+    });
+
+    globalThis.fetch = mock(async () => response({
+      code: 1001,
+      success: false,
+    }));
+    await expect(fetchQuotaForProvider('zhipuai-coding-plan')).resolves.toMatchObject({
+      ok: false,
+      error: 'API error: 1001',
+    });
+  });
+
   it('reports Command Code credits and rolling limits', async () => {
     globalThis.fetch = mock(async (input) => {
       const url = String(input);
@@ -240,6 +347,50 @@ describe('VS Code quota provider parity', () => {
 
     expect(result.usage?.windows.weekly.usedPercent).toBe(25);
     expect(result.usage?.windows['Rate Limit (5h)'].usedPercent).toBe(75);
+  });
+
+  it('resolves Kimi credentials in China-plan-first alias order', async () => {
+    const sentKey = async (auth) => {
+      let authorization;
+      const result = await fetchKimiQuota({
+        readAuth: () => auth,
+        fetchImpl: async (_url, init) => {
+          authorization = new Headers(init.headers).get('Authorization') ?? undefined;
+          return response({ usage: null, limits: [] });
+        },
+      });
+      return { result, authorization };
+    };
+
+    const cn = await sentKey({ 'kimi-code-plan-cn': { type: 'api', key: 'cn-key' } });
+    expect(cn.result.ok).toBe(true);
+    expect(cn.authorization).toBe('Bearer cn-key');
+
+    expect((await sentKey({
+      'kimi-for-coding': { type: 'api', key: 'stale-key' },
+      kimi: { type: 'api', key: 'older-key' },
+      'kimi-code-plan-cn': { type: 'api', key: 'cn-key' },
+    })).authorization).toBe('Bearer cn-key');
+
+    expect((await sentKey({ 'kimi-code-plan-global': { key: 'global-key' } })).authorization).toBe('Bearer global-key');
+    expect((await sentKey({ 'kimi-for-coding': { key: 'legacy-key' } })).authorization).toBe('Bearer legacy-key');
+    expect((await sentKey({
+      'kimi-code-plan-global': { key: 'global-key' },
+      'kimi-for-coding': { key: 'legacy-key' },
+    })).authorization).toBe('Bearer legacy-key');
+  });
+
+  it('skips a blank Kimi key and uses the token next to it', async () => {
+    let authorization;
+    await fetchKimiQuota({
+      readAuth: () => ({ 'kimi-code-plan-cn': { key: '  ', token: 'cn-token' } }),
+      fetchImpl: async (_url, init) => {
+        authorization = new Headers(init.headers).get('Authorization') ?? undefined;
+        return response({ usage: null, limits: [] });
+      },
+    });
+
+    expect(authorization).toBe('Bearer cn-token');
   });
 
   it('reports DeepSeek account balance as a label-only window', async () => {
