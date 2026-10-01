@@ -105,6 +105,9 @@ export const BehaviorPage: React.FC = () => {
     preset: ResponseStyleValue;
     custom: string;
   } | null>(null);
+  // AGENTS.md exactly as last read or written (null: no file). A save sends it
+  // so the server refuses to overwrite a file edited elsewhere in the meantime.
+  const agentsMdOnDiskRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     const abort = new AbortController();
@@ -141,9 +144,10 @@ export const BehaviorPage: React.FC = () => {
           }
         }
 
-        if (!nextSettings.prompt.trim() && agentsMdRes.ok) {
+        if (agentsMdRes.ok) {
           const agentsData = await agentsMdRes.json();
-          if (typeof agentsData.content === 'string') {
+          agentsMdOnDiskRef.current = agentsData.exists ? (typeof agentsData.content === 'string' ? agentsData.content : null) : null;
+          if (!nextSettings.prompt.trim() && typeof agentsData.content === 'string') {
             nextSettings = { ...nextSettings, prompt: agentsData.content };
           }
         }
@@ -171,6 +175,49 @@ export const BehaviorPage: React.FC = () => {
 
     void load();
     return () => abort.abort();
+  }, []);
+
+  // AGENTS.md is often edited in another editor while this page stays open.
+  // Coming back to the window re-reads it; the editor follows only when it
+  // holds no edit of its own, and a pending edit is guarded by the save.
+  const promptRef = React.useRef(prompt);
+  promptRef.current = prompt;
+  const initialPromptRef = React.useRef(initialPrompt);
+  initialPromptRef.current = initialPrompt;
+  React.useEffect(() => {
+    let refreshAbort: AbortController | null = null;
+    const refresh = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (promptRef.current !== initialPromptRef.current) return;
+      refreshAbort?.abort();
+      const controller = new AbortController();
+      refreshAbort = controller;
+      try {
+        const response = await fetch('/api/behavior/agents-md', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (controller.signal.aborted || !data?.exists || typeof data.content !== 'string') return;
+        if (data.content === agentsMdOnDiskRef.current || promptRef.current !== initialPromptRef.current) return;
+        agentsMdOnDiskRef.current = data.content;
+        initialPromptRef.current = data.content;
+        setPrompt(data.content);
+        setInitialPrompt(data.content);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) console.warn('Failed to refresh AGENTS.md:', error);
+      }
+    };
+    const onRefresh = () => { void refresh(); };
+    window.addEventListener('focus', onRefresh);
+    document.addEventListener('visibilitychange', onRefresh);
+    return () => {
+      refreshAbort?.abort();
+      window.removeEventListener('focus', onRefresh);
+      document.removeEventListener('visibilitychange', onRefresh);
+    };
   }, []);
 
   React.useEffect(() => {
@@ -222,9 +269,13 @@ export const BehaviorPage: React.FC = () => {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, expectedContent: agentsMdOnDiskRef.current }),
       });
 
+      if (response.status === 409) {
+        toast.error(t('settings.behavior.page.toast.agentsMdChangedOnDisk'));
+        return;
+      }
       if (!response.ok) {
         throw new Error(await readApiError(response, t('settings.behavior.page.toast.saveFailed')));
       }
@@ -233,6 +284,7 @@ export const BehaviorPage: React.FC = () => {
         globalBehaviorPrompt: content,
       }, t('settings.behavior.page.toast.saveFailed'));
 
+      agentsMdOnDiskRef.current = content;
       setPrompt(content);
       setInitialPrompt(content);
       toast.success(t('settings.behavior.page.toast.saved'));

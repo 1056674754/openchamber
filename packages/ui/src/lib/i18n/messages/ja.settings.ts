@@ -614,6 +614,7 @@ export const settingsDict = {
   'settings.behavior.page.responseStyle.customPlaceholder': '最初のメッセージに追加する指示を記述...',
   'settings.behavior.page.toast.saved': '動作設定を保存しました',
   'settings.behavior.page.toast.saveFailed': '動作設定の保存に失敗しました',
+  'settings.behavior.page.toast.agentsMdChangedOnDisk': 'AGENTS.md が OpenChamber の外で変更されたため、編集は保存されませんでした。コピーしてからこのページを開き直し、最新のファイルを読み込んでください。',
   'settings.commands.sidebar.title': 'コマンド',
   'settings.commands.sidebar.total': '合計 {count}',
   'settings.commands.sidebar.empty.title': 'Command が設定されていません',

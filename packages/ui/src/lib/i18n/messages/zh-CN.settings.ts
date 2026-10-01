@@ -602,6 +602,7 @@ export const settingsDict = {
   'settings.behavior.page.responseStyle.customPlaceholder': '编写要添加到第一条消息的说明...',
   'settings.behavior.page.toast.saved': '行为保存成功',
   'settings.behavior.page.toast.saveFailed': '行为保存失败',
+  'settings.behavior.page.toast.agentsMdChangedOnDisk': 'AGENTS.md 已在 OpenChamber 之外被修改，你的编辑尚未保存。请先复制内容，然后重新打开此页面以加载当前文件。',
   'settings.commands.sidebar.title': '命令',
   'settings.commands.sidebar.total': '总计 {count}',
   'settings.commands.sidebar.empty.title': '未配置命令',

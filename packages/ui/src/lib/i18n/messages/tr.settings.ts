@@ -614,6 +614,7 @@ export const settingsDict = {
   "settings.behavior.page.responseStyle.customPlaceholder": "İlk mesaja eklenecek talimatı yazın...",
   "settings.behavior.page.toast.saved": "Davranış başarıyla kaydedildi",
   "settings.behavior.page.toast.saveFailed": "Davranış kaydedilemedi",
+  "settings.behavior.page.toast.agentsMdChangedOnDisk": "AGENTS.md, OpenChamber dışında değiştirildiği için düzenlemeniz kaydedilmedi. Kopyalayın ve güncel dosyayı yüklemek için bu sayfayı yeniden açın.",
   "settings.commands.sidebar.title": "Komutlar",
   "settings.commands.sidebar.total": "Toplam {count}",
   "settings.commands.sidebar.empty.title": "Yapılandırılmış komut yok",

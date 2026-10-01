@@ -234,17 +234,25 @@ function readConfigLayer(filePath) {
 function readConfigLayers(workingDirectory) {
   const { userPaths, projectPath, customPath } = getConfigPaths(workingDirectory);
   const userPath = getPrimaryUserConfigPath(userPaths);
+  // OpenCode loads every global config file in order, so an `opencode.jsonc`
+  // next to `opencode.json` overrides it. New entries still go to the primary
+  // file; entries found in the override are edited where they live.
+  const userOverridePath = userPaths.find((candidate) => candidate !== userPath && fs.existsSync(candidate)) ?? null;
   const userLayer = readConfigLayer(userPath);
+  const userOverrideLayer = readConfigLayer(userOverridePath);
   const projectLayer = readConfigLayer(projectPath);
   const customLayer = readConfigLayer(customPath);
   const mergedConfig = mergeConfigs(
-    mergeConfigs(userLayer.config, projectLayer.config),
+    mergeConfigs(mergeConfigs(userLayer.config, userOverrideLayer.config), projectLayer.config),
     customLayer.config,
   );
 
   const layerErrors = [];
   if (userLayer.error) {
     layerErrors.push({ path: userPath, code: userLayer.error.code, message: userLayer.error.message });
+  }
+  if (userOverrideLayer.error && userOverridePath) {
+    layerErrors.push({ path: userOverridePath, code: userOverrideLayer.error.code, message: userOverrideLayer.error.message });
   }
   if (projectLayer.error && projectPath) {
     layerErrors.push({ path: projectPath, code: projectLayer.error.code, message: projectLayer.error.message });
@@ -255,10 +263,11 @@ function readConfigLayers(workingDirectory) {
 
   return {
     userConfig: userLayer.config,
+    userOverrideConfig: userOverrideLayer.config,
     projectConfig: projectLayer.config,
     customConfig: customLayer.config,
     mergedConfig,
-    paths: { userPath, projectPath, customPath },
+    paths: { userPath, userOverridePath, projectPath, customPath },
     layerErrors,
   };
 }
@@ -320,7 +329,7 @@ function throwIfLayerError(layers, filePath) {
 }
 
 function getJsonEntrySource(layers, sectionKey, entryName) {
-  const { userConfig, projectConfig, customConfig, paths } = layers;
+  const { userConfig, userOverrideConfig, projectConfig, customConfig, paths } = layers;
   if (paths.customPath) {
     throwIfLayerError(layers, paths.customPath);
     const customSection = customConfig?.[sectionKey]?.[entryName];
@@ -333,6 +342,14 @@ function getJsonEntrySource(layers, sectionKey, entryName) {
     const projectSection = projectConfig?.[sectionKey]?.[entryName];
     if (projectSection !== undefined) {
       return { section: projectSection, config: projectConfig, path: paths.projectPath, exists: true };
+    }
+  }
+
+  if (paths.userOverridePath) {
+    throwIfLayerError(layers, paths.userOverridePath);
+    const userOverrideSection = userOverrideConfig?.[sectionKey]?.[entryName];
+    if (userOverrideSection !== undefined) {
+      return { section: userOverrideSection, config: userOverrideConfig, path: paths.userOverridePath, exists: true };
     }
   }
 
@@ -440,7 +457,20 @@ function walkSkillMdFiles(rootDir) {
   if (!rootDir || !fs.existsSync(rootDir)) return [];
 
   const results = [];
+  // Real paths of the directories on the current walk path. Links (symlinks and
+  // Windows junctions) are followed at any depth; a link back to one of its own
+  // ancestors is skipped instead of recursing forever. Two links to the same
+  // target elsewhere in the tree are both walked, as the top level always did.
+  const ancestors = new Set();
   const walk = (dir) => {
+    let realDir;
+    try {
+      realDir = fs.realpathSync(dir);
+    } catch {
+      return;
+    }
+    if (ancestors.has(realDir)) return;
+
     let entries = [];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -448,16 +478,33 @@ function walkSkillMdFiles(rootDir) {
       return;
     }
 
+    ancestors.add(realDir);
+
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
+      // Junctions report as links, not directories. A link whose target cannot be
+      // stat'ed is skipped, the way an unreadable directory is, instead of failing
+      // the whole scan.
+      let isDirectoryEntry = entry.isDirectory();
+      let isFileEntry = entry.isFile();
+      if (entry.isSymbolicLink()) {
+        try {
+          const target = fs.statSync(fullPath);
+          isDirectoryEntry = target.isDirectory();
+          isFileEntry = target.isFile();
+        } catch {
+          continue;
+        }
+      }
+      if (isDirectoryEntry) {
         walk(fullPath);
         continue;
       }
-      if (entry.isFile() && entry.name === 'SKILL.md') {
+      if (isFileEntry && entry.name === 'SKILL.md') {
         results.push(fullPath);
       }
     }
+    ancestors.delete(realDir);
   };
 
   walk(rootDir);

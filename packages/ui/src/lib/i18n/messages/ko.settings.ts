@@ -603,6 +603,7 @@ export const settingsDict = {
   'settings.behavior.page.responseStyle.customPlaceholder': '첫 메시지에 추가할 지침을 작성하세요...',
   'settings.behavior.page.toast.saved': '동작이 성공적으로 저장되었습니다',
   'settings.behavior.page.toast.saveFailed': '동작 저장에 실패했습니다',
+  'settings.behavior.page.toast.agentsMdChangedOnDisk': 'AGENTS.md이(가) OpenChamber 외부에서 변경되어 편집 내용이 저장되지 않았습니다. 복사한 후 이 페이지를 다시 열어 최신 파일을 불러오세요.',
   'settings.commands.sidebar.title': '명령어',
   'settings.commands.sidebar.total': '총 {count}개',
   'settings.commands.sidebar.empty.title': '설정된 명령어가 없습니다',

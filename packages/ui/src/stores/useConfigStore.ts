@@ -3020,6 +3020,9 @@ export const useConfigStore = create<ConfigStore>()(
                             }
 
                             set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected" });
+                            // A plugin registers its agents while the server is already serving, so
+                            // the load above can race it. Re-check once, after startup has settled.
+                            setTimeout(() => void get().loadAgents({ source: 'startupAgentRecheck' }), 8_000);
                             markStartupTrace('initializeApp:end', {
                                 providers: get().providers.length,
                                 agents: get().agents.length,

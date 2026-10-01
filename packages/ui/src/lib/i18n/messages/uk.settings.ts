@@ -603,6 +603,7 @@ export const settingsDict = {
   "settings.behavior.page.responseStyle.customPlaceholder": "Напишіть інструкцію, яку треба додати до першого повідомлення...",
   "settings.behavior.page.toast.saved": "Поведінку збережено",
   "settings.behavior.page.toast.saveFailed": "Не вдалося зберегти поведінку",
+  "settings.behavior.page.toast.agentsMdChangedOnDisk": "AGENTS.md було змінено поза OpenChamber, тому ваше редагування не збережено. Скопіюйте його, а потім знову відкрийте цю сторінку, щоб завантажити поточний файл.",
   "settings.commands.sidebar.title": "Команди",
   "settings.commands.sidebar.total": "Усього {count}",
   "settings.commands.sidebar.empty.title": "Команди не налаштовано",

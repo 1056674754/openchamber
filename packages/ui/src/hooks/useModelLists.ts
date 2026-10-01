@@ -1,5 +1,5 @@
 import React from 'react';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ModelPickerProvider, ProviderModel } from '@/components/model-picker/ModelPickerList';
 
@@ -64,8 +64,12 @@ export const buildModelLists = ({
   return { favoriteModelsList, recentModelsList, hiddenModels: [...hiddenModels] };
 };
 
-export const useModelLists = () => {
-  const providers = useConfigStore((state) => state.providers);
+// `directory` resolves favorites and recents against that directory's scoped
+// catalog (a settings page editing another project), not the active one.
+export const useModelLists = (directory?: string) => {
+  const providers = useConfigStore((state) => (directory === undefined
+    ? state.providers
+    : selectProvidersForDirectory(state, directory)));
   const favoriteModels = useUIStore((state) => state.favoriteModels);
   const recentModels = useUIStore((state) => state.recentModels);
   const hiddenModels = useUIStore((state) => state.hiddenModels);

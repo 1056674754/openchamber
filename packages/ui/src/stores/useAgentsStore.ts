@@ -318,13 +318,16 @@ export const useAgentsStore = create<AgentsStore>()(
                         // Parse subfolder group from file path
                         const mdPath: string | null | undefined = data.sources?.md?.path;
                         const group = parseAgentGroup(mdPath);
+                        // The resolved Agent info carries no built-in flag; the
+                        // config-entity route derives it from the sources.
+                        const native = data.isBuiltIn === true;
 
                         if (scope === 'project' || scope === 'user') {
-                          return { ...agent, scope: scope as AgentScope, group };
+                          return { ...agent, scope: scope as AgentScope, group, native };
                         }
 
                         // Explicitly set null scope if not found, to clear stale state
-                        return { ...agent, scope: undefined, group };
+                        return { ...agent, scope: undefined, group, native };
                       }
                     } catch (err) {
                       console.warn(`[AgentsStore] Failed to fetch config for agent ${agent.name}:`, err);

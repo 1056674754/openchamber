@@ -475,7 +475,20 @@ const walkSkillMdFiles = (rootDir?: string | null): string[] => {
   if (!rootDir || !fs.existsSync(rootDir)) return [];
 
   const results: string[] = [];
+  // Real paths of the directories on the current walk path. Links (symlinks and
+  // Windows junctions) are followed at any depth; a link back to one of its own
+  // ancestors is skipped instead of recursing forever. Two links to the same
+  // target elsewhere in the tree are both walked, as the top level always did.
+  const ancestors = new Set<string>();
   const walkDir = (dir: string) => {
+    let realDir: string;
+    try {
+      realDir = fs.realpathSync(dir);
+    } catch {
+      return;
+    }
+    if (ancestors.has(realDir)) return;
+
     let entries: fs.Dirent[] = [];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -483,16 +496,33 @@ const walkSkillMdFiles = (rootDir?: string | null): string[] => {
       return;
     }
 
+    ancestors.add(realDir);
+
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
+      // Junctions report as links, not directories. A link whose target cannot be
+      // stat'ed is skipped, the way an unreadable directory is, instead of failing
+      // the whole scan.
+      let isDirectoryEntry = entry.isDirectory();
+      let isFileEntry = entry.isFile();
+      if (entry.isSymbolicLink()) {
+        try {
+          const target = fs.statSync(fullPath);
+          isDirectoryEntry = target.isDirectory();
+          isFileEntry = target.isFile();
+        } catch {
+          continue;
+        }
+      }
+      if (isDirectoryEntry) {
         walkDir(fullPath);
         continue;
       }
-      if (entry.isFile() && entry.name === 'SKILL.md') {
+      if (isFileEntry && entry.name === 'SKILL.md') {
         results.push(fullPath);
       }
     }
+    ancestors.delete(realDir);
   };
 
   walkDir(rootDir);
