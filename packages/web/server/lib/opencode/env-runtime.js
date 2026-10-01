@@ -12,6 +12,10 @@ export const createOpenCodeEnvRuntime = (deps) => {
     readSettingsFromDiskMigrated,
   } = deps;
   const runSpawnSync = typeof deps.spawnSync === 'function' ? deps.spawnSync : spawnSync;
+  // Windows probes run synchronously on the startup path; an unbounded one (a
+  // PowerShell profile on a stuck OneDrive folder, `where` walking a dead
+  // network drive in PATH) hangs the whole process with no output.
+  const WINDOWS_PROBE_TIMEOUT_MS = 10_000;
 
   const parseNullSeparatedEnvSnapshot = (raw) => {
     if (typeof raw !== 'string' || raw.length === 0) {
@@ -150,11 +154,12 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     for (const shellPath of powershellCandidates) {
       try {
-        const result = runSpawnSync(shellPath, ['-NoLogo', '-Command', psScript], {
+        const result = runSpawnSync(shellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', psScript], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           maxBuffer: 10 * 1024 * 1024,
           windowsHide: true,
+          timeout: WINDOWS_PROBE_TIMEOUT_MS,
         });
         if (result.status !== 0) {
           continue;
@@ -174,6 +179,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
         stdio: ['ignore', 'pipe', 'pipe'],
         maxBuffer: 10 * 1024 * 1024,
         windowsHide: true,
+        timeout: WINDOWS_PROBE_TIMEOUT_MS,
       });
       if (result.status === 0 && typeof result.stdout === 'string' && result.stdout.length > 0) {
         return parseNullSeparatedEnvSnapshot(result.stdout.replace(/\r?\n/g, '\0'));
@@ -396,6 +402,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: WINDOWS_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const lines = (result.stdout || '')
@@ -470,6 +477,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: WINDOWS_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const lines = (result.stdout || '')
@@ -551,6 +559,7 @@ export const createOpenCodeEnvRuntime = (deps) => {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
+          timeout: WINDOWS_PROBE_TIMEOUT_MS,
         });
         if (result.status === 0) {
           const lines = (result.stdout || '')

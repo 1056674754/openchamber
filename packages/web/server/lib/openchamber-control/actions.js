@@ -1,7 +1,7 @@
 export const OPENCHAMBER_CONTROL_ACTION_DEFINITIONS = Object.freeze([
   { action: 'projects.list', title: 'List configured projects', description: 'List configured projects; no parameters' },
   { action: 'models.list', title: 'Show model preferences', description: 'Show default, favorite, and recent model preferences; no parameters' },
-  { action: 'session.list', title: 'List sessions', description: 'List sessions in an explicit directory; optional limit, all, or withStatus' },
+  { action: 'session.list', title: 'List sessions', description: 'List sessions in an explicit directory or projectId; optional limit, all, or withStatus' },
   { action: 'session.create', title: 'Create a session', description: 'Create a session in an explicit directory; prompt is optional' },
   { action: 'session.send', title: 'Send a prompt', description: 'Send a new prompt to sessionId in its explicit directory' },
   { action: 'session.fork', title: 'Fork a session', description: 'Fork sessionId in its explicit directory; messageId selects the boundary' },

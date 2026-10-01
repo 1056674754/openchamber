@@ -67,4 +67,41 @@ describe('OpenChamber control authority', () => {
       serverId: 'default',
     })).rejects.toMatchObject({ statusCode: 400 });
   });
+
+  test('refuses projectId and directory together and resolves reads through the project', async () => {
+    const service = createService({
+      sessionService: {
+        resolveDirectory: async ({ projectId }) => {
+          if (projectId === 'unknown') throw Object.assign(new Error('Project not found'), { statusCode: 404 });
+          return { directory: '/resolved-repo', projectId };
+        },
+        create: async () => ({ sessionId: 'ses_created', directory: '/repo' }),
+        send: async () => ({ sessionId: 'ses_existing', directory: '/repo' }),
+        fork: async () => ({ sessionId: 'ses_forked', directory: '/repo' }),
+      },
+      createClient: () => ({
+        session: {
+          list: async () => ({ data: [{ id: 'ses_1' }] }),
+          status: async () => ({ data: {} }),
+        },
+      }),
+    });
+
+    await expect(service.execute('session.list', {
+      serverId: 'default',
+      projectId: 'proj-1',
+      directory: '/repo',
+    })).rejects.toMatchObject({ statusCode: 400 });
+
+    await expect(service.execute('session.list', {
+      serverId: 'default',
+      projectId: 'unknown',
+    })).rejects.toMatchObject({ statusCode: 404 });
+
+    const result = await service.execute('session.list', {
+      serverId: 'default',
+      projectId: 'proj-1',
+    });
+    expect(result.directory).toBe('/resolved-repo');
+  });
 });

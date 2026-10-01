@@ -443,6 +443,24 @@ export const createOpenChamberControlService = (dependencies) => {
     };
   };
 
+  // projectId and directory are two names for one scope. Accepting both let
+  // one silently win over the other, so every session action refuses the pair.
+  const assertSingleScope = (input) => {
+    if (asNonEmptyString(input.projectId) && asNonEmptyString(input.directory)) {
+      throw new OpenChamberControlError('Provide only one of projectId or directory', 400);
+    }
+  };
+
+  // An explicit projectId scopes a session read to that project's directory,
+  // resolved the same way create/send/fork resolve it. An unknown project is
+  // an error, never a silent read of the caller's directory or of every project.
+  const resolveReadDirectory = async (input) => {
+    assertSingleScope(input);
+    const projectID = asNonEmptyString(input.projectId);
+    if (!projectID) return asNonEmptyString(input.directory);
+    return (await sessionService.resolveDirectory({ projectId: projectID })).directory;
+  };
+
   const execute = async (action, input = {}, contextDirectory, options = {}) => {
     try {
       if (!CONTROL_ACTIONS.has(action)) {
@@ -461,10 +479,15 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action === 'schedule.status') return scheduledTaskService.status();
       if (action.startsWith('schedule.')) return executeScheduleAction(action, input);
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
+        assertSingleScope(input);
         return executeSessionMutation(action, input, options.signal);
       }
 
-      const directory = asNonEmptyString(input.directory);
+      if (action.startsWith('session.')) {
+        const sessionID = asNonEmptyString(input.sessionId);
+        if (action !== 'session.list' && !sessionID) throw new OpenChamberControlError('sessionId is required', 400);
+      }
+      const directory = await resolveReadDirectory(input);
       if (!directory) throw new OpenChamberControlError('directory is required', 400);
       const client = await getClient();
       if (action === 'session.list') {
