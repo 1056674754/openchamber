@@ -94,6 +94,7 @@ import {
   createDraftPermissionIntent,
   type DraftPermissionIntent,
 } from "./draft-permission-intent"
+import type { PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import { useSessionGoalArmStore } from "@/stores/useSessionGoalArmStore"
 import { setSessionGoal } from "@/lib/sessionGoalActions"
 import { probeSessionGoalSupport } from "@/lib/sessionGoalLocal"
@@ -425,7 +426,7 @@ export type SessionUIState = {
   prepareChatDraftDirectory: () => Promise<string | null>
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null; serverId?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
-  setDraftPermissionAutoAccept: (enabled: boolean) => void
+  setDraftPermissionMode: (mode: PermissionMode) => void
   setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
@@ -825,7 +826,7 @@ const migrateDraftPermissionIntentToCreatedSession = async (
   sessionId: string,
   draft: NewSessionDraftState,
 ): Promise<void> => {
-  if (!draft.permissionIntent.autoAccept) {
+  if (draft.permissionIntent.mode === "ask") {
     return
   }
 
@@ -833,7 +834,7 @@ const migrateDraftPermissionIntentToCreatedSession = async (
   await applyDraftPermissionIntentAfterSessionCreation({
     sessionId,
     intent: draft.permissionIntent,
-    setSessionAutoAccept: usePermissionStore.getState().setSessionAutoAccept,
+    setSessionMode: usePermissionStore.getState().setSessionMode,
   })
 }
 
@@ -1282,7 +1283,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
         preparedChatDirectory: null,
         selectedProjectId: isChatDraft ? CHAT_DRAFT_PROJECT_ID : selectedProject?.id ?? null,
         directoryOverride: directory,
-        permissionIntent: createDraftPermissionIntent(options?.permissionIntent?.autoAccept),
+        permissionIntent: createDraftPermissionIntent(options?.permissionIntent?.mode ?? "ask"),
         pendingWorktreeRequestId: options?.pendingWorktreeRequestId ?? null,
         bootstrapPendingDirectory: normalizePath(options?.bootstrapPendingDirectory ?? null),
         preserveDirectoryOverride: options?.preserveDirectoryOverride,
@@ -1443,13 +1444,13 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       return { newSessionDraft: { ...s.newSessionDraft, preserveDirectoryOverride: value } }
     }),
 
-  setDraftPermissionAutoAccept: (enabled) =>
+  setDraftPermissionMode: (mode) =>
     set((s) => {
       if (!s.newSessionDraft.open) return s
       return {
         newSessionDraft: {
           ...s.newSessionDraft,
-          permissionIntent: createDraftPermissionIntent(enabled),
+          permissionIntent: createDraftPermissionIntent(mode),
         },
       }
     }),

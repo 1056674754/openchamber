@@ -113,6 +113,8 @@ import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { usePermissionStore } from '@/stores/permissionStore';
+import { displayedPermissionMode, nextPermissionMode, type PermissionMode } from '@/stores/utils/permissionAutoAccept';
+import { selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { extractGitChangedFiles } from './changedFiles';
 import { useI18n } from '@/lib/i18n';
 import { fetchResponseStyleInstruction } from '@/lib/responseStyle';
@@ -680,10 +682,17 @@ type PermissionAutoAcceptButtonProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
     isInteractive: boolean;
-    permissionAutoAcceptEnabled: boolean;
-    handlePermissionAutoAcceptToggle: () => void;
+    /** Already passed through `displayedPermissionMode`. */
+    permissionMode: PermissionMode;
+    handlePermissionModeCycle: () => void;
     withTooltip?: boolean;
 };
+
+const PERMISSION_MODE_ICON = {
+    ask: { icon: 'shield-user', color: undefined },
+    safety: { icon: 'shield-star', color: 'var(--status-success)' },
+    auto: { icon: 'shield-check', color: 'var(--status-info)' },
+} as const satisfies Record<PermissionMode, { icon: IconName; color: string | undefined }>;
 
 const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButton(props: PermissionAutoAcceptButtonProps) {
     const { t } = useI18n();
@@ -691,22 +700,24 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
         footerIconButtonClass,
         iconSizeClass,
         isInteractive,
-        permissionAutoAcceptEnabled,
-        handlePermissionAutoAcceptToggle,
+        permissionMode,
+        handlePermissionModeCycle,
         withTooltip = false,
     } = props;
 
-    const ariaLabel = permissionAutoAcceptEnabled
-        ? t('chat.chatInput.permissionAutoAccept.disable')
-        : t('chat.chatInput.permissionAutoAccept.enable');
-    const tooltipLabel = permissionAutoAcceptEnabled
-        ? t('chat.chatInput.permissionAutoAccept.on')
-        : t('chat.chatInput.permissionAutoAccept.off');
+    // Cycles ask → safety → auto → ask, skipping safety while no
+    // classification provider can run it (upstream segb 1bc709ed0).
+    const ariaLabel = permissionMode === 'safety'
+        ? t('chat.chatInput.permissionMode.safety')
+        : permissionMode === 'auto'
+            ? t('chat.chatInput.permissionMode.auto')
+            : t('chat.chatInput.permissionMode.ask');
+    const { icon, color } = PERMISSION_MODE_ICON[permissionMode];
 
     const button = (
         <button
             type="button"
-            onClick={handlePermissionAutoAcceptToggle}
+            onClick={handlePermissionModeCycle}
             className={cn(
                 footerIconButtonClass,
                 'rounded-md hover:bg-transparent',
@@ -721,15 +732,10 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
                     event.stopPropagation();
                 }
             }}
-            aria-pressed={permissionAutoAcceptEnabled}
             aria-label={ariaLabel}
             title={ariaLabel}
         >
-            {permissionAutoAcceptEnabled ? (
-                <Icon name="shield-check" className={cn(iconSizeClass)} style={{ color: 'var(--status-info)' }} />
-            ) : (
-                <Icon name="shield-user" className={cn(iconSizeClass)} />
-            )}
+            <Icon name={icon} className={cn(iconSizeClass)} style={color ? { color } : undefined} />
         </button>
     );
 
@@ -743,7 +749,7 @@ const PermissionAutoAcceptButton = React.memo(function PermissionAutoAcceptButto
                 {button}
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
-                {tooltipLabel}
+                {ariaLabel}
             </TooltipContent>
         </Tooltip>
     );
@@ -1200,10 +1206,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     }, [showSkillAutocomplete]);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const newSessionDraftOpen = Boolean(newSessionDraft?.open);
-    const draftPermissionAutoAcceptEnabled = useSessionUIStore(
-        (s) => s.newSessionDraft.open && s.newSessionDraft.permissionIntent.autoAccept,
+    const draftPermissionMode = useSessionUIStore(
+        (s) => (s.newSessionDraft.open ? s.newSessionDraft.permissionIntent.mode : null),
     );
-    const setDraftPermissionAutoAccept = useSessionUIStore((s) => s.setDraftPermissionAutoAccept);
+    const setDraftPermissionMode = useSessionUIStore((s) => s.setDraftPermissionMode);
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
     const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
@@ -1276,7 +1282,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     );
     const currentModel = getCurrentModel();
     const [abortFeedbackActive, setAbortFeedbackActive] = React.useState(false);
-    const setSessionAutoAccept = usePermissionStore((state) => state.setSessionAutoAccept);
+    const setSessionMode = usePermissionStore((state) => state.setSessionMode);
     const [isNarrowComposer, setIsNarrowComposer] = React.useState(false);
     const currentSessionMessagesResolved = useSessionMessagesResolved(currentSessionId ?? '');
     const [stableComposerContextUsage, setStableComposerContextUsage] = React.useState<SessionContextUsage | null>(null);
@@ -4429,38 +4435,39 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const iconButtonBaseClass = 'flex cursor-pointer items-center justify-center text-foreground transition-none outline-none focus:outline-none flex-shrink-0 disabled:cursor-not-allowed';
     const footerIconButtonClass = cn(iconButtonBaseClass, buttonSizeClass);
     const permissionScopeSessionId = currentSessionId ?? currentManagementSessionId;
-    const sessionPermissionAutoAcceptEnabled = usePermissionStore((state) => {
-        if (!permissionScopeSessionId) {
-            return false;
-        }
-        return state.isSessionAutoAccepting(permissionScopeSessionId);
-    });
-    const permissionAutoAcceptEnabled = permissionScopeSessionId
-        ? sessionPermissionAutoAcceptEnabled
-        : draftPermissionAutoAcceptEnabled;
+    const sessionPermissionMode = usePermissionStore((state) => (
+        permissionScopeSessionId ? state.getSessionMode(permissionScopeSessionId) : "ask" as PermissionMode
+    ));
+    const safetyNetAvailable = useRoutingStore(selectSafetyNetAvailable);
+    // The user sees `ask` while no classification provider can run the safety
+    // net; the stored `safety` mode comes back on its own once one can.
+    const permissionMode = permissionScopeSessionId
+        ? displayedPermissionMode(sessionPermissionMode, safetyNetAvailable)
+        : displayedPermissionMode(draftPermissionMode ?? "ask", safetyNetAvailable);
     const isPermissionAutoAcceptInteractive = Boolean(permissionScopeSessionId || newSessionDraftOpen);
 
-    const handlePermissionAutoAcceptToggle = React.useCallback(() => {
+    const handlePermissionModeCycle = React.useCallback(() => {
+        const nextMode = nextPermissionMode(permissionMode, safetyNetAvailable);
         if (!permissionScopeSessionId) {
             if (newSessionDraftOpen) {
-                setDraftPermissionAutoAccept(!draftPermissionAutoAcceptEnabled);
+                setDraftPermissionMode(nextMode);
                 return;
             }
             toast.error(t('chat.chatInput.toast.openSessionFirst'));
             return;
         }
 
-        const nextEnabled = !permissionAutoAcceptEnabled;
-        setSessionAutoAccept(permissionScopeSessionId, nextEnabled).catch(() => {
+        setSessionMode(permissionScopeSessionId, nextMode).catch(() => {
             toast.error(t('chat.chatInput.toast.togglePermissionAutoAcceptFailed'));
         });
     }, [
-        draftPermissionAutoAcceptEnabled,
+        draftPermissionMode,
         newSessionDraftOpen,
-        permissionAutoAcceptEnabled,
+        permissionMode,
         permissionScopeSessionId,
-        setDraftPermissionAutoAccept,
-        setSessionAutoAccept,
+        safetyNetAvailable,
+        setDraftPermissionMode,
+        setSessionMode,
         t,
     ]);
 
@@ -5004,8 +5011,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             footerIconButtonClass={footerIconButtonClass}
                                             iconSizeClass={iconSizeClass}
                                             isInteractive={isPermissionAutoAcceptInteractive}
-                                            permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
-                                            handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
+                                            permissionMode={permissionMode}
+                                            handlePermissionModeCycle={handlePermissionModeCycle}
                                         />
                                         <SessionGoalButton
                                             sessionId={currentSessionId}
@@ -5104,8 +5111,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                         footerIconButtonClass={footerIconButtonClass}
                                         iconSizeClass={iconSizeClass}
                                         isInteractive={isPermissionAutoAcceptInteractive}
-                                        permissionAutoAcceptEnabled={permissionAutoAcceptEnabled}
-                                        handlePermissionAutoAcceptToggle={handlePermissionAutoAcceptToggle}
+                                        permissionMode={permissionMode}
+                                        handlePermissionModeCycle={handlePermissionModeCycle}
                                         withTooltip
                                     />
                                     <SessionGoalButton

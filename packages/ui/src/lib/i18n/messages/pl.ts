@@ -1084,9 +1084,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.linked.pr.number': 'PR #{number}',
   'chat.chatInput.linked.pr.openInBrowserAria': 'Otwórz pull request w przeglądarce',
   'chat.chatInput.linked.pr.removeAria': 'Usuń powiązany pull request',
-  'chat.chatInput.permissionAutoAccept.disable': 'Disable permission auto-accept',
-  'chat.chatInput.permissionAutoAccept.enable': 'Enable permission auto-accept',
-  'chat.chatInput.permissionAutoAccept.off': 'Permission auto-accept: off',
 
   'chat.goal.dialog.titleCreate': 'Set Session Goal',
   'chat.goal.dialog.titleManage': 'Session Goal',
@@ -1132,7 +1129,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.goal.cancelDialog.description': 'The agent will stop working toward this goal automatically.',
   'chat.goal.cancelDialog.keep': 'Keep goal',
   'chat.goal.cancelDialog.confirm': 'Cancel goal',
-  'chat.chatInput.permissionAutoAccept.on': 'Permission auto-accept: on',
   'chat.chatInput.placeholder.chat': '@ dla plików/agentów; / dla poleceń i umiejętności; ! dla shell; # dla fragmentów',
   'chat.chatInput.placeholder.chatCompact': 'Użyj @ / ! # dla pomocników',
   'chat.chatInput.placeholder.selectSession': 'Wybierz lub utwórz sesję, aby zacząć czatować',

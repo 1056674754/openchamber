@@ -2006,8 +2006,13 @@ const READY_NOTIFICATION_COOLDOWN_MS = 5000;
 const DEFAULT_NOTIFICATION_MESSAGE_MAX_LENGTH = 250;
 let notificationSettingsSyncPromise: Promise<void> | null = null;
 
+// VS Code has no safety net (no OpenChamber server), so a session either
+// answers by itself or it does not.
+const legacyPolicyOf = (modes: Readonly<Record<string, string>>): Record<string, boolean> =>
+  Object.fromEntries(Object.entries(modes).map(([sessionId, mode]) => [sessionId, mode !== "ask"]));
+
 const vscodePermissionAutoAcceptRuntime = createVSCodePermissionAutoAcceptRuntime({
-  getPolicy: () => usePermissionStore.getState().autoAccept,
+  getPolicy: () => legacyPolicyOf(usePermissionStore.getState().modes),
   getSessions: () => new Map(getAllSyncSessions().map((session) => [session.id, session])),
   getSession: async (sessionId, target) => {
     const directory = target.directory?.trim();
@@ -2367,7 +2372,7 @@ const applyPermissionPolicySnapshot = (value: unknown): boolean => {
 };
 
 const syncVSCodePermissionPolicy = async (): Promise<void> => {
-  const localPolicy = { ...usePermissionStore.getState().autoAccept };
+  const localPolicy = legacyPolicyOf(usePermissionStore.getState().modes);
   const stored = await sendBridgeMessage('api:permission-auto-accept:get');
   if (!isPermissionPolicySnapshot(stored)) return;
 

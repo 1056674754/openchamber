@@ -301,15 +301,22 @@ describe('settings helpers', () => {
 
     expect(helpers.sanitizeSettingsUpdate({
       permissionAutoAccept: {
-        sessions: { root: true, child: false, invalid: 'true' },
+        sessions: { root: true, child: false, watched: 'safety', invalid: 'true' },
         revision: 4,
       },
     })).toEqual({
       permissionAutoAccept: {
-        sessions: { root: true, child: false },
+        sessions: { root: true, child: false, watched: 'safety' },
         revision: 4,
       },
     });
+  });
+
+  it('sanitizes the permission default mode', () => {
+    const helpers = createTestHelpers();
+
+    expect(helpers.sanitizeSettingsUpdate({ permissionDefaultMode: 'safety' })).toEqual({ permissionDefaultMode: 'safety' });
+    expect(helpers.sanitizeSettingsUpdate({ permissionDefaultMode: 'always-allow' })).toEqual({});
   });
 
   it('accepts mobileKeyboardMode as a persisted shared setting', () => {
@@ -571,6 +578,7 @@ describe('settings registry gate', () => {
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p',
     approvedDirectories: ['/home/testuser/project'], securityScopedBookmarks: ['bookmark'],
     permissionAutoAccept: { sessions: { s: true }, revision: 1 },
+    permissionDefaultMode: 'safety',
     remoteInstances: [{ id: 'r', url: 'https://r.example' }],
     pinnedDirectories: ['/home/testuser/project'], pinnedSessions: ['s1'],
     pinnedSessionsByProject: { p: ['s1'] }, pinnedSessionOrder: ['s1'], pinnedSessionOrderByProject: { p: ['s1'] },

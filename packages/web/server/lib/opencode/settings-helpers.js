@@ -6,6 +6,7 @@ import {
   redactRemoteRequestHeadersForApi,
 } from '../remote-instances/request-headers.js';
 import { isRoutingFeatureAvailable } from '../routing/feature-flag.js';
+import { isPermissionMode } from '../permission-auto-accept/modes.js';
 
 // Generated from packages/ui/src/lib/settings/registry.ts by
 // `bun run settings-registry:generate`; `registry.test.ts` fails when stale.
@@ -265,8 +266,10 @@ export const createSettingsHelpers = (dependencies) => {
       const sessions = {};
       const sourceSessions = candidate.permissionAutoAccept.sessions;
       if (sourceSessions && typeof sourceSessions === 'object' && !Array.isArray(sourceSessions)) {
-        for (const [sessionId, enabled] of Object.entries(sourceSessions)) {
-          if (sessionId && typeof enabled === 'boolean') sessions[sessionId] = enabled;
+        // A mode, or a boolean from a policy written before the modes existed;
+        // the permission runtime converts those on its first read.
+        for (const [sessionId, mode] of Object.entries(sourceSessions)) {
+          if (sessionId && (typeof mode === 'boolean' || isPermissionMode(mode))) sessions[sessionId] = mode;
         }
       }
       result.permissionAutoAccept = {
@@ -276,6 +279,9 @@ export const createSettingsHelpers = (dependencies) => {
           ? candidate.permissionAutoAccept.revision
           : 0,
       };
+    }
+    if (isPermissionMode(candidate.permissionDefaultMode)) {
+      result.permissionDefaultMode = candidate.permissionDefaultMode;
     }
     if (typeof candidate.desktopKeepManagedOpenCodeAliveOnQuit === 'boolean') {
       result.desktopKeepManagedOpenCodeAliveOnQuit = candidate.desktopKeepManagedOpenCodeAliveOnQuit;

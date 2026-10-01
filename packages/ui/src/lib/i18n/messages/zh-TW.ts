@@ -1967,10 +1967,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.stopGeneratingAria': '停止生成',
   'chat.chatInput.focusMode.toggleAria': '切換專注模式',
   'chat.chatInput.focusMode.label': '專注模式',
-  'chat.chatInput.permissionAutoAccept.disable': '關閉權限自動接受',
-  'chat.chatInput.permissionAutoAccept.enable': '開啟權限自動接受',
-  'chat.chatInput.permissionAutoAccept.on': '權限自動接受：開',
-  'chat.chatInput.permissionAutoAccept.off': '權限自動接受：關',
 
   'chat.goal.dialog.titleCreate': 'Set Session Goal',
   'chat.goal.dialog.titleManage': 'Session Goal',

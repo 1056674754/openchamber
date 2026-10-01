@@ -46,6 +46,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.deleted': 'Credenciais do OpenCode Go excluídas.',
   'settings.providers.page.openCodeGo.deleteFailed': 'Não foi possível excluir as credenciais do OpenCode Go.',
   'settings.providers.page.custom.optionLabel': 'Other / Custom',
+  'settings.providers.page.back': 'Todos os provedores',
   'settings.providers.page.custom.title': 'Custom provider',
   'settings.providers.page.custom.editTitle': 'Edit custom provider',
   'settings.providers.page.custom.description': 'Add an OpenAI-compatible provider with a base URL, credentials, and model list. Saved to OpenCode config so it works in chat like any other provider.',

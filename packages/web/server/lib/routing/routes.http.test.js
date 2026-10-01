@@ -22,6 +22,7 @@ const createApp = ({ flag = '1', resolvePromptBody } = {}) => {
     updateConfig: vi.fn(async () => ({ available: true })),
     setToken: vi.fn(async () => ({ available: true, tokenPresent: true })),
     clearToken: vi.fn(async () => ({ available: true, tokenPresent: false })),
+    setClassifierSource: vi.fn(async (source) => ({ available: true, classification: { selected: source } })),
   };
   const app = express();
   registerRoutingRoutes(app, runtime);
@@ -96,5 +97,12 @@ describe('routing routes', () => {
   it('is absent without the feature flag', async () => {
     const { app } = createApp({ flag: '' });
     await request(app).put('/api/routing/token').send({ token: 'x' }).expect(404);
+  });
+
+  it('saves the classification provider pick', async () => {
+    const { app, runtime } = createApp();
+    const response = await request(app).put('/api/routing/classifier').send({ source: 'zen-promo' }).expect(200);
+    expect(runtime.setClassifierSource).toHaveBeenCalledWith('zen-promo');
+    expect(response.body).toMatchObject({ classification: { selected: 'zen-promo' } });
   });
 });

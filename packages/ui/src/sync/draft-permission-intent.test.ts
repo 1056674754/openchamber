@@ -5,36 +5,36 @@ import {
 } from "./draft-permission-intent"
 
 describe("draft permission intent migration", () => {
-  test("does not write session permission when auto-accept is off", async () => {
+  test("does not write a session policy for the ask default", async () => {
     let callCount = 0
-    const setSessionAutoAccept = async (): Promise<void> => {
+    const setSessionMode = async (): Promise<void> => {
       callCount += 1
     }
 
     await applyDraftPermissionIntentAfterSessionCreation({
       sessionId: "session-manual",
-      intent: createDraftPermissionIntent(false),
-      setSessionAutoAccept,
+      intent: createDraftPermissionIntent("ask"),
+      setSessionMode,
     })
 
     expect(callCount).toBe(0)
   })
 
-  test("writes auto-accept to the created session before returning", async () => {
+  test("writes the chosen mode to the created session before returning", async () => {
     const callOrder: string[] = []
-    const setSessionAutoAccept = async (sessionId: string, enabled: boolean): Promise<void> => {
-      callOrder.push(`permission:${sessionId}:${enabled}`)
+    const setSessionMode = async (sessionId: string, mode: "ask" | "safety" | "auto"): Promise<void> => {
+      callOrder.push(`permission:${sessionId}:${mode}`)
     }
 
     await applyDraftPermissionIntentAfterSessionCreation({
       sessionId: "session-created",
-      intent: createDraftPermissionIntent(true),
-      setSessionAutoAccept,
+      intent: createDraftPermissionIntent("auto"),
+      setSessionMode,
     })
     callOrder.push("route-first-message")
 
     expect(callOrder).toEqual([
-      "permission:session-created:true",
+      "permission:session-created:auto",
       "route-first-message",
     ])
   })

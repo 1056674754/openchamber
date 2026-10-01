@@ -35,7 +35,7 @@ mock.module("@/lib/opencode/client", () => ({
 
 mock.module("@/stores/permissionStore", () => ({
   usePermissionStore: {
-    getState: () => ({ isSessionAutoAccepting: () => false }),
+    getState: () => ({ getSessionMode: () => "ask" }),
   },
 }))
 

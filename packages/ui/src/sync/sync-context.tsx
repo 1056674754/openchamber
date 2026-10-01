@@ -28,7 +28,7 @@ import { updateStreamingState } from "./streaming"
 import { setActionRefs, resolveBaseUrl, resolveSdkForDirectory } from "./session-actions"
 import { shouldConsumeBulkArchiveEcho } from "./bulk-archive-echo"
 import { getRuntimeKey } from "@/lib/runtime-switch"
-import { setSyncRefs } from "./sync-refs"
+import { setSyncRefs, getDirectoryState } from "./sync-refs"
 import { deleteShield } from "./delete-shield"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
@@ -49,7 +49,7 @@ import {
 } from "./session-activity-timing"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { usePermissionStore } from "@/stores/permissionStore"
-import { useRoutingStore } from "@/stores/useRoutingStore"
+import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
 import { applyMessageQueueUpdatedEvent, useMessageQueueStore } from "@/stores/messageQueueStore"
 import { useConfigStore, type ConfigConnectionState } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
@@ -375,6 +375,32 @@ const openSessionFromToast = (sessionID: string, directory: string) => {
       useSessionUIStore.getState().setCurrentSession(sessionID, directory)
     })
     .catch(() => undefined)
+}
+
+const notifyPermissionAsked = (permission: PermissionRequest, directory: string): void => {
+  const toastKey = getPermissionToastKey(permission.sessionID, permission.id)
+  const isViewed = isViewedInCurrentSession(directory, permission.sessionID)
+  if (!isViewed && toastKey && !pendingPermissionToastIds.has(toastKey)) {
+    pendingPermissionToastIds.add(toastKey)
+    const description = typeof permission.permission === "string" && permission.permission.trim().length > 0
+      ? permission.permission
+      : "Agent needs your approval"
+    toast.info("Permission needed", {
+      id: `permission-${toastKey}`,
+      description,
+      action: {
+        label: "Open session",
+        onClick: () => openSessionFromToast(permission.sessionID, directory),
+      },
+    })
+  }
+}
+
+/** The toast an `ask` session's request would have raised, for one the safety net left to the user. */
+export const notifyHeldPermission = (permissionID: string, sessionID: string, directory: string | null): void => {
+  if (!directory || isVSCodeRuntime()) return
+  const permission = getDirectoryState(directory)?.permission[sessionID]?.find((entry) => entry.id === permissionID)
+  if (permission) notifyPermissionAsked(permission, directory)
 }
 
 export function setActiveSession(directory: string, sessionId: string) {
@@ -1216,18 +1242,25 @@ export async function resyncBlockingRequestsForDirectory(
     }
 
     const permissionStore = usePermissionStore.getState()
-    const autoAcceptingSessionIds = Object.keys(grouped).filter((sessionId) => permissionStore.isSessionAutoAccepting(sessionId))
+    // Only `auto` sessions are answered by this client. A `safety` session is
+    // the server's to answer: its requests stay in the store so a held one can
+    // be announced, but the resync toast waits for the hold instead.
+    const clientAnsweredSessionIds = Object.keys(grouped).filter((sessionId) => permissionStore.getSessionMode(sessionId) === "auto")
+    const heldBySafetyNetSessionIds = new Set(
+      Object.keys(grouped).filter((sessionId) =>
+        permissionStore.getSessionMode(sessionId) === "safety" && selectSafetyNetAvailable(useRoutingStore.getState())),
+    )
 
-    if (autoAcceptingSessionIds.length > 0) {
+    if (clientAnsweredSessionIds.length > 0) {
       await Promise.all(
-        autoAcceptingSessionIds.flatMap((sessionId) =>
+        clientAnsweredSessionIds.flatMap((sessionId) =>
           (grouped[sessionId] ?? []).map((permission) =>
             sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined),
           ),
         ),
       )
 
-      for (const sessionId of autoAcceptingSessionIds) {
+      for (const sessionId of clientAnsweredSessionIds) {
         delete grouped[sessionId]
       }
     }
@@ -1235,7 +1268,7 @@ export async function resyncBlockingRequestsForDirectory(
     for (const [sessionId, permissions] of Object.entries(grouped)) {
       const knownIds = new Set((before.permission[sessionId] ?? []).map((item) => item.id))
       const isViewed = isViewedInCurrentSession(directory, sessionId)
-      if (isViewed) continue
+      if (isViewed || heldBySafetyNetSessionIds.has(sessionId)) continue
       for (const permission of permissions) {
         if (knownIds.has(permission.id)) continue
         const toastKey = getPermissionToastKey(sessionId, permission.id)
@@ -1611,28 +1644,18 @@ function handleEvent(
   if (payload.type === "permission.asked") {
     const permission = payload.properties as PermissionRequest
     const permissionStore = usePermissionStore.getState()
-    if (permissionStore.isSessionAutoAccepting(permission.sessionID)) {
+    const permissionMode = permissionStore.getSessionMode(permission.sessionID)
+    if (permissionMode === "auto" || (permissionMode === "safety" && selectSafetyNetAvailable(useRoutingStore.getState()))) {
+      // `auto` is answered by this client; a `safety` session is answered (or
+      // held, with a toast then) by the server's safety net. Neither asks here.
       updateRoutingIndexFromEvent(routingIndex, resolvedDirectory, payload, serverId)
-      void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      if (permissionMode === "auto") {
+        void sessionActions.respondToPermission(permission.sessionID, permission.id, "once").catch(() => undefined)
+      }
       return
     }
 
-    const toastKey = getPermissionToastKey(permission.sessionID, permission.id)
-    const isViewed = isViewedInCurrentSession(resolvedDirectory, permission.sessionID)
-    if (!isViewed && toastKey && !pendingPermissionToastIds.has(toastKey)) {
-      pendingPermissionToastIds.add(toastKey)
-      const description = typeof permission.permission === "string" && permission.permission.trim().length > 0
-        ? permission.permission
-        : "Agent needs your approval"
-      toast.info("Permission needed", {
-        id: `permission-${toastKey}`,
-        description,
-        action: {
-          label: "Open session",
-          onClick: () => openSessionFromToast(permission.sessionID, resolvedDirectory),
-        },
-      })
-    }
+    notifyPermissionAsked(permission, resolvedDirectory)
   }
 
   if (payload.type === "permission.replied") {

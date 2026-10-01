@@ -276,12 +276,22 @@ export const SETTINGS_REGISTRY: { readonly [K in keyof DesktopSettings]-?: Setti
   activeProjectId: field({ scope: 'instance', adopt: 'bootstrap-only', parse: parseNonEmptyString }),
   approvedDirectories: field({ scope: 'instance', parse: parseStringList }),
   securityScopedBookmarks: field({ scope: 'instance', surfaces: ['desktop'], parse: parseStringList }),
+  // Per-session permission modes; booleans are policies from before the modes,
+  // which the server converts on its first read (upstream segb 1bc709ed0).
   permissionAutoAccept: field({
     scope: 'instance',
     parse: fromSchema(z.object({
-      sessions: z.record(z.string().min(1), z.boolean()).catch({}),
+      sessions: z.record(z.string().min(1), z.union([z.boolean(), z.enum(['ask', 'safety', 'auto'])])).catch({}),
       revision: z.number().int().nonnegative().catch(0),
     })),
+  }),
+  // The mode the server writes onto each new top-level session. VS Code has no
+  // OpenChamber server to write it.
+  permissionDefaultMode: field({
+    scope: 'instance',
+    surfaces: ['web', 'desktop', 'mobile'],
+    parse: fromSchema(z.enum(['ask', 'safety', 'auto'])),
+    ui: uiStore('permissionDefaultMode', (v) => useUIStore.getState().setPermissionDefaultMode(v)),
   }),
   // Fork-only: remote instances configured on this host (the server sanitizes
   // the entries; the parser mirrors its shape).

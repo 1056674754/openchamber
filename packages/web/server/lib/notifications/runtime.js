@@ -672,12 +672,15 @@ export const createNotificationTriggerRuntime = (deps) => {
         return;
       }
 
-      // Client may be in Permission Auto-Accept for this session (or any
-      // ancestor). Skip the whole notification path — the client responds
-      // directly and the user has opted out of approval prompts.
+      // The session (or an ancestor) answers permissions by itself. Skip the
+      // notification when this request was answered automatically; one the
+      // safety net held for the user still notifies. The request id rides
+      // along inert until the getter is wired to the permission runtime's
+      // `isPermissionAutoAnswered` (deferred index.js wiring, upstream segb
+      // 1bc709ed0).
       if (
         await isSessionAutoAccepting(sessionId, notificationDirectory)
-        || await getIsSessionAutoAccepting?.(sessionId, notificationDirectory)
+        || await getIsSessionAutoAccepting?.(sessionId, notificationDirectory, requestId)
       ) {
         if (requestKey) notifiedPermissionRequests.add(requestKey);
         return;
@@ -693,7 +696,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         if (
           await isSessionAutoAccepting(sessionId, notificationDirectory)
-          || await getIsSessionAutoAccepting?.(sessionId, notificationDirectory)
+          || await getIsSessionAutoAccepting?.(sessionId, notificationDirectory, requestId)
         ) {
           if (requestKey) notifiedPermissionRequests.add(requestKey);
           return;

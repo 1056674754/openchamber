@@ -21,7 +21,7 @@ const draft = (overrides: Record<string, unknown> = {}) => ({
   open: true,
   selectedProjectId: remoteProject.id,
   directoryOverride: remoteProject.path,
-  permissionIntent: { autoAccept: false },
+  permissionIntent: { mode: "ask" },
   parentID: null,
   ...overrides,
 });

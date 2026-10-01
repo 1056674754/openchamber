@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -92,5 +92,19 @@ describe('routing store', () => {
     expect(JSON.stringify(JSON.parse(await fs.readFile(path.join(dir, 'routing.json'), 'utf8').catch(() => '{}')))).not.toContain('ts-secret');
     await store.clearToken();
     expect(await store.readToken()).toBeNull();
+  });
+
+  it('round-trips the classification pick and treats an unreadable file as no pick', async () => {
+    const dir = await tempDir();
+    const store = createRoutingStore({ dataDir: dir });
+    expect(await store.readClassifierSource()).toBeNull();
+    await store.writeClassifierSource('zen-promo');
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'classification.json'), 'utf8'))).toEqual({ version: 1, source: 'zen-promo' });
+    expect(await store.readClassifierSource()).toBe('zen-promo');
+
+    await fs.writeFile(path.join(dir, 'classification.json'), 'not json');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await store.readClassifierSource()).toBeNull();
+    warn.mockRestore();
   });
 });

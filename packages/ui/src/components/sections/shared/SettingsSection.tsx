@@ -1,5 +1,8 @@
 import React from 'react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Radio } from '@/components/ui/radio';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { SettingsInfoHint } from './SettingsInfoHint';
 
@@ -369,3 +372,150 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
     </div>
   );
 };
+
+interface SettingsRadioOptionProps {
+  selected: boolean;
+  onSelect: () => void;
+  label: React.ReactNode;
+  description?: React.ReactNode;
+  ariaLabel?: string;
+  disabled?: boolean;
+  className?: string;
+}
+
+/** Single radio option row used inside SettingsRadioGroup (upstream segb 1bc709ed0). */
+export const SettingsRadioOption: React.FC<SettingsRadioOptionProps> = ({
+  selected,
+  onSelect,
+  label,
+  description,
+  ariaLabel,
+  disabled = false,
+  className,
+}) => {
+  return (
+    <div
+      className={cn(
+        'flex cursor-pointer gap-2 py-0.5',
+        description != null ? 'items-start' : 'items-center',
+        disabled && 'cursor-not-allowed opacity-60',
+        className,
+      )}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-pressed={selected}
+      aria-disabled={disabled || undefined}
+      onClick={() => {
+        if (!disabled) onSelect();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === ' ' || event.key === 'Enter') {
+          event.preventDefault();
+          if (!disabled) onSelect();
+        }
+      }}
+    >
+      <Radio
+        checked={selected}
+        onChange={onSelect}
+        disabled={disabled}
+        ariaLabel={ariaLabel}
+        className={description != null ? 'mt-0.5' : undefined}
+      />
+      <div className="flex min-w-0 flex-col">
+        <span className="typography-ui-label font-normal text-foreground">
+          {label}
+        </span>
+        {description != null ? (
+          <span className={SETTINGS_HELPER_CLASS}>{description}</span>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
+interface SettingsRadioGroupProps {
+  'aria-label': string;
+  children: React.ReactNode;
+  className?: string;
+}
+
+/** Accessible radio group wrapper with compact vertical spacing. */
+export const SettingsRadioGroup: React.FC<SettingsRadioGroupProps> = ({
+  'aria-label': ariaLabel,
+  children,
+  className,
+}) => {
+  return (
+    <div role="radiogroup" aria-label={ariaLabel} className={cn(SETTINGS_OPTION_STACK_CLASS, className)}>
+      {children}
+    </div>
+  );
+};
+
+interface SettingsChipOption<T extends string> {
+  value: T;
+  label: React.ReactNode;
+  disabled?: boolean;
+  /**
+   * Shown on hover (long-press on touch). The popup stays open while the
+   * pointer is on it, so it may carry a link. Keep what the user must read
+   * visible elsewhere: touch users rarely long-press.
+   */
+  tooltip?: React.ReactNode;
+}
+
+interface SettingsChipGroupProps<T extends string> {
+  value: T;
+  options: Array<SettingsChipOption<T>>;
+  onChange: (value: T) => void;
+  className?: string;
+  'aria-label'?: string;
+}
+
+/** Compact chip / segmented enum picker (upstream segb 1bc709ed0). */
+export function SettingsChipGroup<T extends string>({
+  value,
+  options,
+  onChange,
+  className,
+  'aria-label': ariaLabel,
+}: SettingsChipGroupProps<T>) {
+  return (
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      className={cn('flex flex-wrap items-center gap-1', className)}
+    >
+      {options.map((option) => {
+        const chip = (
+          <Button
+            key={option.value}
+            type="button"
+            variant="chip"
+            size="xs"
+            disabled={option.disabled}
+            aria-pressed={value === option.value}
+            className="!font-normal"
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </Button>
+        );
+        if (!option.tooltip) return chip;
+        return (
+          <Tooltip key={option.value}>
+            {/* A disabled button gets no hover events, so its tooltip (usually
+                the reason it is disabled) hangs on a wrapper instead. */}
+            <TooltipTrigger asChild>
+              {option.disabled ? <span className="inline-flex" tabIndex={0}>{chip}</span> : chip}
+            </TooltipTrigger>
+            <TooltipContent side="top" sideOffset={6} className="max-w-xs">
+              {option.tooltip}
+            </TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}

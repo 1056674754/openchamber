@@ -2,8 +2,12 @@ import { create } from "zustand";
 import { devtools, persist } from "zustand/middleware";
 import type { Session } from "@opencode-ai/sdk/v2/client";
 import {
-    autoRespondsPermission,
-    type PermissionAutoAcceptMap,
+    isAutoAnsweringMode,
+    permissionPolicyWireSchema,
+    policySnapshotFromWire,
+    resolvePermissionMode,
+    type PermissionMode,
+    type PermissionModeMap,
 } from "./utils/permissionAutoAccept";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { getAllSyncSessions, getSyncChildStores } from "@/sync/sync-refs";
@@ -12,37 +16,34 @@ import { respondToPermission } from "@/sync/session-actions";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 
 interface PermissionState {
-    autoAccept: PermissionAutoAcceptMap;
+    // The policy itself. Persisted v3; a pre-modes v1/v2 boolean map migrates
+    // on rehydration (true → auto, false → ask).
+    modes: PermissionModeMap;
 }
 
 interface PermissionActions {
-    applySnapshot: (snapshot: { sessions: Readonly<Record<string, unknown>> }) => void;
+    applySnapshot: (snapshot: { sessions?: Readonly<Record<string, unknown>>; modes?: Readonly<Record<string, unknown>> }) => void;
+    /** Legacy on/off view for surfaces that predate the modes (VS Code notifications, scheduled tasks). */
     isSessionAutoAccepting: (sessionId: string) => boolean;
-    setSessionAutoAccept: (sessionId: string, enabled: boolean) => Promise<void>;
+    getSessionMode: (sessionId: string) => PermissionMode;
+    setSessionMode: (sessionId: string, mode: PermissionMode) => Promise<void>;
 }
 
 type PermissionStore = PermissionState & PermissionActions;
 
-const coerceAutoAcceptValue = (value: unknown): boolean => {
-    if (typeof value === "boolean") {
+const coerceSessionMode = (value: unknown): PermissionMode | null => {
+    if (value === "ask" || value === "safety" || value === "auto") {
         return value;
     }
-
+    // Pre-modes boolean entries from a v1/v2 local policy.
+    if (value === true) return "auto";
+    if (value === false) return "ask";
     if (typeof value === "string") {
         const normalized = value.trim().toLowerCase();
-        if (normalized === "true") {
-            return true;
-        }
-        if (normalized === "false") {
-            return false;
-        }
+        if (normalized === "true") return "auto";
+        if (normalized === "false") return "ask";
     }
-
-    if (typeof value === "number") {
-        return value === 1;
-    }
-
-    return false;
+    return null;
 };
 
 const isLegacyDirectoryAutoAcceptKey = (key: string): boolean => key.endsWith("/*");
@@ -189,16 +190,12 @@ const sessionBelongsToScope = async (
     return false;
 };
 
-const autoRespondsPermissionBySession = (
-    autoAccept: PermissionAutoAcceptMap,
-    sessions: Session[],
-    sessionID: string,
-): boolean => {
-    return autoRespondsPermission({
-        autoAccept,
-        sessionID,
-        sessions,
-    });
+const readStoredModes = (value: unknown): PermissionModeMap => {
+    const parsed = permissionPolicyWireSchema.safeParse(value);
+    if (!parsed.success) {
+        return {};
+    }
+    return policySnapshotFromWire(parsed.data).modes;
 };
 
 const getStorage = () => createDeferredSafeJSONStorage();
@@ -207,35 +204,34 @@ export const usePermissionStore = create<PermissionStore>()(
     devtools(
         persist(
             (set, get) => ({
-                autoAccept: {},
+                modes: {},
 
                 applySnapshot: (snapshot) => {
-                    const autoAccept: PermissionAutoAcceptMap = {};
-                    for (const [sessionId, enabled] of Object.entries(snapshot.sessions)) {
-                        if (sessionId && typeof enabled === "boolean") {
-                            autoAccept[sessionId] = enabled;
-                        }
-                    }
+                    const modes = readStoredModes(snapshot);
 
                     set((state) => {
-                        const currentEntries = Object.entries(state.autoAccept);
-                        const nextEntries = Object.entries(autoAccept);
+                        const currentEntries = Object.entries(state.modes);
+                        const nextEntries = Object.entries(modes);
                         const unchanged = currentEntries.length === nextEntries.length
-                            && nextEntries.every(([sessionId, enabled]) => state.autoAccept[sessionId] === enabled);
-                        return unchanged ? state : { autoAccept };
+                            && nextEntries.every(([sessionId, mode]) => state.modes[sessionId] === mode);
+                        return unchanged ? state : { modes };
                     });
                 },
 
                 isSessionAutoAccepting: (sessionId: string) => {
+                    return isAutoAnsweringMode(get().getSessionMode(sessionId));
+                },
+
+                getSessionMode: (sessionId: string) => {
                     if (!sessionId) {
-                        return false;
+                        return "ask";
                     }
 
                     const sessions = getAllSyncSessions();
-                    return autoRespondsPermissionBySession(get().autoAccept, sessions, sessionId);
+                    return resolvePermissionMode({ modes: get().modes, sessions, sessionID: sessionId });
                 },
 
-                setSessionAutoAccept: async (sessionId: string, enabled: boolean) => {
+                setSessionMode: async (sessionId: string, mode: PermissionMode) => {
                     if (!sessionId) {
                         return;
                     }
@@ -243,12 +239,17 @@ export const usePermissionStore = create<PermissionStore>()(
                     const sessions = getAllSyncSessions();
 
                     set((state) => {
-                        const autoAccept = { ...state.autoAccept };
-                        autoAccept[sessionId] = enabled;
-                        return { autoAccept };
+                        const modes = { ...state.modes };
+                        modes[sessionId] = mode;
+                        return { modes };
                     });
 
                     const sessionScope = resolveSessionScope(sessionId, sessions);
+                    // Only an `auto` session is answered without the user here.
+                    // A `safety` session is the server's to answer: its held
+                    // requests must reach the user, so they are not mirrored
+                    // as suppressed. The server runtime holds the mode itself.
+                    const mirroredEnabled = mode === "auto";
 
                     // Mirror inherited state to the server so it can suppress
                     // permission notifications before the client auto-response
@@ -258,17 +259,26 @@ export const usePermissionStore = create<PermissionStore>()(
                         void fetch('/api/notifications/auto-accept', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ sessionId: scopedSessionId, enabled }),
+                            body: JSON.stringify({ sessionId: scopedSessionId, enabled: mirroredEnabled }),
                         }).catch(() => { /* best-effort */ });
                     }
 
-                    if (!enabled) {
+                    // The mode write itself goes to the policy route: booleans
+                    // there are the pre-modes on/off view, so mode-aware
+                    // clients send `mode` and keep the on/off view in step.
+                    const currentDirectory = normalizeDirectoryCandidate(opencodeClient.getDirectory());
+                    void fetch(`/api/permission-auto-accept/sessions/${encodeURIComponent(sessionId)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mode, enabled: mode !== "ask", directory: currentDirectory ?? undefined }),
+                    }).catch(() => { /* best-effort; the local policy already applies */ });
+
+                    if (mode !== "auto") {
                         return;
                     }
 
                     const sessionDirectory = useSessionUIStore.getState().getDirectoryForSession(sessionId);
                     const directories = new Set<string>();
-                    const currentDirectory = normalizeDirectoryCandidate(opencodeClient.getDirectory());
                     if (currentDirectory) {
                         directories.add(currentDirectory);
                     }
@@ -320,57 +330,58 @@ export const usePermissionStore = create<PermissionStore>()(
             }),
             {
                 name: "permission-store",
+                version: 3,
                 storage: getStorage(),
-                partialize: (state) => ({ autoAccept: state.autoAccept }),
-                merge: (persistedState, currentState) => {
-                    const merged = {
-                        ...currentState,
-                        ...(persistedState as Partial<PermissionStore>),
-                    };
-
-                    const persisted = Object.entries(merged.autoAccept || {});
-                    const nextAutoAccept: PermissionAutoAcceptMap = {};
-
-                    for (const [rawKey, rawEnabled] of persisted) {
+                partialize: (state) => ({ modes: state.modes }),
+                migrate: (persisted) => {
+                    const state = persisted && typeof persisted === "object" ? persisted as Record<string, unknown> : {};
+                    const modes: PermissionModeMap = {};
+                    const source = state.modes && typeof state.modes === "object" && !Array.isArray(state.modes)
+                        ? state.modes as Record<string, unknown>
+                        : state.autoAccept && typeof state.autoAccept === "object" && !Array.isArray(state.autoAccept)
+                            ? state.autoAccept as Record<string, unknown>
+                            : {};
+                    for (const [rawKey, rawMode] of Object.entries(source)) {
                         if (rawKey.includes("/") || isLegacyDirectoryAutoAcceptKey(rawKey)) {
                             continue;
                         }
-                        nextAutoAccept[rawKey] = coerceAutoAcceptValue(rawEnabled);
+                        const mode = coerceSessionMode(rawMode);
+                        if (mode) {
+                            modes[rawKey] = mode;
+                        }
                     }
-
-                    for (const [rawKey, rawEnabled] of persisted) {
-                        if (isLegacyDirectoryAutoAcceptKey(rawKey)) {
-                            continue;
+                    // Directory-scoped keys from a v1 policy collapse onto their
+                    // session id when that id has no explicit entry yet.
+                    if (state.autoAccept && typeof state.autoAccept === "object" && !Array.isArray(state.autoAccept)) {
+                        for (const [rawKey, rawEnabled] of Object.entries(state.autoAccept as Record<string, unknown>)) {
+                            if (!rawKey.includes("/")) continue;
+                            const sessionId = extractSessionIdFromLegacyKey(rawKey);
+                            if (!sessionId || Object.prototype.hasOwnProperty.call(modes, sessionId)) continue;
+                            const mode = coerceSessionMode(rawEnabled);
+                            if (mode) modes[sessionId] = mode;
                         }
-                        if (!rawKey.includes("/")) {
-                            continue;
-                        }
-
-                        const sessionId = extractSessionIdFromLegacyKey(rawKey);
-                        if (!sessionId) {
-                            continue;
-                        }
-                        if (Object.prototype.hasOwnProperty.call(nextAutoAccept, sessionId)) {
-                            continue;
-                        }
-
-                        const normalized = coerceAutoAcceptValue(rawEnabled);
-                        const existing = nextAutoAccept[sessionId];
-                        nextAutoAccept[sessionId] = existing === true ? true : normalized;
                     }
-
+                    return { modes } as PermissionStore;
+                },
+                merge: (persistedState, currentState) => {
+                    const persisted = persistedState && typeof persistedState === "object"
+                        ? persistedState as Partial<PermissionStore>
+                        : {};
                     return {
-                        ...merged,
-                        autoAccept: nextAutoAccept,
+                        ...currentState,
+                        ...persisted,
+                        modes: persisted.modes && typeof persisted.modes === "object" ? { ...persisted.modes } : {},
                     };
                 },
                 onRehydrateStorage: () => (state) => {
                     if (!state) return;
                     // Re-broadcast auto-accept state to the server after
                     // rehydration so server-side notification suppression
-                    // survives page reloads / server restarts.
-                    for (const [sid, enabled] of Object.entries(state.autoAccept || {})) {
-                        if (enabled === true) {
+                    // survives page reloads / server restarts. Only `auto`
+                    // sessions are answered without the user (safety held
+                    // requests must reach the user).
+                    for (const [sid, mode] of Object.entries(state.modes || {})) {
+                        if (mode === "auto") {
                             void fetch('/api/notifications/auto-accept', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },

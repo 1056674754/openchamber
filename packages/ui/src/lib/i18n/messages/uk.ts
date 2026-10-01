@@ -2091,10 +2091,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.stopGeneratingAria": "Припинити генерацію",
   "chat.chatInput.focusMode.toggleAria": "Перемкнути режим фокусування",
   "chat.chatInput.focusMode.label": "Режим фокусування",
-  "chat.chatInput.permissionAutoAccept.disable": "Вимкнути автоматичне прийняття дозволів",
-  "chat.chatInput.permissionAutoAccept.enable": "Увімкнути автоматичне прийняття дозволів",
-  "chat.chatInput.permissionAutoAccept.on": "Автоматичне прийняття дозволу: увімкнено",
-  "chat.chatInput.permissionAutoAccept.off": "Автоматичне прийняття дозволу: вимкнено",
 
   "chat.goal.dialog.titleCreate": "Set Session Goal",
   "chat.goal.dialog.titleManage": "Session Goal",

@@ -4,8 +4,6 @@
  */
 import { z } from 'zod';
 import {
-  JEV_API_ORIGIN,
-  JEV_API_PATH,
   JEV_MODEL,
   JEV_TIMEOUT_MS,
   ROUTING_INSTRUCTIONS,
@@ -69,15 +67,18 @@ export const decidePermission = (answers, { threshold }) => {
 const responseSchema = z.object({ answers: z.record(z.string(), z.unknown()) });
 
 export const createJevClient = ({ fetchImpl = fetch, timeoutMs = JEV_TIMEOUT_MS } = {}) => ({
-  /** Resolves to the parsed answers; throws with `status` on an HTTP error and `code: 'timeout'` on abort. */
-  ask: async (request, token) => {
+  /**
+   * `endpoint` comes from `classifierEndpoint`. Resolves to the parsed answers;
+   * throws with `status` on an HTTP error and `code: 'timeout'` on abort.
+   */
+  ask: async (request, endpoint) => {
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), timeoutMs);
     const started = Date.now();
     try {
-      const response = await fetchImpl(JEV_API_ORIGIN + JEV_API_PATH, {
+      const response = await fetchImpl(endpoint.url, {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        headers: { ...endpoint.headers, 'content-type': 'application/json' },
         body: JSON.stringify(request),
         signal: abort.signal,
       });

@@ -18,7 +18,7 @@ const readyConfig = () => {
   return config;
 };
 
-const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError, flag = '1' } = {}) => {
+const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError, flag = '1', classifierSource = null, providerKeys = { zenKey: null } } = {}) => {
   process.env.OPENCHAMBER_ROUTING_ENABLE = flag;
   const events = [];
   const store = {
@@ -27,6 +27,8 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError,
     readToken: vi.fn(async () => token),
     writeToken: vi.fn(async () => undefined),
     clearToken: vi.fn(async () => undefined),
+    readClassifierSource: vi.fn(async () => classifierSource),
+    writeClassifierSource: vi.fn(async (source) => source),
   };
   const jev = { ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 12 }; }) };
   const runtime = createRoutingRuntime({
@@ -36,6 +38,7 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError,
     broadcastGlobalUiEvent: (event) => events.push(event),
     store,
     jev,
+    readProviderKeys: () => providerKeys,
   });
   return { runtime, store, jev, events };
 };
@@ -159,30 +162,89 @@ describe('evaluatePermission', () => {
     expect(runtime.heldPermissions()).toEqual([]);
   });
 
-  it('accepts when Jev is unreachable and tells the UI it skipped', async () => {
-    const { runtime, events } = makeRuntime({ askError: Object.assign(new Error('Jev timed out after 4000ms'), { code: 'timeout' }) });
-    expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'accept', skipped: 'Jev timed out after 4000ms' });
+  it('holds when Jev is unreachable and tells the UI it skipped, without caching the skip', async () => {
+    const { runtime, jev, events } = makeRuntime({ askError: Object.assign(new Error('Jev timed out after 4000ms'), { code: 'timeout' }) });
+    expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'hold', skipped: 'Jev timed out after 4000ms' });
     expect(events.at(-1)).toMatchObject({ type: 'openchamber:routing.safety-skipped', properties: { permissionId: 'p1', error: 'Jev timed out after 4000ms' } });
+    // A skipped check is not remembered: the reconnect reconciliation may accept.
+    expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'hold', skipped: 'Jev timed out after 4000ms' });
+    expect(jev.ask).toHaveBeenCalledTimes(2);
+    expect(runtime.heldPermissions()).toEqual([]);
   });
 
-  it('accepts without asking when the safety net is off, the key is missing, or the flag is unset', async () => {
-    const off = readyConfig();
-    off.safetyNet.enabled = false;
-    for (const setup of [{ config: off }, { token: null }, { flag: '' }]) {
+  it('holds without asking when no classification provider is usable or the flag is unset', async () => {
+    for (const setup of [{ token: null }, { flag: '' }]) {
       const { runtime, jev } = makeRuntime({ ...setup, answers: {} });
-      expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'accept' });
+      expect(await runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'hold', unavailable: true });
       expect(jev.ask).not.toHaveBeenCalled();
     }
+  });
+
+  it('asks through the picked classification provider', async () => {
+    const zen = makeRuntime({ token: null, classifierSource: 'zen-promo', answers: { ask: { noul: 0.1 } } });
+    expect(await zen.runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'accept', score: 0.1, kind: null });
+    expect(zen.jev.ask).toHaveBeenCalledTimes(1);
+    expect(zen.jev.ask.mock.calls[0][1]).toMatchObject({ url: 'https://opencode.ai/zen/v1/systemone', model: 'jev-1.13-free' });
+
+    const zenKey = makeRuntime({ token: null, classifierSource: 'zen-key', providerKeys: { zenKey: 'zk' }, answers: { ask: { noul: 0.1 } } });
+    expect(await zenKey.runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'accept', score: 0.1, kind: null });
+    expect(zenKey.jev.ask.mock.calls[0][1]).toMatchObject({ model: 'jev-1.13', headers: { authorization: 'Bearer zk' } });
+  });
+
+  it('falls back to a usable key when the pick lost its credential, and Off sends nothing', async () => {
+    const fallback = makeRuntime({ classifierSource: 'zen-key', answers: { ask: { noul: 0.1 } } });
+    expect(await fallback.runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'accept', score: 0.1, kind: null });
+    expect(fallback.jev.ask.mock.calls[0][1]).toMatchObject({ model: 'jev-latest' });
+
+    const off = makeRuntime({ classifierSource: 'off', answers: {} });
+    expect(await off.runtime.evaluatePermission(permission, '/repo')).toEqual({ action: 'hold', unavailable: true });
+    expect(off.jev.ask).not.toHaveBeenCalled();
+  });
+
+  it('persists an explicit classifier pick and reports the routing state', async () => {
+    let picked = 'typesafe';
+    const { runtime, store } = makeRuntime({ answers: {} });
+    store.readClassifierSource.mockImplementation(async () => picked);
+    store.writeClassifierSource.mockImplementation(async (source) => { picked = source; });
+    await runtime.setClassifierSource('zen-promo');
+    expect(store.writeClassifierSource).toHaveBeenCalledWith('zen-promo');
+    const state = await runtime.describe();
+    expect(state.classification).toMatchObject({ selected: 'zen-promo', effective: 'zen-promo' });
+    expect(state.jevAvailable).toBe(true);
+    // `classifier` is the pre-Off client shape; zen-promo survives it.
+    expect(state.classifier).toMatchObject({ selected: 'zen-promo' });
+    await expect(runtime.classifierEndpoint()).resolves.toMatchObject({ model: 'jev-1.13-free' });
+
+    await expect(runtime.setClassifierSource('nope')).rejects.toMatchObject({ status: 400 });
   });
 });
 
 describe('describe', () => {
-  it('reports Auto ready only with the flag, enabled config, key, fallback and two categories', async () => {
+  it('reports Auto ready only with the flag, a usable classifier, enabled config, fallback and two categories', async () => {
     expect((await makeRuntime({ answers: {} }).runtime.describe()).autoReady).toBe(true);
-    expect((await makeRuntime({ token: null, answers: {} }).runtime.describe())).toMatchObject({ autoReady: false, tokenPresent: false });
+    expect((await makeRuntime({ token: null, answers: {} }).runtime.describe())).toMatchObject({ autoReady: false, tokenPresent: false, jevAvailable: false });
+    // The free promotion makes Jev available without any key.
+    const promo = await makeRuntime({ token: null, classifierSource: 'zen-promo', answers: {} }).runtime.describe();
+    expect(promo).toMatchObject({ jevAvailable: true, autoReady: true, tokenPresent: false, jevSource: 'zen-free' });
     const one = readyConfig();
     one.categories = one.categories.map((c, i) => ({ ...c, enabled: i === 0 }));
     expect((await makeRuntime({ config: one, answers: {} }).runtime.describe()).autoReady).toBe(false);
-    expect(await makeRuntime({ flag: '', answers: {} }).runtime.describe()).toEqual({ available: false, autoReady: false, tokenPresent: false, config: null, builtins: [] });
+    expect(await makeRuntime({ flag: '', answers: {} }).runtime.describe()).toEqual({
+      available: false, autoReady: false, jevAvailable: false, tokenPresent: false,
+      config: null, builtins: [], jevSource: 'zen-free', classifier: null, classification: null,
+    });
+  });
+
+  it('hides the classifier pick from clients that predate the Off source', async () => {
+    const state = await makeRuntime({ classifierSource: 'off', answers: {} }).runtime.describe();
+    expect(state.classifier).toBeNull();
+    expect(state.classification).toMatchObject({ selected: 'off', effective: null });
+  });
+
+  it('answers the legacy safety-net question from the stored config', async () => {
+    await expect(makeRuntime({ answers: {} }).runtime.legacySafetyNetEnabled()).resolves.toBe(true);
+    const off = readyConfig();
+    off.safetyNet.enabled = false;
+    await expect(makeRuntime({ config: off, answers: {} }).runtime.legacySafetyNetEnabled()).resolves.toBe(false);
   });
 });

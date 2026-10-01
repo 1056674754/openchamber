@@ -46,6 +46,7 @@ export const settingsDict = {
   'settings.providers.page.openCodeGo.deleted': '已删除 OpenCode Go 凭据。',
   'settings.providers.page.openCodeGo.deleteFailed': '无法删除 OpenCode Go 凭据。',
   'settings.providers.page.custom.optionLabel': 'Other / Custom',
+  'settings.providers.page.back': '所有提供商',
   'settings.providers.page.custom.title': 'Custom provider',
   'settings.providers.page.custom.editTitle': 'Edit custom provider',
   'settings.providers.page.custom.description': 'Add an OpenAI-compatible provider with a base URL, credentials, and model list. Saved to OpenCode config so it works in chat like any other provider.',

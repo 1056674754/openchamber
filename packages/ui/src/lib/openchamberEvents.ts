@@ -13,7 +13,11 @@ export type ScheduledTaskRanEvent = {
 const routingUpdatedSchema = z.object({
   available: z.boolean(),
   autoReady: z.boolean(),
+  // Servers from before the classifier pick never send this; absent keeps the
+  // last known value rather than reading as "no provider".
+  jevAvailable: z.boolean().optional(),
   tokenPresent: z.boolean(),
+  jevSource: z.enum(['typesafe', 'zen-free']).optional(),
 });
 
 const routingDecisionSchema = z.object({
@@ -34,12 +38,14 @@ const routingPermissionHeldSchema = z.object({
   sessionId: z.string().min(1),
   score: z.number(),
   kind: z.string().nullable(),
+  directory: z.string().nullable().optional(),
 });
 
 const routingSafetySkippedSchema = z.object({
   permissionId: z.string().min(1),
   sessionId: z.string().min(1),
   error: z.string(),
+  directory: z.string().nullable().optional(),
 });
 
 type RoutingUpdatedEvent = { type: 'routing-updated' } & z.infer<typeof routingUpdatedSchema>;

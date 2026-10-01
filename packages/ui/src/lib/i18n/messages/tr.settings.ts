@@ -46,6 +46,7 @@ export const settingsDict = {
   "settings.providers.page.openCodeGo.deleted": "OpenCode Go kimlik bilgileri silindi.",
   "settings.providers.page.openCodeGo.deleteFailed": "OpenCode Go kimlik bilgileri silinemedi.",
   "settings.providers.page.custom.optionLabel": "Diğer / Özel",
+  "settings.providers.page.back": 'Tüm sağlayıcılar',
   "settings.providers.page.custom.title": "Özel provider",
   "settings.providers.page.custom.editTitle": "Özel provider'ı düzenle",
   "settings.providers.page.custom.description": "Base URL, kimlik bilgileri, model listesi ve desteklenen API protokolüyle bir provider ekleyin. Sohbette kullanılmak üzere OpenCode yapılandırmasına kaydedilir.",

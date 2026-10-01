@@ -2,7 +2,6 @@ import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -24,6 +23,8 @@ import { useSettingsServerBaseUrl } from '@/hooks/useSettingsServerBaseUrl';
 import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { useSettingsProviders } from './useSettingsProviders';
 import { CustomProviderForm } from './CustomProviderForm';
+import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
+import { useUIStore } from '@/stores/useUIStore';
 import { ProviderOAuthMethods, type ProviderOAuthMethod } from './ProviderOAuthMethods';
 import {
   getOAuthAuthMethods,
@@ -182,12 +183,24 @@ export const ProvidersPage: React.FC = () => {
   const [customAllowExistingAuth, setCustomAllowExistingAuth] = React.useState(false);
   const [customBusy, setCustomBusy] = React.useState(false);
   const [customAuthFailure, setCustomAuthFailure] = React.useState<string | null>(null);
+  // Not an OpenCode provider id: OpenChamber's own classification providers (Jev).
+  const [showClassification, setShowClassification] = React.useState(false);
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
       setSelectedProvider(providers[0].id);
     }
   }, [providers, selectedProviderId, setSelectedProvider]);
+
+  // Links elsewhere in Settings (Jev access notes, permission chips) open this
+  // sub-page once and clear the request.
+  const classificationRequested = useUIStore((state) => state.settingsProvidersClassificationRequested);
+  const setClassificationRequested = useUIStore((state) => state.setSettingsProvidersClassificationRequested);
+  React.useEffect(() => {
+    if (!classificationRequested) return;
+    setShowClassification(true);
+    setClassificationRequested(false);
+  }, [classificationRequested, setClassificationRequested]);
 
   React.useEffect(() => {
     if (status === 'loading') return;
@@ -441,6 +454,26 @@ export const ProvidersPage: React.FC = () => {
 
   const isAddMode = selectedProviderId === ADD_PROVIDER_ID;
 
+  if (showClassification) {
+    return (
+      <ClassificationProvidersPage
+        titleLeading={(
+          <button
+            type="button"
+            onClick={() => setShowClassification(false)}
+            className="typography-ui-label cursor-pointer text-[var(--primary-base)] hover:underline"
+          >
+            {t('settings.providers.page.back')}
+          </button>
+        )}
+        onOpenProvider={(providerId) => {
+          setShowClassification(false);
+          setSelectedProvider(providerId);
+        }}
+      />
+    );
+  }
+
   const openCreateCustomProvider = () => {
     setCustomMode('create');
     setCustomInitial(null);
@@ -676,13 +709,20 @@ export const ProvidersPage: React.FC = () => {
               </div>
             </section>
 
-            <div className="px-2 pb-2">
+            <div className="flex items-center gap-4 px-2 pb-2">
               <button
                 type="button"
                 onClick={openCreateCustomProvider}
                 className="typography-ui-label text-[var(--primary-base)] hover:underline"
               >
                 {t('settings.providers.page.custom.optionLabel')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowClassification(true)}
+                className="typography-ui-label text-[var(--primary-base)] hover:underline"
+              >
+                {t('settings.classification.page.title')}
               </button>
             </div>
           </div>

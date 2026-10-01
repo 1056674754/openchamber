@@ -1,5 +1,6 @@
 import React from 'react';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import { PermissionDefaultModeField } from './PermissionDefaultModeField';
 import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -12,6 +13,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { shouldPreserveManualModelOverride } from '@/lib/messages/userModelChoice';
@@ -400,6 +402,8 @@ export const DefaultsSettings: React.FC = () => {
             <AgentSelector agentName={defaultAgent || ''} onChange={handleAgentChange} />
           </div>
         </div>
+
+        {!isVSCodeRuntime() ? <PermissionDefaultModeField agentName={defaultAgent || undefined} /> : null}
 
         <div className={cn('flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:gap-8')}>
           <div className="flex min-w-0 flex-col sm:w-56 shrink-0">

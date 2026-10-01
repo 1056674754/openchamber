@@ -7,6 +7,7 @@ import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey 
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { DesktopWindowControlsPosition, DesktopWindowControlsStyle } from '@/lib/desktop';
+import type { PermissionMode } from './utils/permissionAutoAccept';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
@@ -808,6 +809,10 @@ interface UIStore {
    * same as the other feature-availability flags.
    */
   routingFeatureAvailable: boolean;
+  /** Set by links elsewhere in Settings; the Providers page opens Classification providers once and clears it. */
+  settingsProvidersClassificationRequested: boolean;
+  /** The permission mode the server writes onto each new top-level session. */
+  permissionDefaultMode: PermissionMode;
   inputSpellcheckEnabled: boolean;
   wideChatLayoutEnabled: boolean;
   codeBlockLineWrap: boolean;
@@ -994,6 +999,8 @@ interface UIStore {
   setAgentControlToolEnabled: (value: boolean) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
   setRoutingFeatureAvailable: (value: boolean) => void;
+  setSettingsProvidersClassificationRequested: (requested: boolean) => void;
+  setPermissionDefaultMode: (value: PermissionMode) => void;
   setInputSpellcheckEnabled: (value: boolean) => void;
   setWideChatLayoutEnabled: (value: boolean) => void;
   setCodeBlockLineWrap: (value: boolean) => void;
@@ -1160,6 +1167,8 @@ export const useUIStore = create<UIStore>()(
         agentControlToolEnabled: true,
         agentMemoryToolEnabled: false,
         routingFeatureAvailable: false,
+        settingsProvidersClassificationRequested: false,
+        permissionDefaultMode: 'ask',
         inputSpellcheckEnabled: false,
         wideChatLayoutEnabled: false,
         codeBlockLineWrap: true,
@@ -2504,6 +2513,12 @@ export const useUIStore = create<UIStore>()(
         setRoutingFeatureAvailable: (value) => {
           set({ routingFeatureAvailable: value });
         },
+        setSettingsProvidersClassificationRequested: (requested) => {
+          set({ settingsProvidersClassificationRequested: requested });
+        },
+        setPermissionDefaultMode: (value) => {
+          set({ permissionDefaultMode: value });
+        },
         setInputSpellcheckEnabled: (value) => {
           set({ inputSpellcheckEnabled: value });
         },
@@ -2799,6 +2814,7 @@ export const useUIStore = create<UIStore>()(
           activeMainTab: state.activeMainTab,
           sidebarSection: state.sidebarSection,
           settingsPage: state.settingsPage,
+          permissionDefaultMode: state.permissionDefaultMode,
           settingsHasOpenedOnce: state.settingsHasOpenedOnce,
           settingsProjectsSelectedId: state.settingsProjectsSelectedId,
           settingsRemoteInstancesSelectedId: state.settingsRemoteInstancesSelectedId,

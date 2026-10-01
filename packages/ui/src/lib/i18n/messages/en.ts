@@ -2136,10 +2136,6 @@ export const dict = {
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
   'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',
   'chat.chatInput.focusMode.label': 'Focus mode',
-  'chat.chatInput.permissionAutoAccept.disable': 'Disable permission auto-accept',
-  'chat.chatInput.permissionAutoAccept.enable': 'Enable permission auto-accept',
-  'chat.chatInput.permissionAutoAccept.on': 'Permission auto-accept: on',
-  'chat.chatInput.permissionAutoAccept.off': 'Permission auto-accept: off',
 
   'chat.goal.dialog.titleCreate': 'Set Session Goal',
   'chat.goal.dialog.titleManage': 'Session Goal',

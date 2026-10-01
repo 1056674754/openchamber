@@ -85,9 +85,11 @@ export type DesktopSettings = {
   securityScopedBookmarks?: string[];
   /** Per-session permission auto-accept map (fork: the server still round-trips it). */
   permissionAutoAccept?: {
-    sessions: Record<string, boolean>;
+    sessions: Record<string, boolean | 'ask' | 'safety' | 'auto'>;
     revision: number;
   };
+  /** The permission mode the server writes onto each new top-level session (upstream segb 1bc709ed0). */
+  permissionDefaultMode?: 'ask' | 'safety' | 'auto';
   /** Fork-only: remote instances configured on this host (server-sanitized shape). */
   remoteInstances?: Array<{
     id: string;

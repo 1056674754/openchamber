@@ -1,5 +1,6 @@
 /**
- * `/api/routing` — configuration and the Jev key. Normal authenticated
+ * `/api/routing` — configuration, the Jev key and the classification provider
+ * pick (`/api/routing/classifier`). Normal authenticated
  * OpenChamber routes: do not add them to browser URL-token allowlists.
  *
  * `/api/session/:id/{prompt_async,prompt,command}` — the rewrite that turns
@@ -57,6 +58,15 @@ export function registerRoutingRoutes(app, runtime) {
     if (!isRoutingFeatureAvailable()) return unavailable(res);
     try {
       res.json(await runtime.clearToken());
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  app.put('/api/routing/classifier', express.json({ limit: '4kb' }), async (req, res) => {
+    if (!isRoutingFeatureAvailable()) return unavailable(res);
+    try {
+      res.json(await runtime.setClassifierSource(req.body?.source));
     } catch (error) {
       sendError(res, error);
     }

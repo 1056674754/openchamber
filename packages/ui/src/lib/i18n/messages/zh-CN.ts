@@ -2092,10 +2092,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.stopGeneratingAria': '停止生成',
   'chat.chatInput.focusMode.toggleAria': '切换专注模式',
   'chat.chatInput.focusMode.label': '专注模式',
-  'chat.chatInput.permissionAutoAccept.disable': '关闭权限自动接受',
-  'chat.chatInput.permissionAutoAccept.enable': '开启权限自动接受',
-  'chat.chatInput.permissionAutoAccept.on': '权限自动接受：开',
-  'chat.chatInput.permissionAutoAccept.off': '权限自动接受：关',
 
   'chat.goal.dialog.titleCreate': '设置会话目标',
   'chat.goal.dialog.titleManage': '会话目标',
