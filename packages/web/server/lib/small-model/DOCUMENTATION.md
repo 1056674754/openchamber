@@ -108,6 +108,31 @@ module is imported on first request, not at server startup.
   backs `summarizeText` (TTS/notification/note/topic). Session assist / git
   generation remain separate Work Items.
 
+## Dual track (OC2 spine S4, upstream 654705f7d)
+
+`index.js` dispatches `generateSmallModelText` / `describeSmallModel` /
+`listAuthenticatedProviders` on the managed instance's recorded protocol mode
+(`resolveProtocolMode('default')`, env-overrideable). Callers — assist, goal,
+notifications, agent-tool, walkthrough, routes — keep calling the same entry
+points.
+
+- **v1 track (default)**: the direct-provider path above, unchanged
+  (`call.js` / `resolve.js` / `catalog.js` / `runtime-providers.js`, including
+  the `small_model_fallback` candidate chain).
+- **v2 track (`OPENCHAMBER_PROTOCOL_MODE=v2` or a recorded 2.x probe)**: the
+  ported upstream resolution — family scan over `GET /api/model`,
+  `GET /api/model/default` fallback, one cold-catalog retry, schema-in-prompt
+  structured output — sending prompts through the running OpenCode's
+  generation endpoint via `client.js`. Credentials stay inside OpenCode.
+  `client.js` answers "no small model available" until
+  `configureOpenCodeRuntimeProviders` is wired from `server/index.js` (S8
+  wiring batch); it coexists with the identically-named configure function in
+  `runtime-providers.js` (separate connections by design).
+
+`/api/small-model/generate` responses now also carry `code` next to `error`
+when the failure has one (`small-model-unavailable`, `no-provider-login`, …);
+the message and status behavior is unchanged.
+
 ## Known limitations
 
 - OpenCode's free models (`opencode/big-pickle`, `*-free`) work without a

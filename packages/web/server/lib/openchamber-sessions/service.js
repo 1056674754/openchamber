@@ -1,9 +1,20 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { createWorktree } from '../git/index.js';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { expandSnippets } from '../opencode/snippets.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from '../opencode/protocol-mode.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
+import { createArchiveStore } from './archive-store.js';
+import {
+  createSessionMetadataStore,
+  createUpstreamSessionMetadataReader,
+  createV1UpstreamSessionMetadataReader,
+} from './session-metadata-store.js';
+import { createOpenCodeClient as defaultCreateOpenCodeClient } from './opencode-client.js';
 
 const FALLBACK_PROVIDER_ID = 'opencode';
 const FALLBACK_MODEL_ID = 'big-pickle';
@@ -273,6 +284,19 @@ export const createOpenChamberSessionService = (dependencies) => {
     createClient = createOpencodeClient,
     createWorktree: createWorktreeOverride = createWorktree,
     localServerId = 'default',
+    // OC2 spine S4 [spine 654705f7d]: OpenChamber-owned session state. The
+    // v1 archive path (session.update below) is untouched; the stores are the
+    // storage base the v2 track switches onto, and the metadata routes
+    // (routes.js) are the single owner of OpenChamber-namespaced metadata.
+    dataDir = null,
+    archiveStore: injectedArchiveStore = null,
+    sessionMetadataStore: injectedSessionMetadataStore = null,
+    // Injected by the server so every metadata write takes the same path:
+    // store, broadcast, and tell the goal loop. Falls back to store+broadcast
+    // when it is absent, which is what module tests use.
+    persistSessionMetadata = null,
+    broadcastGlobalUiEvent = null,
+    createOpenCodeClient = defaultCreateOpenCodeClient,
   } = dependencies;
 
   const assertLocalAuthority = (payload) => {
@@ -282,6 +306,94 @@ export const createOpenChamberSessionService = (dependencies) => {
       throw new OpenChamberControlError(`Managed Session control does not support server '${serverId}'`, 409);
     }
     return serverId;
+  };
+
+  // --- OpenChamber-owned session state [spine 654705f7d, spine S4] ---
+  // Same data dir convention as the rest of the server: `OPENCHAMBER_DATA_DIR`
+  // or `~/.config/openchamber`. Stores are built lazily so a service that only
+  // dispatches prompts never touches the filesystem.
+  const resolveDataDir = () => dataDir
+    ?? (process.env.OPENCHAMBER_DATA_DIR
+      ? path.resolve(process.env.OPENCHAMBER_DATA_DIR)
+      : path.join(os.homedir(), '.config', 'openchamber'));
+
+  let archiveStoreInstance = injectedArchiveStore;
+  let sessionMetadataStoreInstance = injectedSessionMetadataStore;
+
+  const getArchiveStore = () => {
+    if (!archiveStoreInstance) archiveStoreInstance = createArchiveStore({ dataDir: resolveDataDir() });
+    return archiveStoreInstance;
+  };
+
+  /**
+   * Seeding reads the OpenCode record through the client of the active track:
+   * the v1 SDK client while the managed instance speaks v1, `@opencode/client`
+   * once it speaks v2. Chosen per call so a mode recorded after construction
+   * (lifecycle probe) is honoured.
+   */
+  const readUpstreamMetadataV1 = createV1UpstreamSessionMetadataReader({
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
+    createClient,
+  });
+  const readUpstreamMetadataV2 = createUpstreamSessionMetadataReader({
+    buildOpenCodeUrl,
+    getOpenCodeAuthHeaders,
+    createOpenCodeClient,
+  });
+  const defaultReadUpstreamMetadata = (sessionID, scope) => {
+    const v2Track = resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2';
+    return v2Track ? readUpstreamMetadataV2(sessionID, scope) : readUpstreamMetadataV1(sessionID, scope);
+  };
+
+  const getSessionMetadataStore = () => {
+    if (!sessionMetadataStoreInstance) {
+      sessionMetadataStoreInstance = createSessionMetadataStore({
+        dataDir: resolveDataDir(),
+        readUpstreamMetadata: defaultReadUpstreamMetadata,
+      });
+    }
+    return sessionMetadataStoreInstance;
+  };
+
+  const broadcastMetadata = (sessionID, metadata) => {
+    broadcastGlobalUiEvent?.({
+      type: 'openchamber:session-metadata',
+      properties: { sessionID, metadata },
+    });
+  };
+
+  /**
+   * Merge-patch a session's OpenChamber-owned metadata — the single owner.
+   * Every writer goes through here so the same-transaction seed of a session
+   * OpenCode still holds metadata for always happens first. The broadcast
+   * carries the full merged object, because a client that missed an earlier
+   * patch must not have to reconstruct it.
+   */
+  const writeMetadata = async (sessionID, patch, directory = '') => {
+    if (typeof persistSessionMetadata === 'function') {
+      return persistSessionMetadata(sessionID, patch, { directory });
+    }
+    const metadata = await getSessionMetadataStore().setSessionMetadata(sessionID, patch, { directory });
+    broadcastMetadata(sessionID, metadata);
+    return metadata;
+  };
+
+  const setMetadata = async (sessionID, payload = {}) => {
+    const id = asNonEmptyString(sessionID);
+    if (!id) throw new OpenChamberControlError('a session id is required', 400);
+    const patch = payload?.patch;
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      throw new OpenChamberControlError('patch must be an object', 400);
+    }
+
+    return { metadata: await writeMetadata(id, patch, asNonEmptyString(payload?.directory) || '') };
+  };
+
+  const getMetadata = async (sessionID, directory = '') => {
+    const id = asNonEmptyString(sessionID);
+    if (!id) throw new OpenChamberControlError('a session id is required', 400);
+    return { metadata: await getSessionMetadataStore().get(id, { directory }) };
   };
 
   const validateRequestedSelection = async ({ directory, requestedModel, requestedAgent, requestedVariant }) => {
@@ -776,5 +888,14 @@ export const createOpenChamberSessionService = (dependencies) => {
     send: (sessionID, payload) => runExisting('send', sessionID, payload),
     fork: (sessionID, payload) => runExisting('fork', sessionID, payload),
     archive,
+    // Lazily-built stores, exposed for the v2-track switch and server wiring.
+    get archiveStore() {
+      return getArchiveStore();
+    },
+    get sessionMetadataStore() {
+      return getSessionMetadataStore();
+    },
+    setMetadata,
+    getMetadata,
   };
 };

@@ -38,7 +38,14 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
       if (statusCode >= 500) {
         console.error('Small model generation failed:', error);
       }
-      res.status(statusCode).json({ error: error.message || 'Small model generation failed' });
+      // [spine 654705f7d] carry the machine-readable code (`small-model-unavailable`
+      // from the v2 track's cold-catalog retry, `no-provider-login`, …) next to
+      // the message so UI callers can branch without string matching. Inert on
+      // the v1 track's response shape apart from the additive field.
+      res.status(statusCode).json({
+        error: error.message || 'Small model generation failed',
+        ...(error?.code ? { code: error.code } : {}),
+      });
     }
   });
 }
