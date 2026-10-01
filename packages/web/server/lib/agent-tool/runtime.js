@@ -128,7 +128,7 @@ const createWebToolEntry = () => String.raw`
 
 const createMemoryToolEntry = () => String.raw`
     openchamber_memory: {
-      description: "Keep durable facts, preferences, decisions, and hard-won references across sessions. Read a listed memory before acting on its abbreviated title. Never store secrets, one-off task state, facts already obvious from the code, or anything the user asked you not to keep. Choose global only for facts about the user; project is for this codebase.",
+      description: "Keep durable facts, preferences, decisions, and hard-won references across sessions. Read a listed memory before acting on its abbreviated title; once read, an entry stays in your context, so do not read it again in the same conversation. Never store secrets, one-off task state, facts already obvious from the code, or anything the user asked you not to keep. Choose global only for facts about the user; project is for this codebase.",
       args: {
         action: { type: "string", oneOf: ${JSON.stringify(OPENCHAMBER_MEMORY_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Memory action" },
         parameters: { type: "object", properties: ${JSON.stringify(MEMORY_PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the memory action" },
@@ -164,7 +164,7 @@ export const OpenChamberPlugin = async () => ({
   tool: {
 ${includeControl ? String.raw`
     openchamber: {
-      description: "Control OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with; never use this tool to delegate parts of your own current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default. To inspect a completed result later, use session.messages; session.send always sends a new prompt. Session and worktree deletion are unavailable.",
+      description: "Control OpenChamber projects, sessions, and scheduled tasks on the user's behalf. Sessions and scheduled tasks you create are for the user to follow and interact with. Do not decide on your own to hand parts of your current task to another session; when the user asks you to create a session, send a prompt to one, or schedule a task, do it, including when the work relates to your current task. Use one action per call. Scope with projectId or directory; omit both to use the current session directory. Session dispatches return immediately by default. To inspect a completed result later, use session.messages; session.send always sends a new prompt. Session and worktree deletion are unavailable.",
       args: {
         action: { type: "string", oneOf: ${JSON.stringify(OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "OpenChamber action to perform" },
         parameters: { type: "object", properties: ${JSON.stringify(PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },

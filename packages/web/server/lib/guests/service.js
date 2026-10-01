@@ -37,6 +37,31 @@ const runtimes = new Map();
 /** @type {Map<string, Promise<ServiceRuntime>>} */
 const startingByGuest = new Map();
 
+/** @type {Map<string, Promise<void>>} */
+const stoppingByGuest = new Map();
+
+// Requests retain their lifecycle object across awaits. A later host start
+// cannot reopen admission for work that belonged to the previous host.
+let hostLifecycle = { accepting: true };
+
+export const beginGuestServiceHost = () => {
+  if (runtimes.size || startingByGuest.size || stoppingByGuest.size) {
+    throw new Error('Guest services must finish stopping before a new host starts.');
+  }
+  hostLifecycle.accepting = false;
+  hostLifecycle = { accepting: true };
+};
+
+export const beginGuestServiceShutdown = () => {
+  hostLifecycle.accepting = false;
+};
+
+const assertGuestHostActive = (lifecycle) => {
+  if (!lifecycle.accepting) {
+    throw new GuestServiceError('The host is shutting down.', 'NO_SERVICE');
+  }
+};
+
 export class GuestServiceError extends Error {
   /**
    * @param {string} message
@@ -192,6 +217,8 @@ export const stopGuestService = async (guestId) => {
  * @param {string} guestId
  */
 const discardRuntime = async (guestId) => {
+  const stopping = stoppingByGuest.get(guestId);
+  if (stopping) return stopping;
   const runtime = runtimes.get(guestId);
   if (!runtime) {
     return;
@@ -202,7 +229,7 @@ const discardRuntime = async (guestId) => {
   if (child.exitCode !== null || child.signalCode) {
     return;
   }
-  await new Promise((resolve) => {
+  const stopped = new Promise((resolve) => {
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       resolve(undefined);
@@ -213,14 +240,24 @@ const discardRuntime = async (guestId) => {
     });
     child.kill('SIGTERM');
   });
+  stoppingByGuest.set(guestId, stopped);
+  try {
+    await stopped;
+  } finally {
+    stoppingByGuest.delete(guestId);
+  }
 };
 
 /** Test seam: the pid of a guest's running service, or `null`. */
 export const readServicePid = (guestId) => runtimes.get(guestId)?.child.pid ?? null;
 
 export const stopAllGuestServices = async () => {
-  const ids = [...runtimes.keys()];
-  await Promise.all(ids.map((id) => stopGuestService(id)));
+  const starts = [...startingByGuest.values()];
+  const ids = new Set([...runtimes.keys(), ...startingByGuest.keys(), ...stoppingByGuest.keys()]);
+  const stops = [...ids].map((id) => stopGuestService(id));
+  // Cancelled starts reject normally. Await their cleanup as well as children
+  // already registered when shutdown began.
+  await Promise.allSettled([...starts, ...stops]);
 };
 
 /**
@@ -266,7 +303,14 @@ const startGuestService = async ({
   socketBindings = [],
   socketOverrides = {},
   epoch,
+  lifecycle,
 }) => {
+  assertGuestHostActive(lifecycle);
+  // A replacement must not occupy the same guest slot while its previous
+  // child is still stopping; host shutdown must be able to drain both.
+  const previousStop = stoppingByGuest.get(guestId);
+  if (previousStop) await previousStop;
+  assertGuestHostActive(lifecycle);
   const existing = runtimes.get(guestId);
   if (existing?.status === 'ready' && existing.child.exitCode === null && !existing.child.signalCode) {
     return existing;
@@ -276,7 +320,7 @@ const startGuestService = async ({
   }
   // The request's epoch, read before its first store access: a Pause that
   // finished anywhere since then is a cancellation, spawn included.
-  const cancelled = () => stopEpochOf(guestId) !== epoch;
+  const cancelled = () => !lifecycle.accepting || stopEpochOf(guestId) !== epoch;
   const stoppedError = () => new GuestServiceError('The service was stopped before it became ready.', 'NO_SERVICE');
 
   const absoluteEntry = path.resolve(packageRoot, entry);
@@ -294,6 +338,7 @@ const startGuestService = async ({
     throw stoppedError();
   }
   const port = await reserveLoopbackPort();
+  if (cancelled()) throw stoppedError();
   const token = crypto.randomBytes(24).toString('hex');
   const socketEnv = socketBindings.length > 0
     ? await resolveServiceSocketEnv(socketBindings, socketOverrides)
@@ -451,8 +496,11 @@ export const proxyGuestServiceRequest = async ({
   // A Pause that lands anywhere between here and the proxied call bumps
   // this; the request then ends with NO_SERVICE instead of using the
   // enabled flag it read before the pause.
+  const lifecycle = hostLifecycle;
+  assertGuestHostActive(lifecycle);
   const epoch = stopEpochOf(guestId);
   const store = await readExtensionStore(persistPath);
+  assertGuestHostActive(lifecycle);
   if (store.disabledGuests?.[guestId]) {
     const label = typeof guestName === 'string' && guestName.trim() ? guestName.trim() : 'This extension';
     throw new GuestServiceError(
@@ -481,9 +529,10 @@ export const proxyGuestServiceRequest = async ({
       socketBindings,
       socketOverrides,
       epoch,
+      lifecycle,
     });
   }
-  if (stopEpochOf(guestId) !== epoch) {
+  if (!lifecycle.accepting || stopEpochOf(guestId) !== epoch) {
     if (runtimes.get(guestId) === runtime) {
       await discardRuntime(guestId);
     }

@@ -45,9 +45,9 @@ export const OPENCHAMBER_WEB_ACTIONS = Object.freeze(
 );
 
 export const OPENCHAMBER_MEMORY_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'memory.read', title: 'Read a stored memory', description: 'Read one full memory by title or memoryId; scope is optional' },
+  { action: 'memory.read', title: 'Read a stored memory', description: 'Read one full memory by title or memoryId; scope is optional. Once read, an entry stays in your context; do not read it again in the same conversation' },
   { action: 'memory.list', title: 'List stored memories', description: 'List memory titles in global, project, or both scopes' },
-  { action: 'memory.save', title: 'Remember something', description: 'Store a durable fact, preference, or reference in global or project scope' },
+  { action: 'memory.save', title: 'Remember something', description: 'Store a durable fact, preference, or reference in global or project scope. When the user explicitly asks you to remember something, store it unless it is a secret' },
   { action: 'memory.delete', title: 'Forget a memory', description: 'Delete a memory by memoryId and scope' },
 ]);
 
