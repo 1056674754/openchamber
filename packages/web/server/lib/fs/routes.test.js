@@ -418,11 +418,10 @@ describe('fs git-dirs (nested repository discovery)', () => {
     ]);
   });
 
-  it('skips junk directories and never descends into symlinks', async () => {
+  it('skips junk directories', async () => {
     const tempRoot = await fs.realpath(await makeTempDir());
     await fs.mkdir(path.join(tempRoot, 'node_modules/dep/.git'), { recursive: true });
     await fs.mkdir(path.join(tempRoot, 'real/.git'), { recursive: true });
-    await fs.symlink(path.join(tempRoot, 'real'), path.join(tempRoot, 'link'));
 
     const res = await request(await createGitDirsApp(tempRoot))
       .get('/api/fs/git-dirs')
@@ -431,6 +430,45 @@ describe('fs git-dirs (nested repository discovery)', () => {
     expect(res.status).toBe(200);
     expect(res.body.repositories).toEqual([
       { path: path.join(tempRoot, 'real'), name: 'real' },
+    ]);
+  });
+
+  it('follows symlinked directories and reports repositories under the link path', async () => {
+    // The project root groups repositories kept elsewhere through links.
+    const tempRoot = await fs.realpath(await makeTempDir());
+    const elsewhere = await fs.realpath(await makeTempDir());
+    await fs.mkdir(path.join(elsewhere, 'api/.git'), { recursive: true });
+    await fs.mkdir(path.join(elsewhere, 'web'), { recursive: true });
+    await fs.writeFile(path.join(elsewhere, 'web/.git'), 'gitdir: /elsewhere');
+    await fs.writeFile(path.join(elsewhere, 'notes.md'), 'x');
+    await fs.symlink(path.join(elsewhere, 'api'), path.join(tempRoot, 'api'));
+    await fs.symlink(path.join(elsewhere, 'web'), path.join(tempRoot, 'web'));
+    await fs.symlink(path.join(elsewhere, 'notes.md'), path.join(tempRoot, 'notes.md'));
+
+    const res = await request(await createGitDirsApp(tempRoot))
+      .get('/api/fs/git-dirs')
+      .query({ path: tempRoot, directory: tempRoot });
+
+    expect(res.status).toBe(200);
+    expect(res.body.repositories).toEqual([
+      { path: path.join(tempRoot, 'api'), name: 'api' },
+      { path: path.join(tempRoot, 'web'), name: 'web' },
+    ]);
+  });
+
+  it('walks each real directory once, so a link loop or a second link to a repository does not repeat it', async () => {
+    const tempRoot = await fs.realpath(await makeTempDir());
+    await fs.mkdir(path.join(tempRoot, 'real/.git'), { recursive: true });
+    await fs.symlink(tempRoot, path.join(tempRoot, 'loop'));
+    await fs.symlink(path.join(tempRoot, 'real'), path.join(tempRoot, 'again'));
+
+    const res = await request(await createGitDirsApp(tempRoot))
+      .get('/api/fs/git-dirs')
+      .query({ path: tempRoot, directory: tempRoot });
+
+    expect(res.status).toBe(200);
+    expect(res.body.repositories).toEqual([
+      { path: path.join(tempRoot, 'again'), name: 'again' },
     ]);
   });
 

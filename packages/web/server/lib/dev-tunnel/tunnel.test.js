@@ -36,10 +36,12 @@ const stopServer = async (server, sockets) => {
   });
 };
 
-const startDevServer = async (handler) => {
+const startDevServer = async (handler, host = '127.0.0.1') => {
   const server = http.createServer(handler);
   const sockets = trackSockets(server);
-  const port = await listen(server);
+  const port = await new Promise((resolve) => {
+    server.listen(0, host, () => resolve(server.address().port));
+  });
   cleanup.push(() => stopServer(server, sockets));
   return port;
 };
@@ -113,6 +115,20 @@ describe('dev tunnel end to end', () => {
 
     expect(response.body).toBe('path:/page?q=1');
     expect(response.headers['x-dev-header']).toBe('kept');
+  });
+
+  test('reaches a dev server that listens on IPv6 loopback only', async () => {
+    // `localhost` resolves to ::1 first on many systems, so a dev server started
+    // with its defaults often never binds 127.0.0.1. Discovery lists it anyway.
+    const devPort = await startDevServer((req, res) => res.end(`v6:${req.url}`), '::1');
+    const host = await startHost({ allowedPorts: [devPort] });
+    const client = createDevTunnelClient({ logger: { warn: () => {} } });
+    cleanup.push(() => client.closeAll());
+
+    const { localPort } = await client.open({ baseUrl: host.baseUrl, port: devPort });
+    const response = await httpGet(localPort, '/page');
+    expect(response.status).toBe(200);
+    expect(response.body).toBe('v6:/page');
   });
 
   test('reuses listeners and closes them deterministically', async () => {
