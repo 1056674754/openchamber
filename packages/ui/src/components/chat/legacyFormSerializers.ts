@@ -1,8 +1,16 @@
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 
-export function serializeQuestionAsMarkdown(question: QuestionRequest): string {
+/**
+ * Serializers for the v1 track's blocking-form request (the wire's
+ * multi-question `question.asked` payload), so the user can carry an agent's
+ * question into another tool. The v2 typed-form serializers live in
+ * `./formSerializers`. The emitted content strings are unchanged from the
+ * pre-rename serializers — only the module and function names moved.
+ */
+
+export function serializeFormAsMarkdown(form: FormRequest): string {
   const lines: string[] = [];
-  const questions = question.questions ?? [];
+  const questions = form.questions ?? [];
 
   questions.forEach((q, index) => {
     const header = q.header?.trim();
@@ -29,9 +37,9 @@ export function serializeQuestionAsMarkdown(question: QuestionRequest): string {
   return lines.join('\n').trimEnd();
 }
 
-export function serializeQuestionAsJson(question: QuestionRequest): string {
+export function serializeFormAsJson(form: FormRequest): string {
   const payload = {
-    questions: (question.questions ?? []).map((q) => ({
+    questions: (form.questions ?? []).map((q) => ({
       header: q.header ?? null,
       question: q.question,
       multiple: Boolean(q.multiple),
@@ -45,12 +53,12 @@ export function serializeQuestionAsJson(question: QuestionRequest): string {
   return JSON.stringify(payload, null, 2);
 }
 
-export function serializeQuestionAnswersAsMarkdown(question: QuestionRequest, answers: readonly (readonly string[])[]): string {
+export function serializeFormAnswersAsMarkdown(form: FormRequest, answers: readonly (readonly string[])[]): string {
   const lines: string[] = [
     'I am answering the pending question that was shown earlier:',
     '',
   ];
-  const questions = question.questions ?? [];
+  const questions = form.questions ?? [];
 
   questions.forEach((q, index) => {
     const header = q.header?.trim();

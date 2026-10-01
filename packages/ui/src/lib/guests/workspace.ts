@@ -49,7 +49,7 @@ const projectSession = (session: Session, projectId: string, guestId: string, wo
     // channel and observations only.
     else if (status?.type === 'idle' || observed) activity = 'idle';
     if (child?.permission[session.id]?.length) activity = 'waiting-permission';
-    else if (child?.question[session.id]?.length) activity = 'waiting-question';
+    else if (child?.form[session.id]?.length) activity = 'waiting-form';
   }
   return {
     id: session.id, title: session.title || session.id, projectId, directory,

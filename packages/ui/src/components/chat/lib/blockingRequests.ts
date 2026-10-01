@@ -1,6 +1,6 @@
 import type { Part } from '@opencode-ai/sdk/v2';
 import type { PermissionRequest } from '@/types/permission';
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 
 interface SessionLinkRecord {
     id: string;
@@ -27,7 +27,7 @@ type ToolAnchoredBlockingRequest = {
 };
 
 export type InlineBlockingRequests = {
-    questions: QuestionRequest[];
+    forms: FormRequest[];
     permissions: PermissionRequest[];
 };
 
@@ -88,35 +88,35 @@ export const collectVisibleToolRequestKeys = (messages: readonly MessageRecordWi
 };
 
 export const splitBlockingRequestsByVisibleTool = (
-    questions: readonly QuestionRequest[],
+    forms: readonly FormRequest[],
     permissions: readonly PermissionRequest[],
     visibleToolRequestKeys: ReadonlySet<string>,
 ): {
     inlineByTool: Map<string, InlineBlockingRequests>;
-    trailingQuestions: QuestionRequest[];
+    trailingForms: FormRequest[];
     trailingPermissions: PermissionRequest[];
 } => {
     const inlineByTool = new Map<string, InlineBlockingRequests>();
-    const trailingQuestions: QuestionRequest[] = [];
+    const trailingForms: FormRequest[] = [];
     const trailingPermissions: PermissionRequest[] = [];
-    const seenQuestionIds = new Set<string>();
+    const seenFormIds = new Set<string>();
 
     const ensureBucket = (key: string): InlineBlockingRequests => {
         const existing = inlineByTool.get(key);
         if (existing) return existing;
-        const next: InlineBlockingRequests = { questions: [], permissions: [] };
+        const next: InlineBlockingRequests = { forms: [], permissions: [] };
         inlineByTool.set(key, next);
         return next;
     };
 
-    for (const question of questions) {
-        if (seenQuestionIds.has(question.id)) continue;
-        seenQuestionIds.add(question.id);
-        const key = getBlockingRequestToolKey(question);
+    for (const form of forms) {
+        if (seenFormIds.has(form.id)) continue;
+        seenFormIds.add(form.id);
+        const key = getBlockingRequestToolKey(form);
         if (key && visibleToolRequestKeys.has(key)) {
-            ensureBucket(key).questions.push(question);
+            ensureBucket(key).forms.push(form);
         } else {
-            trailingQuestions.push(question);
+            trailingForms.push(form);
         }
     }
 
@@ -129,7 +129,7 @@ export const splitBlockingRequestsByVisibleTool = (
         }
     }
 
-    return { inlineByTool, trailingQuestions, trailingPermissions };
+    return { inlineByTool, trailingForms, trailingPermissions };
 };
 
 export const collectVisibleSessionIdsForBlockingRequests = (

@@ -9,8 +9,8 @@ import { DraftPresetChips } from './DraftPresetChips';
 import type { ResolvedStarter } from './useDraftStarters';
 import MessageList, { type MessageListHandle } from './MessageList';
 import { PermissionCard } from './PermissionCard';
-import { QuestionCard } from './QuestionCard';
-import { hasActiveQuestionToolInCurrentTurn, recoverPendingQuestionWithRetry } from '@/sync/question-recovery';
+import { LegacyFormCard } from './LegacyFormCard';
+import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from '@/sync/form-recovery';
 import { SessionRecapNote } from './SessionRecapNote';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
 import { StatusRowContainer } from './StatusRowContainer';
@@ -33,7 +33,7 @@ import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from "@/components/icon/Icon";
 import type { PermissionRequest } from '@/types/permission';
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 import { cn } from '@/lib/utils';
 import {
     collectVisibleSessionIdsForBlockingRequests,
@@ -57,7 +57,7 @@ import {
 import {
     useServerLiveSessions,
     useServerSessionPermissions,
-    useServerSessionQuestions,
+    useServerSessionForms,
 } from '@/sync/multi-server-hooks';
 import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { useSync } from '@/sync/use-sync';
@@ -192,7 +192,7 @@ type ChatViewportProps = {
     syncPendingPrependAnchorToViewport: () => void;
     scrollToBottom: () => void;
     notifyViewportStabilize: () => void;
-    sessionQuestions: QuestionRequest[];
+    sessionForms: FormRequest[];
     sessionPermissions: PermissionRequest[];
     inlineBlockingRequestsByTool: ReturnType<typeof splitBlockingRequestsByVisibleTool>['inlineByTool'];
     isProgrammaticFollowActive: boolean;
@@ -247,7 +247,7 @@ const ChatViewport = React.memo(({
     handleLoadOlder,
     syncPendingPrependAnchorToViewport,
     scrollToBottom,
-    sessionQuestions,
+    sessionForms,
     sessionPermissions,
     inlineBlockingRequestsByTool,
     isProgrammaticFollowActive,
@@ -311,27 +311,27 @@ const ChatViewport = React.memo(({
         }
     }, [initialScrollAction, isInitialScrollReady, onInitialScrollReady]);
 
-    // Collect callIDs of ALL pending questions (inline + trailing) so the
-    // question recovery mechanism in ToolPart can avoid creating a duplicate
-    // card when the question is already rendered as trailing or inline.
-    const pendingQuestionCallIDs = React.useMemo(() => {
+    // Collect callIDs of ALL pending forms (inline + trailing) so the
+    // form recovery mechanism in ToolPart can avoid creating a duplicate
+    // card when the form is already rendered as trailing or inline.
+    const pendingFormCallIDs = React.useMemo(() => {
         const callIDs = new Set<string>();
         for (const bucket of inlineBlockingRequestsByTool.values()) {
-            for (const question of bucket.questions) {
-                const callID = question.tool?.callID;
+            for (const form of bucket.forms) {
+                const callID = form.tool?.callID;
                 if (typeof callID === 'string' && callID.length > 0) {
                     callIDs.add(callID);
                 }
             }
         }
-        for (const question of sessionQuestions) {
-            const callID = question.tool?.callID;
+        for (const form of sessionForms) {
+            const callID = form.tool?.callID;
             if (typeof callID === 'string' && callID.length > 0) {
                 callIDs.add(callID);
             }
         }
         return callIDs;
-    }, [inlineBlockingRequestsByTool, sessionQuestions]);
+    }, [inlineBlockingRequestsByTool, sessionForms]);
 
     return (
         <div
@@ -399,7 +399,7 @@ const ChatViewport = React.memo(({
                     data-scrollbar="chat"
                 >
                     <div className="relative z-0 min-h-full">
-                        <InlineBlockingRequestsContext.Provider value={{ inlineByTool: inlineBlockingRequestsByTool, pendingQuestionCallIDs }}>
+                        <InlineBlockingRequestsContext.Provider value={{ inlineByTool: inlineBlockingRequestsByTool, pendingFormCallIDs }}>
                             <MessageList
                                 ref={messageListRef}
                                 sessionKey={currentSessionId}
@@ -423,10 +423,10 @@ const ChatViewport = React.memo(({
                                 onInitialBottomReady={onInitialScrollReady}
                             />
                         </InlineBlockingRequestsContext.Provider>
-                        {(sessionQuestions.length > 0 || sessionPermissions.length > 0) && (
+                        {(sessionForms.length > 0 || sessionPermissions.length > 0) && (
                             <div>
-                                {sessionQuestions.map((question) => (
-                                    <QuestionCard key={question.id} question={question} />
+                                {sessionForms.map((form) => (
+                                    <LegacyFormCard key={form.id} form={form} />
                                 ))}
                                 {sessionPermissions.map((permission) => (
                                     <PermissionCard key={permission.id} permission={permission} />
@@ -506,7 +506,7 @@ const ChatViewport = React.memo(({
         && prev.getAnimationHandlers === next.getAnimationHandlers
         && prev.handleLoadOlder === next.handleLoadOlder
         && prev.scrollToBottom === next.scrollToBottom
-        && prev.sessionQuestions === next.sessionQuestions
+        && prev.sessionForms === next.sessionForms
         && prev.sessionPermissions === next.sessionPermissions
         && prev.inlineBlockingRequestsByTool === next.inlineBlockingRequestsByTool
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
@@ -730,19 +730,19 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [currentSessionDirectory, currentSessionId, scopedSessionIds, sessions]);
 
     const sessionPermissions = useServerSessionPermissions(activeServerId, scopedBlockingRequestTargets);
-    const sessionQuestions = useServerSessionQuestions(activeServerId, scopedBlockingRequestTargets);
-    const hasUnreconciledQuestionTool = React.useMemo(
-        () => !sessionQuestions.some((question) => question.sessionID === currentSessionId)
-            && hasActiveQuestionToolInCurrentTurn(sessionMessages),
-        [currentSessionId, sessionMessages, sessionQuestions],
+    const sessionForms = useServerSessionForms(activeServerId, scopedBlockingRequestTargets);
+    const hasUnreconciledFormTool = React.useMemo(
+        () => !sessionForms.some((form) => form.sessionID === currentSessionId)
+            && hasActiveFormToolInCurrentTurn(sessionMessages),
+        [currentSessionId, sessionMessages, sessionForms],
     );
 
     React.useEffect(() => {
-        if (!currentSessionId || !currentSessionDirectory || !hasUnreconciledQuestionTool) return;
+        if (!currentSessionId || !currentSessionDirectory || !hasUnreconciledFormTool) return;
         let cancelled = false;
 
-        void recoverPendingQuestionWithRetry(
-            () => sync.recoverPendingQuestions({
+        void recoverPendingFormWithRetry(
+            () => sync.recoverPendingForms({
                 sessionID: currentSessionId,
                 directory: currentSessionDirectory,
                 serverId: activeServerId,
@@ -753,7 +753,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         return () => {
             cancelled = true;
         };
-    }, [activeServerId, currentSessionDirectory, currentSessionId, hasUnreconciledQuestionTool, sync]);
+    }, [activeServerId, currentSessionDirectory, currentSessionId, hasUnreconciledFormTool, sync]);
 
     // Keyed to the deferred selection: during a held switch the timeline still
     // shows the outgoing session, so its working state must drive the follow
@@ -761,12 +761,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     // activity and mis-fire the anchored-turn logic.
     const { isWorking: sessionActivityWorking } = useSessionActivity(currentSessionId);
     const sessionIsWorking = React.useMemo(() => {
-        if (!currentSessionId || sessionPermissions.length > 0 || sessionQuestions.length > 0) {
+        if (!currentSessionId || sessionPermissions.length > 0 || sessionForms.length > 0) {
             return false;
         }
 
         return sessionActivityWorking;
-    }, [currentSessionId, sessionPermissions.length, sessionQuestions.length, sessionActivityWorking]);
+    }, [currentSessionId, sessionPermissions.length, sessionForms.length, sessionActivityWorking]);
     const activeRetryStatus = React.useMemo(() => {
         if (!currentSessionId || sessionStatusForCurrent.type !== 'retry') {
             return null;
@@ -944,11 +944,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     );
     const {
         inlineByTool: inlineBlockingRequestsByTool,
-        trailingQuestions,
+        trailingForms,
         trailingPermissions,
     } = React.useMemo(
-        () => splitBlockingRequestsByVisibleTool(sessionQuestions, sessionPermissions, visibleToolRequestKeys),
-        [sessionPermissions, sessionQuestions, visibleToolRequestKeys],
+        () => splitBlockingRequestsByVisibleTool(sessionForms, sessionPermissions, visibleToolRequestKeys),
+        [sessionPermissions, sessionForms, visibleToolRequestKeys],
     );
 
     const resumeToLatestInstant = React.useCallback(() => {
@@ -973,7 +973,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [timelineController.handleActiveTurnChange]);
 
     React.useEffect(() => {
-        if (sessionPermissions.length === 0 && sessionQuestions.length === 0) {
+        if (sessionPermissions.length === 0 && sessionForms.length === 0) {
             return;
         }
         if (inlineBlockingRequestsByTool.size > 0) {
@@ -981,7 +981,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
             return;
         }
         handleMessageContentChange('permission');
-    }, [handleMessageContentChange, inlineBlockingRequestsByTool, releaseAutoFollow, sessionPermissions, sessionQuestions]);
+    }, [handleMessageContentChange, inlineBlockingRequestsByTool, releaseAutoFollow, sessionPermissions, sessionForms]);
 
     const handleLoadOlder = React.useCallback((options: { userInitiated: boolean }) => {
         return loadEarlier({ userInitiated: options.userInitiated });
@@ -1323,7 +1323,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 syncPendingPrependAnchorToViewport={timelineController.syncPendingPrependAnchorToViewport}
                 scrollToBottom={resumeToLatestInstant}
                 notifyViewportStabilize={notifyViewportStabilize}
-                sessionQuestions={trailingQuestions}
+                sessionForms={trailingForms}
                 sessionPermissions={trailingPermissions}
                 inlineBlockingRequestsByTool={inlineBlockingRequestsByTool}
                 isProgrammaticFollowActive={isFollowingProgrammatically}

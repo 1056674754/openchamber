@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore
 import type { Session } from "@opencode-ai/sdk/v2";
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client";
 import type { PermissionRequest } from "@/types/permission";
-import type { QuestionRequest } from "@/types/question";
+import type { FormRequest } from "@/types/form";
 import {
   getAllSyncStores,
   getSyncStoresForServer,
@@ -125,8 +125,8 @@ export function useAllServersActiveSessionKeys(options?: { enabled?: boolean }):
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-type BlockingRequestKind = "permission" | "question";
-type BlockingRequest = PermissionRequest | QuestionRequest;
+type BlockingRequestKind = "permission" | "form";
+type BlockingRequest = PermissionRequest | FormRequest;
 export type BlockingRequestTarget = {
   sessionId: string;
   directory: string;
@@ -225,7 +225,7 @@ export function collectBlockingRequests<T extends BlockingRequest>(
     const store = manager.getChild(target.directory);
     if (!store) continue;
     const state = store.getState();
-    const requestMap = kind === "permission" ? state.permission : state.question;
+    const requestMap = kind === "permission" ? state.permission : state.form;
     const requests = requestMap[target.sessionId] as T[] | undefined;
     if (!requests || requests.length === 0) continue;
     for (const request of requests) {
@@ -313,8 +313,8 @@ export function useServerSessionPermissions(serverId: string, targets: readonly 
   return useServerBlockingRequests<PermissionRequest>("permission", serverId, targets);
 }
 
-export function useServerSessionQuestions(serverId: string, targets: readonly BlockingRequestTarget[]): QuestionRequest[] {
-  return useServerBlockingRequests<QuestionRequest>("question", serverId, targets);
+export function useServerSessionForms(serverId: string, targets: readonly BlockingRequestTarget[]): FormRequest[] {
+  return useServerBlockingRequests<FormRequest>("form", serverId, targets);
 }
 
 export function useAllServersLiveSessions(options?: { enabled?: boolean }): Session[] {

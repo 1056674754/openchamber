@@ -3,7 +3,7 @@ import type { DirectoryStore } from './child-store';
 
 export type InterruptedTurnState = Pick<
   DirectoryStore,
-  'session_status' | 'message' | 'part' | 'question' | 'permission'
+  'session_status' | 'message' | 'part' | 'form' | 'permission'
 >;
 
 export type InterruptedTurnSettlement = {
@@ -18,7 +18,7 @@ export const settleInterruptedTurn = (
   now = Date.now(),
 ): InterruptedTurnSettlement | null => {
   if (state.session_status?.[sessionID]?.type !== 'idle') return null;
-  if ((state.question?.[sessionID] ?? []).length > 0) return null;
+  if ((state.form?.[sessionID] ?? []).length > 0) return null;
   if ((state.permission?.[sessionID] ?? []).length > 0) return null;
 
   const messages = state.message[sessionID] ?? [];

@@ -3,7 +3,7 @@ import type { AssistantMessage, Message, Part, ReasoningPart, TextPart, ToolPart
 
 import type { MessageStreamPhase } from '@/stores/types/sessionTypes';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { useDirectorySync, useSessionPermissions, useSessionQuestions, useSessionStatus } from '@/sync/sync-context';
+import { useDirectorySync, useSessionPermissions, useSessionForms, useSessionStatus } from '@/sync/sync-context';
 import { serverRegistry } from '@/lib/opencode/server-registry';
 import { isFullySyntheticMessage } from '@/lib/messages/synthetic';
 import { getBlockingRequestToolKey, getToolPartRequestKey } from '@/components/chat/lib/blockingRequests';
@@ -172,7 +172,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
     );
 
     const sessionPermissionRequests = useSessionPermissions(currentSessionId ?? '');
-    const sessionQuestionRequests = useSessionQuestions(currentSessionId ?? '');
+    const sessionFormRequests = useSessionForms(currentSessionId ?? '');
 
     const sessionAbortRecord = useSessionUIStore(
         React.useCallback((state) => {
@@ -241,7 +241,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         // request, a lingering running question tool part must not be treated
         // as the active status source.
         const pendingQuestionKeys = new Set<string>();
-        for (const req of sessionQuestionRequests) {
+        for (const req of sessionFormRequests) {
             const key = getBlockingRequestToolKey(req);
             if (key) pendingQuestionKeys.add(key);
         }
@@ -352,7 +352,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         })();
 
         return { activePartType, activeToolName, statusText, isGenericStatus };
-    }, [sessionMessages, sessionQuestionRequests]);
+    }, [sessionMessages, sessionFormRequests]);
 
     const abortState = React.useMemo(() => {
         const hasActiveAbort = Boolean(sessionAbortRecord && !sessionAbortRecord.acknowledged);
@@ -455,7 +455,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         }
 
         const hasPendingPermission = sessionPermissionRequests.length > 0;
-        const hasPendingQuestion = sessionQuestionRequests.length > 0;
+        const hasPendingQuestion = sessionFormRequests.length > 0;
 
         if (!hasPendingPermission && !hasPendingQuestion) {
             return baseWorking;
@@ -482,7 +482,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             canAbort: false,
             retryInfo: null,
         };
-    }, [baseWorking, sessionPermissionRequests, sessionQuestionRequests]);
+    }, [baseWorking, sessionPermissionRequests, sessionFormRequests]);
 
     return {
         forming,

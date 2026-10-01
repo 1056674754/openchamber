@@ -1,11 +1,12 @@
+import type { FormInfo } from "@opencode/client"
 import type {
   Message,
   Part,
   PermissionRequest,
-  QuestionRequest,
   SessionStatus,
   Todo,
 } from "@opencode-ai/sdk/v2/client"
+import type { FormRequest } from "@/types/form"
 import type { FileDiff } from "./types"
 
 type SessionCache = {
@@ -16,7 +17,8 @@ type SessionCache = {
   message: Record<string, Message[] | undefined>
   part: Record<string, Part[] | undefined>
   permission: Record<string, PermissionRequest[] | undefined>
-  question: Record<string, QuestionRequest[] | undefined>
+  form: Record<string, FormRequest[] | undefined>
+  nativeForm?: Record<string, FormInfo[] | undefined>
 }
 
 export function getProtectedSessionCacheIds(store: SessionCache): Set<string> {
@@ -34,8 +36,14 @@ export function getProtectedSessionCacheIds(store: SessionCache): Set<string> {
     }
   }
 
-  for (const [sessionID, questions] of Object.entries(store.question ?? {})) {
-    if ((questions?.length ?? 0) > 0) {
+  for (const [sessionID, forms] of Object.entries(store.form ?? {})) {
+    if ((forms?.length ?? 0) > 0) {
+      protectedIds.add(sessionID)
+    }
+  }
+
+  for (const [sessionID, forms] of Object.entries(store.nativeForm ?? {})) {
+    if ((forms?.length ?? 0) > 0) {
       protectedIds.add(sessionID)
     }
   }
@@ -84,7 +92,10 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
       delete store.session_activity[sessionID]
     }
     delete store.permission[sessionID]
-    delete store.question[sessionID]
+    delete store.form[sessionID]
+    if (store.nativeForm) {
+      delete store.nativeForm[sessionID]
+    }
   }
 }
 

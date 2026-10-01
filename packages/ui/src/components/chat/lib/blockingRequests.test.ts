@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 import {
     collectVisibleToolRequestKeys,
     getToolPartRequestKey,
@@ -30,7 +30,7 @@ describe('blocking request tool anchoring', () => {
             },
         ]);
 
-        const question: QuestionRequest = {
+        const question: FormRequest = {
             id: 'que-1',
             sessionID: 'ses-1',
             questions: [],
@@ -43,8 +43,8 @@ describe('blocking request tool anchoring', () => {
 
         expect(visibleKeys.has(getToolRequestKey('msg-1', 'call-1'))).toBe(true);
         expect(visibleKeys.has(getToolRequestKey('msg-1', 'part-1'))).toBe(true);
-        expect(split.inlineByTool.get(getToolRequestKey('msg-1', 'call-1'))?.questions).toEqual([question]);
-        expect(split.trailingQuestions).toEqual([]);
+        expect(split.inlineByTool.get(getToolRequestKey('msg-1', 'call-1'))?.forms).toEqual([question]);
+        expect(split.trailingForms).toEqual([]);
     });
 
     test('matches pending requests that use the rendered part id as call id', () => {
@@ -69,7 +69,7 @@ describe('blocking request tool anchoring', () => {
             },
         ]);
 
-        const question: QuestionRequest = {
+        const question: FormRequest = {
             id: 'que-1',
             sessionID: 'ses-1',
             questions: [],
@@ -80,13 +80,13 @@ describe('blocking request tool anchoring', () => {
         };
         const split = splitBlockingRequestsByVisibleTool([question], [], visibleKeys);
 
-        expect(split.inlineByTool.get(getToolRequestKey('msg-1', 'part-1'))?.questions).toEqual([question]);
-        expect(split.trailingQuestions).toEqual([]);
+        expect(split.inlineByTool.get(getToolRequestKey('msg-1', 'part-1'))?.forms).toEqual([question]);
+        expect(split.trailingForms).toEqual([]);
     });
 
     test('renders the same pending question request only once', () => {
         const visibleKey = getToolRequestKey('msg-1', 'call-1');
-        const question: QuestionRequest = {
+        const question: FormRequest = {
             id: 'que-1',
             sessionID: 'ses-1',
             questions: [],
@@ -102,8 +102,8 @@ describe('blocking request tool anchoring', () => {
             new Set([visibleKey]),
         );
 
-        expect(split.inlineByTool.get(visibleKey)?.questions).toEqual([question]);
-        expect(split.trailingQuestions).toEqual([]);
+        expect(split.inlineByTool.get(visibleKey)?.forms).toEqual([question]);
+        expect(split.trailingForms).toEqual([]);
     });
 
     test('falls back to part id for older tool records without callID', () => {

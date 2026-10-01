@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { QuestionRequest } from "@/types/question";
+import type { FormRequest } from "@/types/form";
 import { DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry";
 import { ChildStoreManager } from "./child-store";
 import {
@@ -53,34 +53,34 @@ describe("multi-server blocking requests", () => {
     const sessionID = "ses-shared";
     const localStores = new ChildStoreManager();
     const remoteStores = new ChildStoreManager();
-    const localQuestion: QuestionRequest = {
+    const localQuestion: FormRequest = {
       id: "que-1",
       sessionID,
       questions: [{ header: "Local", question: "Local question", options: [] }],
     };
-    const remoteQuestion: QuestionRequest = {
+    const remoteQuestion: FormRequest = {
       id: "que-1",
       sessionID,
       questions: [{ header: "Remote", question: "Remote question", options: [] }],
     };
 
     localStores.ensureChild("/shared", { bootstrap: false }).getState().patch({
-      question: { [sessionID]: [localQuestion] },
+      form: { [sessionID]: [localQuestion] },
     });
     remoteStores.ensureChild("/shared", { bootstrap: false }).getState().patch({
-      question: { [sessionID]: [remoteQuestion] },
+      form: { [sessionID]: [remoteQuestion] },
     });
     const unregister = registerSyncStores("remote-question-test", remoteStores, () => undefined);
 
     try {
-      expect(collectBlockingRequests<QuestionRequest>(
-        "question",
+      expect(collectBlockingRequests<FormRequest>(
+        "form",
         localStores,
         DEFAULT_SERVER_ID,
         [{ sessionId: sessionID, directory: "/shared" }],
       )).toEqual([localQuestion]);
-      expect(collectBlockingRequests<QuestionRequest>(
-        "question",
+      expect(collectBlockingRequests<FormRequest>(
+        "form",
         localStores,
         "remote-question-test",
         [{ sessionId: sessionID, directory: "/shared" }],
@@ -92,17 +92,17 @@ describe("multi-server blocking requests", () => {
 
   test("does not fall back to local data while a remote store is unavailable", () => {
     const stores = new ChildStoreManager();
-    const question: QuestionRequest = {
+    const question: FormRequest = {
       id: "que-1",
       sessionID: "ses-1",
       questions: [],
     };
     stores.ensureChild("/local", { bootstrap: false }).getState().patch({
-      question: { "ses-1": [question] },
+      form: { "ses-1": [question] },
     });
 
-    expect(collectBlockingRequests<QuestionRequest>(
-      "question",
+    expect(collectBlockingRequests<FormRequest>(
+      "form",
       stores,
       "remote-not-mounted",
       [{ sessionId: "ses-1", directory: "/local" }],
@@ -112,25 +112,25 @@ describe("multi-server blocking requests", () => {
   test("ignores a same-ID request copied into a non-authoritative directory", () => {
     const stores = new ChildStoreManager();
     const sessionID = "ses-1";
-    const authoritative: QuestionRequest = {
+    const authoritative: FormRequest = {
       id: "que-1",
       sessionID,
       questions: [{ header: "Right", question: "Authoritative question", options: [] }],
     };
-    const stale: QuestionRequest = {
+    const stale: FormRequest = {
       id: "que-1",
       sessionID,
       questions: [{ header: "Wrong", question: "Stale question", options: [] }],
     };
     stores.ensureChild("/wrong", { bootstrap: false }).getState().patch({
-      question: { [sessionID]: [stale] },
+      form: { [sessionID]: [stale] },
     });
     stores.ensureChild("/right", { bootstrap: false }).getState().patch({
-      question: { [sessionID]: [authoritative] },
+      form: { [sessionID]: [authoritative] },
     });
 
-    expect(collectBlockingRequests<QuestionRequest>(
-      "question",
+    expect(collectBlockingRequests<FormRequest>(
+      "form",
       stores,
       DEFAULT_SERVER_ID,
       [{ sessionId: sessionID, directory: "/right" }],

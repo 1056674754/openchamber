@@ -2,23 +2,25 @@ import { create } from 'zustand';
 import type { Event } from '@opencode-ai/sdk/v2/client';
 import { normalizeProjectPath } from '@/lib/projectResolution';
 import type { PermissionRequest } from '@/types/permission';
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 
-// Cross-directory index of permission and question requests still waiting
+// Cross-directory index of permission and form requests still waiting
 // for an answer. Directory stores remain the source for open directories;
 // this index exists for the ones that are never bootstrapped, whose pending
 // requests would otherwise be invisible to the tray and to any surface that
 // does not mount a row for them.
 //
 // It is fed by the same rare events the directory reducer consumes
-// (`permission.asked`/`permission.replied`, `question.asked`/`question.replied`/
-// `question.rejected`, `session.deleted`) and seeded once from the host. Nothing
-// streams through here, so consumers subscribe per session ID without cost.
+// (`permission.asked`/`permission.replied`, and the blocking-form lifecycle —
+// the v1 wire names those `question.asked`/`question.replied`/
+// `question.rejected`), plus `session.deleted`, and it is seeded once from the
+// host. Nothing streams through here, so consumers subscribe per session ID
+// without cost.
 
 export type PendingBlockingRequests = {
   directory: string;
   permissions: readonly PermissionRequest[];
-  questions: readonly QuestionRequest[];
+  forms: readonly FormRequest[];
 };
 
 type GlobalBlockingRequestsState = {
@@ -67,23 +69,23 @@ class Reducer {
 
   write(sessionId: string, entry: PendingBlockingRequests): void {
     this.draft ??= new Map(this.state.bySession);
-    if (entry.permissions.length === 0 && entry.questions.length === 0) this.draft.delete(sessionId);
+    if (entry.permissions.length === 0 && entry.forms.length === 0) this.draft.delete(sessionId);
     else this.draft.set(sessionId, entry);
   }
 
-  ask(directory: string, sessionId: string, request: PermissionRequest | null, question: QuestionRequest | null): void {
-    const existing = this.current(sessionId) ?? { directory, permissions: EMPTY, questions: EMPTY };
+  ask(directory: string, sessionId: string, request: PermissionRequest | null, form: FormRequest | null): void {
+    const existing = this.current(sessionId) ?? { directory, permissions: EMPTY, forms: EMPTY };
     const permissions = request ? upsertRequest(existing.permissions, request) : null;
-    const questions = question ? upsertRequest(existing.questions, question) : null;
-    if (!permissions && !questions && existing.directory === directory) return;
+    const forms = form ? upsertRequest(existing.forms, form) : null;
+    if (!permissions && !forms && existing.directory === directory) return;
     this.write(sessionId, {
       directory,
       permissions: permissions ?? existing.permissions,
-      questions: questions ?? existing.questions,
+      forms: forms ?? existing.forms,
     });
   }
 
-  settle(kind: 'permissions' | 'questions', sessionId: string, requestId: string | undefined): void {
+  settle(kind: 'permissions' | 'forms', sessionId: string, requestId: string | undefined): void {
     const existing = this.current(sessionId);
     if (!existing) return;
     if (kind === 'permissions') {
@@ -91,14 +93,14 @@ class Reducer {
       if (permissions) this.write(sessionId, { ...existing, permissions });
       return;
     }
-    const questions = withoutRequest(existing.questions, requestId);
-    if (questions) this.write(sessionId, { ...existing, questions });
+    const forms = withoutRequest(existing.forms, requestId);
+    if (forms) this.write(sessionId, { ...existing, forms });
   }
 
   remove(sessionId: string): void {
     const existing = this.current(sessionId);
     if (!existing) return;
-    this.write(sessionId, { ...existing, permissions: EMPTY, questions: EMPTY });
+    this.write(sessionId, { ...existing, permissions: EMPTY, forms: EMPTY });
   }
 
   publish(): void {
@@ -121,8 +123,8 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
         continue;
       }
       case 'question.asked': {
-        // SAFETY: the ask event carries the full question request as its properties, the same contract the directory reducer relies on.
-        const request = payload.properties as QuestionRequest;
+        // SAFETY: the ask event carries the full form request as its properties, the same contract the directory reducer relies on.
+        const request = payload.properties as FormRequest;
         if (request.sessionID && request.id) reducer.ask(directory, request.sessionID, null, request);
         continue;
       }
@@ -132,7 +134,7 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
         // SAFETY: reply events name the session and, when OpenCode includes it, the request they settle.
         const props = payload.properties as { sessionID?: string; requestID?: string };
         if (props.sessionID) {
-          reducer.settle(payload.type === 'permission.replied' ? 'permissions' : 'questions', props.sessionID, props.requestID);
+          reducer.settle(payload.type === 'permission.replied' ? 'permissions' : 'forms', props.sessionID, props.requestID);
         }
         continue;
       }
@@ -157,17 +159,17 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
  * because a live reply may already have settled a request the host map lags on.
  */
 export const seedGlobalBlockingRequests = (
-  entries: ReadonlyArray<{ sessionId: string; directory: string; permissions: readonly PermissionRequest[]; questions: readonly QuestionRequest[] }>,
+  entries: ReadonlyArray<{ sessionId: string; directory: string; permissions: readonly PermissionRequest[]; forms: readonly FormRequest[] }>,
 ): void => {
   const state = useGlobalBlockingRequestsStore.getState();
   const reducer = new Reducer(state);
   for (const entry of entries) {
     if (state.bySession.has(entry.sessionId)) continue;
-    if (entry.permissions.length === 0 && entry.questions.length === 0) continue;
+    if (entry.permissions.length === 0 && entry.forms.length === 0) continue;
     reducer.write(entry.sessionId, {
       directory: normalizeDirectory(entry.directory),
       permissions: entry.permissions,
-      questions: entry.questions,
+      forms: entry.forms,
     });
   }
   reducer.publish();

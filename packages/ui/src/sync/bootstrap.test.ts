@@ -98,7 +98,7 @@ describe("bootstrapDirectory", () => {
       },
       lsp: { status: () => (requestedPaths.push("lsp.status"), ok([])) },
       vcs: { get: () => (requestedPaths.push("vcs.get"), ok({})) },
-      question: { list: () => (requestedPaths.push("question.list"), ok([])) },
+      form: { list: () => (requestedPaths.push("question.list"), ok([])) },
       permission: { list: () => (requestedPaths.push("permission.list"), ok([])) },
     }
 

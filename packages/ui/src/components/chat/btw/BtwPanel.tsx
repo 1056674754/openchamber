@@ -5,7 +5,7 @@ import ChatMessage from '@/components/chat/ChatMessage';
 import { ComposerFloatingPanel } from '@/components/chat/composer/ui/ComposerFloatingPanel';
 import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import { PermissionCard } from '@/components/chat/PermissionCard';
-import { QuestionCard } from '@/components/chat/QuestionCard';
+import { LegacyFormCard } from '@/components/chat/LegacyFormCard';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,7 @@ import { useBtwStore } from '@/stores/useBtwStore';
 import {
   useSessionMessageRecords,
   useSessionPermissions,
-  useSessionQuestions,
+  useSessionForms,
   useSessionStatus,
 } from '@/sync/sync-context';
 import type { StreamPhase } from '@/components/chat/message/types';
@@ -69,7 +69,7 @@ type BtwSessionData = {
   streamingMessageId: string | null;
   activeStreamingPhase: StreamPhase | null;
   sessionPermissions: ReturnType<typeof useSessionPermissions>;
-  sessionQuestions: ReturnType<typeof useSessionQuestions>;
+  sessionForms: ReturnType<typeof useSessionForms>;
   isEmpty: boolean;
 };
 
@@ -95,17 +95,17 @@ const useBtwSessionData = (
     ),
   );
   const sessionPermissions = useSessionPermissions(sessionId, directory);
-  const sessionQuestions = useSessionQuestions(sessionId, directory);
+  const sessionForms = useSessionForms(sessionId, directory);
   const tailRecords = React.useMemo(
     () => filterBtwTailMessages(messageRecords, boundaryMessageID),
     [boundaryMessageID, messageRecords],
   );
   const sessionIsWorking = React.useMemo(() => {
-    if (sessionPermissions.length > 0 || sessionQuestions.length > 0) return false;
+    if (sessionPermissions.length > 0 || sessionForms.length > 0) return false;
     if (status.type === 'busy' || status.type === 'retry') return true;
     const last = tailRecords[tailRecords.length - 1]?.info;
     return Boolean(last && last.role === 'assistant' && last.time.completed === undefined);
-  }, [sessionPermissions.length, sessionQuestions.length, status.type, tailRecords]);
+  }, [sessionPermissions.length, sessionForms.length, status.type, tailRecords]);
 
   return {
     messageRecords: tailRecords,
@@ -113,7 +113,7 @@ const useBtwSessionData = (
     streamingMessageId,
     activeStreamingPhase,
     sessionPermissions,
-    sessionQuestions,
+    sessionForms,
     isEmpty: tailRecords.length === 0,
   };
 };
@@ -348,7 +348,7 @@ const BtwMessages: React.FC<{
             activeStreamingPhase={record.info.id === data.streamingMessageId ? data.activeStreamingPhase : null}
           />
         ))}
-        {data.sessionQuestions.map((question) => <QuestionCard key={question.id} question={question} />)}
+        {data.sessionForms.map((form) => <LegacyFormCard key={form.id} form={form} />)}
         {data.sessionPermissions.map((permission) => <PermissionCard key={permission.id} permission={permission} />)}
         <div className={cn('flex items-center gap-2 px-1 py-2 typography-meta text-muted-foreground', !data.sessionIsWorking && 'invisible')} aria-hidden={!data.sessionIsWorking}>
           <Icon name="loader-4" className="size-3.5 animate-spin" />

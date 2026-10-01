@@ -2339,11 +2339,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         }
 
         if (currentSessionId && !queuedOnly && !isBtwActive) {
-            const [deniedPermissions, dismissedQuestions] = await Promise.all([
+            const [deniedPermissions, dismissedForms] = await Promise.all([
                 sessionActions.dismissOpenPermissionsForSession(currentSessionId),
-                sessionActions.dismissOpenQuestionsForSession(currentSessionId),
+                sessionActions.dismissOpenFormsForSession(currentSessionId),
             ]);
-            if (deniedPermissions || dismissedQuestions) {
+            if (deniedPermissions || dismissedForms) {
                 handleQueueMessage();
                 return;
             }

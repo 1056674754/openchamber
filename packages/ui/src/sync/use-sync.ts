@@ -226,7 +226,7 @@ export function useSync() {
         session_diff: { ...current.session_diff },
         todo: { ...current.todo },
         permission: { ...current.permission },
-        question: { ...current.question },
+        form: { ...current.form },
       }
       dropSessionCaches(draft, sessionIDs)
       dropCachedSessionMessageRecordsSnapshots(dirStore, sessionIDs)
@@ -865,7 +865,7 @@ export function useSync() {
     [getMetaFor, resolveSessionTarget],
   )
 
-  const recoverPendingQuestions = useCallback(
+  const recoverPendingForms = useCallback(
     async (input: { readonly sessionID: string; readonly directory: string; readonly serverId: string }): Promise<boolean> => {
       const indexedServerId = serverRegistry.getServerForSession(input.sessionID)
       const targetServerId = indexedServerId ?? input.serverId
@@ -881,7 +881,7 @@ export function useSync() {
         sdk: serverRegistry.get(targetServerId)?.client,
         includePermissions: false,
       })
-      return result.questions && (targetStore.getState().question[input.sessionID]?.length ?? 0) > 0
+      return result.forms && (targetStore.getState().form[input.sessionID]?.length ?? 0) > 0
     },
     [childStores, directory, store],
   )
@@ -984,13 +984,13 @@ export function useSync() {
       hasMore,
       isLoading,
       isComplete,
-      recoverPendingQuestions,
+      recoverPendingForms,
       optimistic: {
         add: optimisticAdd,
         remove: optimisticRemove,
         confirm: optimisticConfirm,
       },
     }),
-    [syncSession, forceRefreshSession, loadMore, loadThroughMessage, hasMore, isLoading, isComplete, recoverPendingQuestions, optimisticAdd, optimisticRemove, optimisticConfirm],
+    [syncSession, forceRefreshSession, loadMore, loadThroughMessage, hasMore, isLoading, isComplete, recoverPendingForms, optimisticAdd, optimisticRemove, optimisticConfirm],
   )
 }

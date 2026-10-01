@@ -1,7 +1,7 @@
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
-import type { QuestionInfo, QuestionOption, QuestionRequest } from '@/types/question';
+import type { FormQuestion, FormOption, FormRequest } from '@/types/form';
 
-type RecoverQuestionRequestInput = {
+type RecoverFormRequestInput = {
     readonly part: ToolPartType;
     readonly messageID?: string;
     readonly sessionID?: string;
@@ -36,7 +36,7 @@ const getBooleanValue = (value: unknown, key: string): boolean | undefined => {
     return typeof raw === 'boolean' ? raw : undefined;
 };
 
-const parseQuestionOption = (value: unknown): QuestionOption | null => {
+const parseFormOption = (value: unknown): FormOption | null => {
     const label = getStringValue(value, 'label');
     if (!label) return null;
     return {
@@ -45,15 +45,15 @@ const parseQuestionOption = (value: unknown): QuestionOption | null => {
     };
 };
 
-const parseQuestionInfo = (value: unknown): QuestionInfo | null => {
+const parseFormQuestion = (value: unknown): FormQuestion | null => {
     const question = getStringValue(value, 'question');
     if (!question) return null;
 
     const rawOptions = getValue(value, 'options');
     const options = Array.isArray(rawOptions)
         ? rawOptions
-            .map(parseQuestionOption)
-            .filter((option): option is QuestionOption => option !== null)
+            .map(parseFormOption)
+            .filter((option): option is FormOption => option !== null)
         : [];
 
     return {
@@ -64,14 +64,14 @@ const parseQuestionInfo = (value: unknown): QuestionInfo | null => {
     };
 };
 
-const parseQuestionInfos = (value: unknown): QuestionInfo[] => {
+const parseFormQuestions = (value: unknown): FormQuestion[] => {
     if (!Array.isArray(value)) return [];
     return value
-        .map(parseQuestionInfo)
-        .filter((question): question is QuestionInfo => question !== null);
+        .map(parseFormQuestion)
+        .filter((question): question is FormQuestion => question !== null);
 };
 
-export const hasQuestionAnswer = (part: ToolPartType): boolean => {
+export const hasFormAnswer = (part: ToolPartType): boolean => {
     const metadata = getValue(part.state, 'metadata');
     if (Array.isArray(getValue(metadata, 'answers'))) return true;
 
@@ -79,7 +79,7 @@ export const hasQuestionAnswer = (part: ToolPartType): boolean => {
     return Boolean(output?.startsWith(ANSWERED_OUTPUT_PREFIX));
 };
 
-const isQuestionClosedByUser = (part: ToolPartType): boolean => {
+const isFormClosedByUser = (part: ToolPartType): boolean => {
     const error = getStringValue(part.state, 'error');
     if (!error) return false;
     const lowerError = error.toLowerCase();
@@ -87,12 +87,12 @@ const isQuestionClosedByUser = (part: ToolPartType): boolean => {
 };
 
 const isToolPartTerminatedWithoutAnswer = (part: ToolPartType): boolean => {
-    if (hasQuestionAnswer(part)) return false;
+    if (hasFormAnswer(part)) return false;
     const status = getStringValue(part.state, 'status');
     return status !== undefined && TERMINAL_TOOL_STATUSES.has(status);
 };
 
-const questionSignature = (questions: readonly QuestionInfo[]): string => {
+const formSignature = (questions: readonly FormQuestion[]): string => {
     return JSON.stringify(questions.map((question) => ({
         header: question.header,
         multiple: Boolean(question.multiple),
@@ -104,21 +104,21 @@ const questionSignature = (questions: readonly QuestionInfo[]): string => {
     })));
 };
 
-export const recoverQuestionRequestFromToolPart = ({
+export const recoverFormRequestFromToolPart = ({
     part,
     messageID,
     sessionID,
     normalizedToolName,
-}: RecoverQuestionRequestInput): QuestionRequest | null => {
+}: RecoverFormRequestInput): FormRequest | null => {
     if ((normalizedToolName ?? part.tool) !== 'question') return null;
-    if (hasQuestionAnswer(part) || isQuestionClosedByUser(part) || isToolPartTerminatedWithoutAnswer(part)) return null;
+    if (hasFormAnswer(part) || isFormClosedByUser(part) || isToolPartTerminatedWithoutAnswer(part)) return null;
 
     const requestSessionID = sessionID ?? part.sessionID;
     const requestMessageID = messageID ?? part.messageID;
     const requestCallID = part.callID || part.id;
     if (!requestSessionID || !requestMessageID || !requestCallID) return null;
 
-    const questions = parseQuestionInfos(getValue(part.state.input, 'questions'));
+    const questions = parseFormQuestions(getValue(part.state.input, 'questions'));
     if (questions.length === 0) return null;
 
     return {
@@ -132,10 +132,10 @@ export const recoverQuestionRequestFromToolPart = ({
     };
 };
 
-export const findPendingQuestionRequestForRecoveredTool = (
-    recovered: QuestionRequest,
-    pendingRequests: readonly QuestionRequest[],
-): QuestionRequest | null => {
+export const findPendingFormRequestForRecoveredTool = (
+    recovered: FormRequest,
+    pendingRequests: readonly FormRequest[],
+): FormRequest | null => {
     const recoveredTool = recovered.tool;
     if (recoveredTool) {
         const toolMatch = pendingRequests.find((request) => (
@@ -146,10 +146,10 @@ export const findPendingQuestionRequestForRecoveredTool = (
         if (toolMatch) return toolMatch;
     }
 
-    const recoveredSignature = questionSignature(recovered.questions);
+    const recoveredSignature = formSignature(recovered.questions);
     const contentMatches = pendingRequests.filter((request) => (
         request.sessionID === recovered.sessionID
-        && questionSignature(request.questions) === recoveredSignature
+        && formSignature(request.questions) === recoveredSignature
     ));
 
     return contentMatches.length === 1 ? contentMatches[0] : null;

@@ -240,6 +240,8 @@ const BOOTSTRAP_MESSAGES: Record<Locale, BootstrapMessages> = {
   ja: JA_MESSAGES,
   de: DE_MESSAGES,
   tr: TR_MESSAGES,
+  // Full nl splash strings land with the B10 i18n batch; English until then.
+  nl: EN_MESSAGES,
 };
 
 export const getBootstrapMessages = (locale: Locale): BootstrapMessages => BOOTSTRAP_MESSAGES[locale];

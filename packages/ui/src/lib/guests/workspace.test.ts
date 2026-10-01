@@ -93,8 +93,8 @@ describe('extension workspace projection', () => {
     expect(readB().sessions[0].activity).toBe('retrying');
     child.setState({ permission: { 'b-session': [{ id: 'permission', sessionID: 'b-session', permission: 'bash', patterns: [], metadata: {}, always: [] }] } });
     expect(readB().sessions[0].activity).toBe('waiting-permission');
-    child.setState({ permission: {}, question: { 'b-session': [{ id: 'question', sessionID: 'b-session', questions: [] }] } });
-    expect(readB().sessions[0].activity).toBe('waiting-question');
+    child.setState({ permission: {}, form: { 'b-session': [{ id: 'form', sessionID: 'b-session', questions: [] }] } });
+    expect(readB().sessions[0].activity).toBe('waiting-form');
     expect('messages' in readB().sessions[0]).toBe(false);
   });
 });

@@ -212,7 +212,7 @@ export function getSyncPermissions(sessionId: string, directory?: string) {
   return getDirectoryState(directory)?.permission[sessionId] ?? []
 }
 
-/** Read questions for a session from current directory's child store */
-export function getSyncQuestions(sessionId: string, directory?: string) {
-  return getDirectoryState(directory)?.question[sessionId] ?? []
+/** Read pending forms for a session from current directory's child store */
+export function getSyncForms(sessionId: string, directory?: string) {
+  return getDirectoryState(directory)?.form[sessionId] ?? []
 }

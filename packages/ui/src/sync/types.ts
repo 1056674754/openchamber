@@ -1,3 +1,4 @@
+import type { FormInfo } from "@opencode/client"
 import type {
   Agent,
   Config,
@@ -9,12 +10,12 @@ import type {
   Project,
   ProviderAuthResponse,
   ProviderListResponse,
-  QuestionRequest,
   Session,
   SessionStatus,
   Todo,
   VcsInfo,
 } from "@opencode-ai/sdk/v2/client"
+import type { FormRequest } from "@/types/form"
 
 export type FileDiff = {
   file?: string
@@ -60,7 +61,20 @@ export type State = {
   session_diff: Record<string, FileDiff[]>
   todo: Record<string, Todo[]>
   permission: Record<string, PermissionRequest[]>
-  question: Record<string, QuestionRequest[]>
+  /**
+   * Pending blocking forms keyed by session. Holds the v1 protocol track's
+   * payloads (the wire keeps the `question.*` event names there). The v2
+   * track's typed forms ride the adjacent `nativeForm` channel so the two
+   * wire shapes never merge.
+   */
+  form: Record<string, FormRequest[]>
+  /**
+   * Pending v2 typed forms (`@/lib/opencode/model` `FormRequest`), fed by the
+   * server-translated `form.created` / `form.settled` events (S2
+   * translate-v2). Always empty on the v1 track; consumed by
+   * `useScopedBlockingForms` and the v2 dock surfaces.
+   */
+  nativeForm: Record<string, FormInfo[]>
   lsp: LspStatus[]
   vcs: VcsInfo | undefined
   limit: number
@@ -85,6 +99,17 @@ export type InitError = {
   type: "init"
   message: string
 }
+
+/**
+ * The v2 blocking-form frames the OpenChamber server translates from
+ * OpenCode 2.x `session.form.*` events (S2 translate-v2). They ride the same
+ * stream as the SDK's v1 `Event` union but are not part of it, so the
+ * directory reducer and the cold-directory classifier take
+ * `Event | FormEventFrame`.
+ */
+export type FormEventFrame =
+  | { type: "form.created"; properties: { sessionID: string; form: FormInfo } }
+  | { type: "form.settled"; properties: { sessionID: string; formID: string } }
 
 export type DirState = {
   lastAccessAt: number
@@ -137,7 +162,8 @@ export const INITIAL_STATE: State = {
   session_diff: {},
   todo: {},
   permission: {},
-  question: {},
+  form: {},
+  nativeForm: {},
   lsp: [],
   vcs: undefined,
   limit: 5,

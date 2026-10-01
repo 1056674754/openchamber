@@ -47,10 +47,10 @@ import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { JsonSummaryView } from './JsonSummaryView';
 import { Icon } from "@/components/icon/Icon";
 import { PermissionCard } from '../../PermissionCard';
-import { QuestionCard } from '../../QuestionCard';
-import { useInlineBlockingRequestsForTool, usePendingQuestionCallIDs } from '../../InlineBlockingRequestsContext';
-import type { QuestionRequest } from '@/types/question';
-import { serializeQuestionAnswersAsMarkdown } from '../../questionSerializers';
+import { LegacyFormCard } from '../../LegacyFormCard';
+import { useInlineBlockingRequestsForTool, usePendingFormCallIDs } from '../../InlineBlockingRequestsContext';
+import type { FormRequest } from '@/types/form';
+import { serializeFormAnswersAsMarkdown } from '../../legacyFormSerializers';
 import { DiffViewToggle, type DiffViewMode } from '../DiffViewToggle';
 import { GuestToolTable } from './GuestToolTable';
 import type { JsonValue } from '@openchamber/sdk';
@@ -87,10 +87,10 @@ import {
 } from './toolDiffUtils';
 import { getToolDiffPreviewText, isToolDiffPreviewOversized } from './toolDiffPreview';
 import {
-    findPendingQuestionRequestForRecoveredTool,
-    recoverQuestionRequestFromToolPart,
-    hasQuestionAnswer,
-} from '../../lib/questionToolRecovery';
+    findPendingFormRequestForRecoveredTool,
+    recoverFormRequestFromToolPart,
+    hasFormAnswer,
+} from '../../lib/formToolRecovery';
 import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedChat';
 import { shouldMaterializeTaskDetails } from './taskToolVisibility';
 import { ArtifactCard } from './ArtifactCard';
@@ -284,15 +284,15 @@ const describeSdkError = (error: unknown): string => {
     }
 };
 
-const listPendingQuestionsForRecovery = async (
+const listPendingFormsForRecovery = async (
     client: OpencodeClient,
     directory: string,
-): Promise<QuestionRequest[]> => {
-    const merged: QuestionRequest[] = [];
+): Promise<FormRequest[]> => {
+    const merged: FormRequest[] = [];
     const seen = new Set<string>();
     const trimmedDirectory = directory.trim();
 
-    const addRequests = (requests: readonly QuestionRequest[]) => {
+    const addRequests = (requests: readonly FormRequest[]) => {
         for (const request of requests) {
             if (!request.id || seen.has(request.id)) continue;
             seen.add(request.id);
@@ -300,7 +300,7 @@ const listPendingQuestionsForRecovery = async (
         }
     };
 
-    const listForDirectory = async (params?: { directory: string }): Promise<QuestionRequest[]> => {
+    const listForDirectory = async (params?: { directory: string }): Promise<FormRequest[]> => {
         const result = await client.question.list(params);
         if (result.error) {
             throw new Error(`question.list failed: ${describeSdkError(result.error)}`);
@@ -863,7 +863,7 @@ const QuestionToolDescription: React.FC<{ part: ToolPartType }> = ({ part }) => 
     const stateWithData = part.state as ToolStateWithMetadata;
     const input = stateWithData.input;
     const count = (input?.questions && Array.isArray(input.questions)) ? input.questions.length : 1;
-    const answered = hasQuestionAnswer(part);
+    const answered = hasFormAnswer(part);
 
     if (count === 1) {
         return answered
@@ -2199,7 +2199,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
             // Show question content from input whenever available, whether the tool is
             // pending/running or completed without parseable output. This ensures question
-            // text persists across refreshes even if the QuestionCard store data is lost.
+            // text persists across refreshes even if the LegacyFormCard store data is lost.
             const questionInput = input as { questions?: Array<{ question?: string; header?: string; options?: Array<{ label: string; description: string }>; multiple?: boolean }> } | undefined;
             if (questionInput?.questions && Array.isArray(questionInput.questions) && questionInput.questions.length > 0) {
                 return renderScrollableBlock(
@@ -2425,7 +2425,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
     }, [messageId, part]);
     const inlineBlockingRequests = useInlineBlockingRequestsForTool(partMessageId, part.callID || part.id);
-    const pendingQuestionCallIDs = usePendingQuestionCallIDs();
+    const pendingFormCallIDs = usePendingFormCallIDs();
 
     const normalizedPartTool = normalizeToolName(part.tool);
     const isTaskTool = normalizedPartTool === 'task';
@@ -2437,8 +2437,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
     const status = state?.status as string | undefined;
     const isFinalized = status === 'completed' || status === 'error' || status === 'aborted' || status === 'failed' || status === 'timeout' || status === 'cancelled';
     const isError = status === 'error' || status === 'failed';
-    const recoveredQuestionRequest = React.useMemo(() => {
-        if (inlineBlockingRequests.questions.length > 0) {
+    const recoveredFormRequest = React.useMemo(() => {
+        if (inlineBlockingRequests.forms.length > 0) {
             return null;
         }
         // If the question is still pending on the server (tracked by callID),
@@ -2446,18 +2446,18 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         // a trailing card at the bottom of the chat. Skip recovery to avoid
         // creating a duplicate card.
         const partCallID = part.callID || part.id;
-        if (typeof partCallID === 'string' && partCallID.length > 0 && pendingQuestionCallIDs.has(partCallID)) {
+        if (typeof partCallID === 'string' && partCallID.length > 0 && pendingFormCallIDs.has(partCallID)) {
             return null;
         }
-        return recoverQuestionRequestFromToolPart({
+        return recoverFormRequestFromToolPart({
             part,
             messageID: partMessageId,
             sessionID: messageSessionId,
             normalizedToolName: normalizedPartTool,
         });
-    }, [inlineBlockingRequests.questions.length, messageSessionId, normalizedPartTool, part, partMessageId, pendingQuestionCallIDs]);
-    const resolveRecoveredQuestionRequestTarget = React.useCallback(async () => {
-        if (!recoveredQuestionRequest) {
+    }, [inlineBlockingRequests.forms.length, messageSessionId, normalizedPartTool, part, partMessageId, pendingFormCallIDs]);
+    const resolveRecoveredFormRequestTarget = React.useCallback(async () => {
+        if (!recoveredFormRequest) {
             throw new Error('Question reply target is not available');
         }
         const directory = currentDirectory.trim();
@@ -2466,8 +2466,8 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         }
         const serverId = messageSessionId ? serverRegistry.getServerForSession(messageSessionId) : undefined;
         const client = resolveSdkForDirectory(directory, messageSessionId, serverId);
-        const pendingQuestions = await listPendingQuestionsForRecovery(client, directory);
-        const liveRequest = findPendingQuestionRequestForRecoveredTool(recoveredQuestionRequest, pendingQuestions);
+        const pendingForms = await listPendingFormsForRecovery(client, directory);
+        const liveRequest = findPendingFormRequestForRecoveredTool(recoveredFormRequest, pendingForms);
         if (!liveRequest) {
             if (!isFinalized) {
                 throw new Error('Question is still active, but the pending request target is not synced yet. Please wait for reconnect/resync instead of sending a normal message.');
@@ -2482,9 +2482,9 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             requestId: liveRequest.id,
             directory,
         };
-    }, [currentDirectory, isFinalized, messageSessionId, recoveredQuestionRequest]);
-    const submitRecoveredQuestionAsMessage = React.useCallback(async (answers: string[][], directoryHint?: string) => {
-        if (!recoveredQuestionRequest) {
+    }, [currentDirectory, isFinalized, messageSessionId, recoveredFormRequest]);
+    const submitStaleFormAnswerAsMessage = React.useCallback(async (answers: string[][], directoryHint?: string) => {
+        if (!recoveredFormRequest) {
             throw new Error('Question reply target is not available');
         }
         if (!messageSessionId) {
@@ -2503,7 +2503,7 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
         const serverId = serverRegistry.getServerForSession(messageSessionId);
         await routeMessage({
             sessionId: messageSessionId,
-            content: serializeQuestionAnswersAsMarkdown(recoveredQuestionRequest, answers),
+            content: serializeFormAnswersAsMarkdown(recoveredFormRequest, answers),
             providerID: choice.providerID,
             modelID: choice.modelID,
             agent: choice.agent,
@@ -2511,18 +2511,18 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
             directory,
             serverId,
         });
-    }, [currentDirectory, messageSessionId, recoveredQuestionRequest]);
-    const hasInlineBlockingRequests = inlineBlockingRequests.questions.length > 0
+    }, [currentDirectory, messageSessionId, recoveredFormRequest]);
+    const hasInlineBlockingRequests = inlineBlockingRequests.forms.length > 0
         || inlineBlockingRequests.permissions.length > 0
-        || recoveredQuestionRequest !== null;
-    // When the interactive QuestionCard is being rendered (either from the
-    // server's pending question routed inline, or from the recovery mechanism),
+        || recoveredFormRequest !== null;
+    // When the interactive LegacyFormCard is being rendered (either from the
+    // server's pending form routed inline, or from the recovery mechanism),
     // suppress the static question text in ToolExpandedContent to avoid
     // showing the question content twice (static text + interactive card).
-    // The static text is only a fallback for when the QuestionCard data is
-    // unavailable (e.g. after refresh when the sync store has no question data).
+    // The static text is only a fallback for when the card data is
+    // unavailable (e.g. after refresh when the sync store has no form data).
     const hasInteractiveQuestionCard = normalizedPartTool === 'question'
-        && (inlineBlockingRequests.questions.length > 0 || recoveredQuestionRequest !== null);
+        && (inlineBlockingRequests.forms.length > 0 || recoveredFormRequest !== null);
 
     const [activeLatched, setActiveLatched] = React.useState<boolean>(!isFinalized);
     const previousPartIdRef = React.useRef<string | undefined>(part.id);
@@ -3485,16 +3485,16 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
             {hasInlineBlockingRequests ? (
                 <div className="mt-1 [overflow-anchor:none]">
-                    {inlineBlockingRequests.questions.map((question) => (
-                        <QuestionCard key={question.id} question={question} inline />
+                    {inlineBlockingRequests.forms.map((form) => (
+                        <LegacyFormCard key={form.id} form={form} inline />
                     ))}
-                    {recoveredQuestionRequest ? (
-                        <QuestionCard
-                            key={recoveredQuestionRequest.id}
-                            question={recoveredQuestionRequest}
+                    {recoveredFormRequest ? (
+                        <LegacyFormCard
+                            key={recoveredFormRequest.id}
+                            form={recoveredFormRequest}
                             inline
-                            resolveRequestTarget={resolveRecoveredQuestionRequestTarget}
-                            submitStaleQuestionAnswer={submitRecoveredQuestionAsMessage}
+                            resolveRequestTarget={resolveRecoveredFormRequestTarget}
+                            submitStaleFormAnswer={submitStaleFormAnswerAsMessage}
                         />
                     ) : null}
                     {inlineBlockingRequests.permissions.map((permission) => (

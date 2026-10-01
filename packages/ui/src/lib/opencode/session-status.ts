@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 // Requests the host forwards verbatim from OpenCode's ask events; the shapes
-// mirror `@/types/permission` and `@/types/question` so a parsed entry is one.
+// mirror `@/types/permission` and `@/types/form` so a parsed entry is one
+// (the wire keeps the v1 `question` payload field names).
 const toolReferenceSchema = z.object({ messageID: z.string(), callID: z.string() }).optional()
 const hostPermissionRequestSchema = z.object({
   id: z.string().min(1),
@@ -12,7 +13,7 @@ const hostPermissionRequestSchema = z.object({
   always: z.array(z.string()),
   tool: toolReferenceSchema,
 })
-const hostQuestionRequestSchema = z.object({
+const hostFormRequestSchema = z.object({
   id: z.string().min(1),
   sessionID: z.string().min(1),
   questions: z.array(z.object({
@@ -36,11 +37,11 @@ export const hostSessionStatusSnapshotSchema = z.object({
   // session. Optional: hosts predating the field omit it.
   pending: z.record(z.string().min(1), z.object({
     permissions: z.array(hostPermissionRequestSchema),
-    questions: z.array(hostQuestionRequestSchema),
+    questions: z.array(hostFormRequestSchema),
   })).optional(),
   serverTime: z.number(),
 })
 
 export type HostSessionStatusSnapshot = z.infer<typeof hostSessionStatusSnapshotSchema>
 export type HostPermissionRequest = z.infer<typeof hostPermissionRequestSchema>
-export type HostQuestionRequest = z.infer<typeof hostQuestionRequestSchema>
+export type HostFormRequest = z.infer<typeof hostFormRequestSchema>

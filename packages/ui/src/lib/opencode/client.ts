@@ -13,7 +13,7 @@ import type {
   FilePartInput,
 } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest } from "@/types/permission";
-import type { QuestionRequest } from "@/types/question";
+import type { FormRequest } from "@/types/form";
 import type { SessionMarkers, SessionMarkersPatch } from "@/stores/types/sessionMarkers";
 import { waitForWorktreeBootstrap } from "@/lib/worktrees/worktreeBootstrap";
 import { resolveSdkForDirectory, resolveBaseUrlForSession } from "@/sync/session-routing";
@@ -1380,17 +1380,17 @@ class OpencodeService {
     return merged;
   }
 
-  async listPendingQuestions(options?: { directories?: Array<string | null | undefined> }): Promise<QuestionRequest[]> {
-    const fetches: Array<Promise<QuestionRequest[]>> = [];
+  async listPendingForms(options?: { directories?: Array<string | null | undefined> }): Promise<FormRequest[]> {
+    const fetches: Array<Promise<FormRequest[]>> = [];
 
-    const fetchForDirectory = async (directory?: string | null): Promise<QuestionRequest[]> => {
+    const fetchForDirectory = async (directory?: string | null): Promise<FormRequest[]> => {
       const trimmed = typeof directory === 'string' ? directory.trim() : '';
       const result = await this.client.question.list(trimmed ? { directory: trimmed } : undefined);
       const rawError = (result as { error?: unknown }).error;
       if (rawError) {
         throw new Error(`question.list failed: ${formatSdkError(rawError)}`);
       }
-      return (result.data || []) as unknown as QuestionRequest[];
+      return (result.data || []) as unknown as FormRequest[];
     };
 
     // Try unscoped first (server may return global pending items).
@@ -1409,7 +1409,7 @@ class OpencodeService {
     }
 
     const results = await Promise.all(fetches);
-    const merged: QuestionRequest[] = [];
+    const merged: FormRequest[] = [];
     const seenIds = new Set<string>();
 
     for (const list of results) {

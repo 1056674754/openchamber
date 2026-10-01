@@ -1,4 +1,5 @@
-import type { OpencodeClient, PermissionRequest, Project, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, PermissionRequest, Project } from "@opencode-ai/sdk/v2/client"
+import type { FormRequest } from "@/types/form"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { retry } from "./retry"
 import type { GlobalState, State } from "./types"
@@ -289,7 +290,7 @@ export async function bootstrapDirectory(input: {
     retry(async () => {
       const before = getState()
       const beforeSignatures = new Map(
-        Object.entries(before.question ?? {}).map(([sessionID, questions]) => [sessionID, requestSignature(questions)]),
+        Object.entries(before.form ?? {}).map(([sessionID, forms]) => [sessionID, requestSignature(forms)]),
       )
       const x = await sdk.question.list(directory ? { directory } : undefined)
       if (x.error) {
@@ -299,23 +300,23 @@ export async function bootstrapDirectory(input: {
         throw err
       }
       const grouped = groupBySession(
-        (x.data ?? []).filter((q): q is QuestionRequest => !!q?.id && !!q.sessionID),
+        (x.data ?? []).filter((q): q is FormRequest => !!q?.id && !!q.sessionID),
       )
       const current = getState()
-      const merged = { ...current.question }
-      for (const [sessionID, questions] of Object.entries(grouped)) {
-        merged[sessionID] = questions
+      const merged = { ...current.form }
+      for (const [sessionID, forms] of Object.entries(grouped)) {
+        merged[sessionID] = forms
           .filter((q) => !!q?.id)
           .sort((a, b) => cmp(a.id, b.id))
       }
       for (const sessionID of beforeSignatures.keys()) {
         if (grouped[sessionID]) continue
         const beforeSignature = beforeSignatures.get(sessionID) ?? ""
-        const currentSignature = requestSignature(current.question[sessionID])
+        const currentSignature = requestSignature(current.form[sessionID])
         if (currentSignature !== beforeSignature) continue
         delete merged[sessionID]
       }
-      set({ question: merged })
+      set({ form: merged })
     }),
     retry(async () => {
       const before = getState()

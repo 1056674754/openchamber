@@ -1,13 +1,13 @@
 import React from 'react';
 import type { PermissionRequest } from '@/types/permission';
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 import type { InlineBlockingRequests } from './lib/blockingRequests';
 import { getToolRequestKey } from './lib/blockingRequests';
 
-const EMPTY_QUESTIONS: QuestionRequest[] = [];
+const EMPTY_FORMS: FormRequest[] = [];
 const EMPTY_PERMISSIONS: PermissionRequest[] = [];
 const EMPTY_INLINE_BLOCKING_REQUESTS: InlineBlockingRequests = {
-  questions: EMPTY_QUESTIONS,
+  forms: EMPTY_FORMS,
   permissions: EMPTY_PERMISSIONS,
 };
 const EMPTY_PENDING_CALL_IDS: ReadonlySet<string> = new Set();
@@ -17,17 +17,17 @@ export type InlineBlockingRequestsByTool = ReadonlyMap<string, InlineBlockingReq
 export type InlineBlockingRequestsContextValue = {
   inlineByTool: InlineBlockingRequestsByTool;
   /**
-   * callIDs of ALL pending questions on the server for the scoped sessions
-   * (including questions routed to trailing, not just inline). Used by the
-   * question recovery mechanism to avoid creating a duplicate recovered card
-   * when the question is already being rendered elsewhere.
+   * callIDs of ALL pending forms on the server for the scoped sessions
+   * (including forms routed to trailing, not just inline). Used by the
+   * form recovery mechanism to avoid creating a duplicate recovered card
+   * when the form is already being rendered elsewhere.
    */
-  pendingQuestionCallIDs: ReadonlySet<string>;
+  pendingFormCallIDs: ReadonlySet<string>;
 };
 
 const EMPTY_CONTEXT_VALUE: InlineBlockingRequestsContextValue = {
   inlineByTool: new Map(),
-  pendingQuestionCallIDs: EMPTY_PENDING_CALL_IDS,
+  pendingFormCallIDs: EMPTY_PENDING_CALL_IDS,
 };
 
 export const InlineBlockingRequestsContext = React.createContext<InlineBlockingRequestsContextValue>(EMPTY_CONTEXT_VALUE);
@@ -42,10 +42,10 @@ export const useInlineBlockingRequestsForTool = (
 };
 
 /**
- * Returns the set of callIDs for ALL pending questions on the server for the
- * scoped sessions. Used to prevent question recovery from creating a duplicate
- * card when the question is already pending (and may be rendered as trailing).
+ * Returns the set of callIDs for ALL pending forms on the server for the
+ * scoped sessions. Used to prevent form recovery from creating a duplicate
+ * card when the form is already pending (and may be rendered as trailing).
  */
-export const usePendingQuestionCallIDs = (): ReadonlySet<string> => {
-  return React.useContext(InlineBlockingRequestsContext).pendingQuestionCallIDs;
+export const usePendingFormCallIDs = (): ReadonlySet<string> => {
+  return React.useContext(InlineBlockingRequestsContext).pendingFormCallIDs;
 };

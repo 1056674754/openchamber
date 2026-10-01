@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { ToolPart as ToolPartType } from '@opencode-ai/sdk/v2';
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 import {
-    findPendingQuestionRequestForRecoveredTool,
-    recoverQuestionRequestFromToolPart,
-} from './questionToolRecovery';
+    findPendingFormRequestForRecoveredTool,
+    recoverFormRequestFromToolPart,
+} from './formToolRecovery';
 
 const makeQuestionToolPart = (overrides: Partial<ToolPartType> = {}): ToolPartType => ({
     id: 'part-1',
@@ -30,9 +30,9 @@ const makeQuestionToolPart = (overrides: Partial<ToolPartType> = {}): ToolPartTy
     ...overrides,
 });
 
-describe('recoverQuestionRequestFromToolPart', () => {
+describe('recoverFormRequestFromToolPart', () => {
     test('recovers a question request from an unfinished question tool part', () => {
-        const recovered = recoverQuestionRequestFromToolPart({
+        const recovered = recoverFormRequestFromToolPart({
             part: makeQuestionToolPart(),
             messageID: 'msg-visible',
             sessionID: 'ses-visible',
@@ -58,7 +58,7 @@ describe('recoverQuestionRequestFromToolPart', () => {
     });
 
     test('does not recover answered question tool parts', () => {
-        const recovered = recoverQuestionRequestFromToolPart({
+        const recovered = recoverFormRequestFromToolPart({
             part: makeQuestionToolPart({
                 state: {
                     status: 'completed',
@@ -85,7 +85,7 @@ describe('recoverQuestionRequestFromToolPart', () => {
     });
 
     test('does not recover a question whose tool part terminated in error without an answer', () => {
-        const recovered = recoverQuestionRequestFromToolPart({
+        const recovered = recoverFormRequestFromToolPart({
             part: makeQuestionToolPart({
                 state: {
                     status: 'error',
@@ -111,7 +111,7 @@ describe('recoverQuestionRequestFromToolPart', () => {
     });
 
     test('does not recover questions the user already dismissed', () => {
-        const recovered = recoverQuestionRequestFromToolPart({
+        const recovered = recoverFormRequestFromToolPart({
             part: makeQuestionToolPart({
                 state: {
                     status: 'error',
@@ -139,7 +139,7 @@ describe('recoverQuestionRequestFromToolPart', () => {
     test('does not recover questions dismissed via expanded error markers (case-insensitive)', () => {
         const markers = ['aborted', 'cancelled', 'canceled', 'dismissed', 'Aborted', 'CANCELLED'];
         for (const marker of markers) {
-            const recovered = recoverQuestionRequestFromToolPart({
+            const recovered = recoverFormRequestFromToolPart({
                 part: makeQuestionToolPart({
                     state: {
                         status: 'error',
@@ -166,8 +166,8 @@ describe('recoverQuestionRequestFromToolPart', () => {
     });
 });
 
-describe('findPendingQuestionRequestForRecoveredTool', () => {
-    const recovered: QuestionRequest = {
+describe('findPendingFormRequestForRecoveredTool', () => {
+    const recovered: FormRequest = {
         id: 'recovered-question:msg-1:call-1',
         sessionID: 'ses-1',
         questions: [
@@ -185,18 +185,18 @@ describe('findPendingQuestionRequestForRecoveredTool', () => {
     };
 
     test('matches live pending requests by tool call id', () => {
-        const pending: QuestionRequest[] = [
+        const pending: FormRequest[] = [
             {
                 ...recovered,
                 id: 'que-live',
             },
         ];
 
-        expect(findPendingQuestionRequestForRecoveredTool(recovered, pending)?.id).toBe('que-live');
+        expect(findPendingFormRequestForRecoveredTool(recovered, pending)?.id).toBe('que-live');
     });
 
     test('falls back to exact question content only when the match is unique', () => {
-        const pending: QuestionRequest[] = [
+        const pending: FormRequest[] = [
             {
                 ...recovered,
                 id: 'que-live',
@@ -204,7 +204,7 @@ describe('findPendingQuestionRequestForRecoveredTool', () => {
             },
         ];
 
-        expect(findPendingQuestionRequestForRecoveredTool(recovered, pending)?.id).toBe('que-live');
-        expect(findPendingQuestionRequestForRecoveredTool(recovered, [...pending, { ...pending[0], id: 'que-ambiguous' }])).toBeNull();
+        expect(findPendingFormRequestForRecoveredTool(recovered, pending)?.id).toBe('que-live');
+        expect(findPendingFormRequestForRecoveredTool(recovered, [...pending, { ...pending[0], id: 'que-ambiguous' }])).toBeNull();
     });
 });

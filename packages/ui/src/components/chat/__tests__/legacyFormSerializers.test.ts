@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { QuestionInfo, QuestionOption, QuestionRequest } from '@/types/question';
-import { serializeQuestionAnswersAsMarkdown, serializeQuestionAsJson, serializeQuestionAsMarkdown } from '../questionSerializers';
+import type { FormQuestion, FormOption, FormRequest } from '@/types/form';
+import { serializeFormAnswersAsMarkdown, serializeFormAsJson, serializeFormAsMarkdown } from '../legacyFormSerializers';
 
-function makeOption(label: string, description = ''): QuestionOption {
+function makeOption(label: string, description = ''): FormOption {
   return { label, description };
 }
 
-function makeQuestion(overrides: Partial<QuestionInfo> & { question: string }): QuestionInfo {
+function makeQuestion(overrides: Partial<FormQuestion> & { question: string }): FormQuestion {
   return {
     header: '',
     options: [],
@@ -14,7 +14,7 @@ function makeQuestion(overrides: Partial<QuestionInfo> & { question: string }): 
   };
 }
 
-function makeRequest(questions: QuestionInfo[]): QuestionRequest {
+function makeRequest(questions: FormQuestion[]): FormRequest {
   return {
     id: 'req-test',
     sessionID: 'sess-test',
@@ -22,9 +22,9 @@ function makeRequest(questions: QuestionInfo[]): QuestionRequest {
   };
 }
 
-describe('serializeQuestionAsMarkdown', () => {
+describe('serializeFormAsMarkdown', () => {
   test('renders header, body and labelled options', () => {
-    const md = serializeQuestionAsMarkdown(
+    const md = serializeFormAsMarkdown(
       makeRequest([
         makeQuestion({
           header: 'Pick mode',
@@ -41,7 +41,7 @@ describe('serializeQuestionAsMarkdown', () => {
   });
 
   test('falls back to Question N when header is empty', () => {
-    const md = serializeQuestionAsMarkdown(
+    const md = serializeFormAsMarkdown(
       makeRequest([
         makeQuestion({ header: '   ', question: 'A?', options: [makeOption('yes')] }),
         makeQuestion({ header: '', question: 'B?', options: [makeOption('yes')] }),
@@ -53,10 +53,10 @@ describe('serializeQuestionAsMarkdown', () => {
   });
 
   test('emits multi-select hint only when multiple is true', () => {
-    const single = serializeQuestionAsMarkdown(
+    const single = serializeFormAsMarkdown(
       makeRequest([makeQuestion({ question: 'pick', options: [makeOption('a')] })]),
     );
-    const multi = serializeQuestionAsMarkdown(
+    const multi = serializeFormAsMarkdown(
       makeRequest([makeQuestion({ question: 'pick', multiple: true, options: [makeOption('a')] })]),
     );
 
@@ -65,7 +65,7 @@ describe('serializeQuestionAsMarkdown', () => {
   });
 
   test('elides blank descriptions', () => {
-    const md = serializeQuestionAsMarkdown(
+    const md = serializeFormAsMarkdown(
       makeRequest([
         makeQuestion({
           question: 'q?',
@@ -80,7 +80,7 @@ describe('serializeQuestionAsMarkdown', () => {
   });
 
   test('serializes multiple questions in order', () => {
-    const md = serializeQuestionAsMarkdown(
+    const md = serializeFormAsMarkdown(
       makeRequest([
         makeQuestion({ header: 'First', question: 'one?', options: [makeOption('a')] }),
         makeQuestion({ header: 'Second', question: 'two?', options: [makeOption('b')] }),
@@ -94,9 +94,9 @@ describe('serializeQuestionAsMarkdown', () => {
   });
 
   test('handles empty questions and zero-option questions', () => {
-    expect(serializeQuestionAsMarkdown(makeRequest([]))).toBe('');
+    expect(serializeFormAsMarkdown(makeRequest([]))).toBe('');
 
-    const md = serializeQuestionAsMarkdown(
+    const md = serializeFormAsMarkdown(
       makeRequest([makeQuestion({ header: 'Empty', question: 'free?', options: [] })]),
     );
     expect(md.includes('## Empty')).toBe(true);
@@ -104,9 +104,9 @@ describe('serializeQuestionAsMarkdown', () => {
   });
 });
 
-describe('serializeQuestionAsJson', () => {
+describe('serializeFormAsJson', () => {
   test('produces canonical envelope preserving option descriptions', () => {
-    const json = serializeQuestionAsJson(
+    const json = serializeFormAsJson(
       makeRequest([
         makeQuestion({
           header: 'Pick',
@@ -132,7 +132,7 @@ describe('serializeQuestionAsJson', () => {
   });
 
   test('reflects multiple as a boolean and omits transient ids', () => {
-    const json = serializeQuestionAsJson(
+    const json = serializeFormAsJson(
       makeRequest([
         makeQuestion({ question: 'q1', multiple: true, options: [makeOption('a')] }),
         makeQuestion({ question: 'q2', options: [makeOption('b')] }),
@@ -147,11 +147,11 @@ describe('serializeQuestionAsJson', () => {
   });
 
   test('uses null for missing runtime descriptions', () => {
-    const json = serializeQuestionAsJson(
+    const json = serializeFormAsJson(
       makeRequest([
         makeQuestion({
           question: 'q?',
-          options: [{ label: 'x' } as unknown as QuestionOption],
+          options: [{ label: 'x' } as unknown as FormOption],
         }),
       ]),
     );
@@ -160,16 +160,16 @@ describe('serializeQuestionAsJson', () => {
   });
 
   test('handles empty questions array with two-space indentation', () => {
-    const json = serializeQuestionAsJson(makeRequest([]));
+    const json = serializeFormAsJson(makeRequest([]));
 
     expect(JSON.parse(json)).toEqual({ questions: [] });
     expect(json.includes('\n  "questions"')).toBe(true);
   });
 });
 
-describe('serializeQuestionAnswersAsMarkdown', () => {
+describe('serializeFormAnswersAsMarkdown', () => {
   test('renders answers beside their original questions', () => {
-    const md = serializeQuestionAnswersAsMarkdown(
+    const md = serializeFormAnswersAsMarkdown(
       makeRequest([
         makeQuestion({ header: 'Mode', question: 'Which mode?', options: [makeOption('A')] }),
         makeQuestion({ question: 'Any notes?', options: [] }),
@@ -186,7 +186,7 @@ describe('serializeQuestionAnswersAsMarkdown', () => {
   });
 
   test('renders multi-answer and missing-answer values deterministically', () => {
-    const md = serializeQuestionAnswersAsMarkdown(
+    const md = serializeFormAnswersAsMarkdown(
       makeRequest([
         makeQuestion({ question: 'Tags?', multiple: true, options: [makeOption('A'), makeOption('B')] }),
         makeQuestion({ question: 'Empty?', options: [] }),

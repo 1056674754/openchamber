@@ -19,7 +19,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
 import type { ChildSessionExport } from '@/lib/exportSession';
-import { buildSessionMessageRecordsSnapshot, useChildStoreManager, useExistingSessionPermissions, useExistingSessionQuestions, useGlobalSessionStatus } from '@/sync/sync-context';
+import { buildSessionMessageRecordsSnapshot, useChildStoreManager, useExistingSessionPermissions, useExistingSessionForms, useGlobalSessionStatus } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { getSyncStoresForServer } from '@/sync/multi-server-registry';
 import { useViewportStore } from '@/sync/viewport-store';
@@ -694,7 +694,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
       });
   }, [currentWorktreeMetadata, projectId, sessionDirectory, startSessionWorktreeMenuLoad]);
   const sessionPermissions = useExistingSessionPermissions(session.id, permissionDirectory);
-  const sessionQuestions = useExistingSessionQuestions(session.id, permissionDirectory);
+  const sessionForms = useExistingSessionForms(session.id, permissionDirectory);
   const directoryState = sessionDirectory ? directoryStatus.get(sessionDirectory) : null;
   const isMissingDirectory = directoryState === 'missing';
   const isActive = currentSessionId === session.id;
@@ -872,7 +872,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
     isStreaming,
   );
   const pendingPermissionCount = sessionPermissions.length;
-  const pendingQuestionCount = sessionQuestions.length;
+  const pendingFormCount = sessionForms.length;
   const showUnreadStatus = !isMovingToWorktree && needsAttention;
 
   const showActivityDuration = (isStreaming || showUnreadStatus) && hasActivityDuration && !isMovingToWorktree;
@@ -988,7 +988,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
   };
 
   const renderBlockingRequestBadges = () => {
-    if (pendingPermissionCount === 0 && pendingQuestionCount === 0) return null;
+    if (pendingPermissionCount === 0 && pendingFormCount === 0) return null;
 
     return (
       <span className="mr-1 inline-flex shrink-0 items-center gap-1">
@@ -998,10 +998,10 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             <span className="leading-none">{pendingPermissionCount}</span>
           </span>
         ) : null}
-        {pendingQuestionCount > 0 ? (
+        {pendingFormCount > 0 ? (
           <span className="oc-blocking-request-badge inline-flex items-center gap-1 rounded px-1 py-0.5 text-[0.7rem] text-status-info" title={t('sessions.sidebar.session.status.questionPending')} aria-label={t('sessions.sidebar.session.status.questionPending')}>
             <Icon name="question" className="h-3 w-3" />
-            <span className="leading-none">{pendingQuestionCount}</span>
+            <span className="leading-none">{pendingFormCount}</span>
           </span>
         ) : null}
       </span>

@@ -7,15 +7,15 @@ import {
   useGlobalBlockingRequestsStore,
 } from './global-blocking-requests';
 import type { PermissionRequest } from '@/types/permission';
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 
 const permission = (id: string, sessionID: string): PermissionRequest => ({
   id, sessionID, permission: 'bash', patterns: ['rm *'], metadata: {}, always: [],
 });
-const question = (id: string, sessionID: string): QuestionRequest => ({
+const question = (id: string, sessionID: string): FormRequest => ({
   id, sessionID, questions: [{ header: 'Pick', question: 'Which?', options: [] }],
 });
-const asked = (request: PermissionRequest | QuestionRequest): Event => ({
+const asked = (request: PermissionRequest | FormRequest): Event => ({
   id: `e-${request.id}`,
   type: 'permission' in request ? 'permission.asked' : 'question.asked',
   // SAFETY: test payloads mirror the SDK ask event shape.
@@ -29,7 +29,7 @@ describe('global blocking requests index', () => {
   test('tracks asks per session and settles them by request id', () => {
     applyGlobalBlockingRequestEvents('/far/', [asked(permission('p1', 's1')), asked(question('q1', 's1')), asked(permission('p2', 's2'))]);
 
-    expect(bySession().get('s1')).toEqual({ directory: '/far', permissions: [permission('p1', 's1')], questions: [question('q1', 's1')] });
+    expect(bySession().get('s1')).toEqual({ directory: '/far', permissions: [permission('p1', 's1')], forms: [question('q1', 's1')] });
     expect(bySession().get('s2')?.permissions.map((p) => p.id)).toEqual(['p2']);
 
     applyGlobalBlockingRequestEvents('/far', [
@@ -45,7 +45,7 @@ describe('global blocking requests index', () => {
     // SAFETY: OpenCode may omit requestID on a reply; the SDK type requires it, the reducer contract does not.
     applyGlobalBlockingRequestEvents('/far', [{ id: 'r', type: 'permission.replied', properties: { sessionID: 's1', reply: 'once' } as never }]);
     expect(bySession().get('s1')?.permissions).toEqual([]);
-    expect(bySession().get('s1')?.questions.map((q) => q.id)).toEqual(['q1']);
+    expect(bySession().get('s1')?.forms.map((q) => q.id)).toEqual(['q1']);
 
     // SAFETY: only the deleted session's id matters here; the full SDK session record is irrelevant to the index.
     applyGlobalBlockingRequestEvents('/far', [{ id: 'd', type: 'session.deleted', properties: { info: { id: 's1' } } as never }]);
@@ -67,13 +67,13 @@ describe('global blocking requests index', () => {
     applyGlobalBlockingRequestEvents('/far', [{ id: 'r', type: 'permission.replied', properties: { sessionID: 's1', requestID: 'p1', reply: 'once' } }]);
 
     seedGlobalBlockingRequests([
-      { sessionId: 's2', directory: '/other', permissions: [permission('p2', 's2')], questions: [] },
-      { sessionId: 's3', directory: '/other', permissions: [], questions: [] },
+      { sessionId: 's2', directory: '/other', permissions: [permission('p2', 's2')], forms: [] },
+      { sessionId: 's3', directory: '/other', permissions: [], forms: [] },
     ]);
     expect([...bySession().keys()]).toEqual(['s2']);
 
     // A later seed cannot resurrect a settled request or override a live entry.
-    seedGlobalBlockingRequests([{ sessionId: 's2', directory: '/elsewhere', permissions: [permission('p9', 's2')], questions: [] }]);
+    seedGlobalBlockingRequests([{ sessionId: 's2', directory: '/elsewhere', permissions: [permission('p9', 's2')], forms: [] }]);
     expect(bySession().get('s2')?.permissions.map((p) => p.id)).toEqual(['p2']);
     seedGlobalBlockingRequests([]);
     expect(bySession().has('s2')).toBe(true);

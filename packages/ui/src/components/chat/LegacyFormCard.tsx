@@ -7,39 +7,39 @@ import { cn } from '@/lib/utils';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { toast } from '@/components/ui';
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessions } from '@/sync/sync-context';
 import * as sessionActions from '@/sync/session-actions';
 import { useI18n } from '@/lib/i18n';
-import { serializeQuestionAsJson, serializeQuestionAsMarkdown } from './questionSerializers';
-import { QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT, getQuestionCustomTextareaHeight } from './questionTextareaSizing';
+import { serializeFormAsJson, serializeFormAsMarkdown } from './legacyFormSerializers';
+import { LEGACY_FORM_CUSTOM_TEXTAREA_MIN_HEIGHT, getLegacyFormCustomTextareaHeight } from './legacyFormTextareaSizing';
 import {
-  clearQuestionDraft,
-  isQuestionHandled,
-  isQuestionHandledByTool,
-  loadQuestionDraft,
-  markQuestionHandled,
-  markQuestionHandledByTool,
-  saveQuestionDraft,
-} from './lib/questionDraftPersistence';
+  clearFormDraft,
+  isFormHandled,
+  isFormHandledByTool,
+  loadFormDraft,
+  markFormHandled,
+  markFormHandledByTool,
+  saveFormDraft,
+} from './lib/formDraftPersistence';
 
-interface QuestionCardProps {
-  question: QuestionRequest;
+interface LegacyFormCardProps {
+  form: FormRequest;
   inline?: boolean;
-  resolveRequestTarget?: () => Promise<QuestionRequestTarget>;
-  submitStaleQuestionAnswer?: (answers: string[][], directory?: string) => Promise<void>;
+  resolveRequestTarget?: () => Promise<FormRequestTarget>;
+  submitStaleFormAnswer?: (answers: string[][], directory?: string) => Promise<void>;
 }
 
-type QuestionRequestTarget =
+type FormRequestTarget =
   | { kind?: 'pending'; requestId: string; directory?: string }
   | { kind: 'stale'; directory?: string };
 
 type TabKey = string;
 const SUMMARY_TAB = 'summary';
 
-const describeQuestionError = (error: unknown): string => {
+const describeFormError = (error: unknown): string => {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
   }
@@ -63,7 +63,7 @@ const CustomAnswerTextarea = React.memo(function CustomAnswerTextarea({
 }: CustomAnswerTextareaProps) {
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const [localValue, setLocalValue] = React.useState(value);
-  const [height, setHeight] = React.useState(QUESTION_CUSTOM_TEXTAREA_MIN_HEIGHT);
+  const [height, setHeight] = React.useState(LEGACY_FORM_CUSTOM_TEXTAREA_MIN_HEIGHT);
   const [isScrollable, setIsScrollable] = React.useState(false);
 
   React.useEffect(() => {
@@ -74,7 +74,7 @@ const CustomAnswerTextarea = React.memo(function CustomAnswerTextarea({
     const textarea = textareaRef.current;
     if (!textarea) return;
 
-    const nextHeight = getQuestionCustomTextareaHeight({
+    const nextHeight = getLegacyFormCustomTextareaHeight({
       scrollHeight: textarea.scrollHeight,
       currentHeight: height,
     });
@@ -110,18 +110,24 @@ const CustomAnswerTextarea = React.memo(function CustomAnswerTextarea({
   );
 });
 
-export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = false, resolveRequestTarget, submitStaleQuestionAnswer }) => {
+/**
+ * The v1 track's inline card for a blocking form (the wire's multi-question
+ * `question.asked` request). The v2 typed-form surfaces are `FormCard` and
+ * `FormDock`. Renamed from `QuestionCard` in spine S7; the draft-persistence
+ * storage keys are unchanged so saved drafts survive the rename.
+ */
+export const LegacyFormCard: React.FC<LegacyFormCardProps> = ({ form, inline = false, resolveRequestTarget, submitStaleFormAnswer }) => {
   const { t } = useI18n();
-  const respondToQuestion = sessionActions.respondToQuestion;
-  const rejectQuestion = sessionActions.rejectQuestion;
+  const replyToForm = sessionActions.replyToForm;
+  const cancelForm = sessionActions.cancelForm;
   const isMobile = useUIStore((state) => state.isMobile);
   const sessions = useSessions();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const isFromSubagent = React.useMemo(() => {
-    if (!currentSessionId || question.sessionID === currentSessionId) return false;
-    const sourceSession = sessions.find((session) => session.id === question.sessionID);
+    if (!currentSessionId || form.sessionID === currentSessionId) return false;
+    const sourceSession = sessions.find((session) => session.id === form.sessionID);
     return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-  }, [question.sessionID, currentSessionId, sessions]);
+  }, [form.sessionID, currentSessionId, sessions]);
   const [activeTab, setActiveTab] = React.useState<TabKey>('0');
   const [isResponding, setIsResponding] = React.useState(false);
   const [hasResponded, setHasResponded] = React.useState(false);
@@ -132,7 +138,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
   const [customTextFilled, setCustomTextFilled] = React.useState<Record<number, boolean>>({});
   const skipNextDraftSaveRef = React.useRef<string | null>(null);
 
-  const questions = React.useMemo(() => question.questions ?? [], [question.questions]);
+  const questions = React.useMemo(() => form.questions ?? [], [form.questions]);
   const isSummaryTab = activeTab === SUMMARY_TAB;
   const activeIndex = isSummaryTab ? -1 : Math.max(0, Math.min(questions.length - 1, Number(activeTab) || 0));
   const activeQuestion = isSummaryTab ? null : questions[activeIndex];
@@ -143,8 +149,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
   }, [activeQuestion?.header, isSummaryTab]);
 
   React.useEffect(() => {
-    const draft = loadQuestionDraft(question.id);
-    skipNextDraftSaveRef.current = question.id;
+    const draft = loadFormDraft(form.id);
+    skipNextDraftSaveRef.current = form.id;
     setActiveTab(draft?.activeTab ?? '0');
     setSelectedOptions(draft?.selectedOptions ?? {});
     setCustomMode(draft?.customMode ?? {});
@@ -157,23 +163,23 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
       }
     }
     setCustomTextFilled(nextFilled);
-    setHasResponded(isQuestionHandled(question.id) || (question.tool ? isQuestionHandledByTool(question.tool) : false));
-  }, [question.id, question.tool]);
+    setHasResponded(isFormHandled(form.id) || (form.tool ? isFormHandledByTool(form.tool) : false));
+  }, [form.id, form.tool]);
 
   React.useEffect(() => {
     if (hasResponded) return;
-    if (skipNextDraftSaveRef.current === question.id) {
+    if (skipNextDraftSaveRef.current === form.id) {
       skipNextDraftSaveRef.current = null;
       return;
     }
 
-    saveQuestionDraft(question.id, {
+    saveFormDraft(form.id, {
       activeTab,
       selectedOptions,
       customMode,
       customText: customTextRef.current,
     });
-  }, [activeTab, customMode, customTextFilled, hasResponded, question.id, selectedOptions]);
+  }, [activeTab, customMode, customTextFilled, hasResponded, form.id, selectedOptions]);
 
   const tabs = React.useMemo(() => {
     const questionTabs = questions.map((q, index) => ({
@@ -256,9 +262,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     return answers;
   }, [customMode, questions.length, selectedOptions]);
 
-  const resolveEffectiveRequestTarget = React.useCallback(async (): Promise<QuestionRequestTarget> => {
+  const resolveEffectiveRequestTarget = React.useCallback(async (): Promise<FormRequestTarget> => {
     if (!resolveRequestTarget) {
-      return { kind: 'pending', requestId: question.id };
+      return { kind: 'pending', requestId: form.id };
     }
     const target = await resolveRequestTarget();
     if (target.kind === 'stale') {
@@ -268,7 +274,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
       throw new Error('Question reply target is not available');
     }
     return target;
-  }, [question.id, resolveRequestTarget]);
+  }, [form.id, resolveRequestTarget]);
 
   const handleToggleOption = React.useCallback(
     (label: string) => {
@@ -311,24 +317,24 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
       const answers = buildAnswersPayload();
       const target = await resolveEffectiveRequestTarget();
       if (target.kind === 'stale') {
-        if (!submitStaleQuestionAnswer) {
+        if (!submitStaleFormAnswer) {
           throw new Error('Question is no longer pending');
         }
-        await submitStaleQuestionAnswer(answers, target.directory);
+        await submitStaleFormAnswer(answers, target.directory);
       } else {
-        await respondToQuestion(question.sessionID, target.requestId, answers, target.directory);
+        await replyToForm(form.sessionID, target.requestId, answers, target.directory);
       }
-      markQuestionHandled(question.id);
-      if (question.tool) markQuestionHandledByTool(question.tool);
+      markFormHandled(form.id);
+      if (form.tool) markFormHandledByTool(form.tool);
       setHasResponded(true);
     } catch (error) {
-      const description = describeQuestionError(error);
-      console.error('[QuestionCard] Failed to respond to question:', error);
+      const description = describeFormError(error);
+      console.error('[LegacyFormCard] Failed to respond to form:', error);
       toast.error(t('chat.questionCard.replyFailed'), { description, copyText: description });
     } finally {
       setIsResponding(false);
     }
-  }, [buildAnswersPayload, question.id, question.sessionID, question.tool, requiredSatisfied, resolveEffectiveRequestTarget, respondToQuestion, submitStaleQuestionAnswer, t]);
+  }, [buildAnswersPayload, form.id, form.sessionID, form.tool, requiredSatisfied, resolveEffectiveRequestTarget, replyToForm, submitStaleFormAnswer, t]);
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -351,38 +357,38 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({ question, inline = f
     try {
       const target = await resolveEffectiveRequestTarget();
       if (target.kind !== 'stale') {
-        await rejectQuestion(question.sessionID, target.requestId, target.directory);
+        await cancelForm(form.sessionID, target.requestId, target.directory);
       }
-      markQuestionHandled(question.id);
-      if (question.tool) markQuestionHandledByTool(question.tool);
-      clearQuestionDraft(question.id);
+      markFormHandled(form.id);
+      if (form.tool) markFormHandledByTool(form.tool);
+      clearFormDraft(form.id);
       setHasResponded(true);
     } catch (error) {
-      const description = describeQuestionError(error);
-      console.error('[QuestionCard] Failed to dismiss question:', error);
+      const description = describeFormError(error);
+      console.error('[LegacyFormCard] Failed to dismiss form:', error);
       toast.error(t('chat.questionCard.dismissFailed'), { description, copyText: description });
     } finally {
       setIsResponding(false);
     }
-  }, [question.id, question.sessionID, question.tool, rejectQuestion, resolveEffectiveRequestTarget, t]);
+  }, [form.id, form.sessionID, form.tool, cancelForm, resolveEffectiveRequestTarget, t]);
 
   const handleCopyMarkdown = React.useCallback(async () => {
-    const result = await copyTextToClipboard(serializeQuestionAsMarkdown(question));
+    const result = await copyTextToClipboard(serializeFormAsMarkdown(form));
     if (result.ok) {
       toast.success(t('chat.questionCard.copiedMarkdown'));
       return;
     }
     toast.error(t('chat.questionCard.copyFailed'));
-  }, [question, t]);
+  }, [form, t]);
 
   const handleCopyJson = React.useCallback(async () => {
-    const result = await copyTextToClipboard(serializeQuestionAsJson(question));
+    const result = await copyTextToClipboard(serializeFormAsJson(form));
     if (result.ok) {
       toast.success(t('chat.questionCard.copiedJson'));
       return;
     }
     toast.error(t('chat.questionCard.copyFailed'));
-  }, [question, t]);
+  }, [form, t]);
 
   if (hasResponded || questions.length === 0) {
     return null;

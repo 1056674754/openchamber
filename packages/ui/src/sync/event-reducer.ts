@@ -4,13 +4,13 @@ import type {
   Part,
   PermissionRequest,
   Project,
-  QuestionRequest,
   Session,
   SessionStatus,
   Todo,
 } from "@opencode-ai/sdk/v2/client"
+import type { FormRequest } from "@/types/form"
 import { Binary } from "./binary"
-import type { FileDiff, GlobalState, State } from "./types"
+import type { FileDiff, FormEventFrame, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
@@ -199,7 +199,7 @@ export function applyGlobalProject(state: GlobalState, project: Project): Global
 
 export function applyDirectoryEvent(
   draft: State,
-  event: Event,
+  event: Event | FormEventFrame,
   callbacks?: {
     onRefresh?: (directory: string) => void
     onLoadLsp?: () => void
@@ -527,30 +527,66 @@ export function applyDirectoryEvent(
       return false
     }
 
+    // v1 wire keeps the `question.*` names; the store field is the form
+    // concept (spine S7 rename — runtime behavior unchanged).
     case "question.asked": {
-      const question = event.properties as QuestionRequest
-      const questions = draft.question[question.sessionID] ?? []
-      const next = [...questions]
-      const result = Binary.search(next, question.id, (q) => q.id)
+      const form = event.properties as FormRequest
+      const forms = draft.form[form.sessionID] ?? []
+      const next = [...forms]
+      const result = Binary.search(next, form.id, (f) => f.id)
       if (result.found) {
-        next[result.index] = question
+        next[result.index] = form
       } else {
-        next.splice(result.index, 0, question)
+        next.splice(result.index, 0, form)
       }
-      draft.question[question.sessionID] = next
+      draft.form[form.sessionID] = next
       return true
     }
 
     case "question.replied":
     case "question.rejected": {
       const props = event.properties as { sessionID: string; requestID: string }
-      const questions = draft.question[props.sessionID]
-      if (!questions) return false
-      const result = Binary.search(questions, props.requestID, (q) => q.id)
+      const forms = draft.form[props.sessionID]
+      if (!forms) return false
+      const result = Binary.search(forms, props.requestID, (f) => f.id)
       if (result.found) {
-        const next = [...questions]
+        const next = [...forms]
         next.splice(result.index, 1)
-        draft.question[props.sessionID] = next
+        draft.form[props.sessionID] = next
+        return true
+      }
+      return false
+    }
+
+    // v2 track: the server translates OpenCode 2.x `session.form.*` events
+    // (translate-v2) into these frames. They only arrive from a v2 instance,
+    // so the v1 track never reaches these branches. The v2-native shape rides
+    // the adjacent `nativeForm` channel; the v2 dock consumes it from there.
+    case "form.created": {
+      const { sessionID, form } = event.properties
+      if (!form.id || !sessionID) return false
+      const forms = draft.nativeForm[sessionID] ?? []
+      const next = [...forms]
+      const result = Binary.search(next, form.id, (f) => f.id)
+      if (result.found) {
+        next[result.index] = form
+      } else {
+        next.splice(result.index, 0, form)
+      }
+      draft.nativeForm[sessionID] = next
+      return true
+    }
+
+    case "form.settled": {
+      const { sessionID, formID } = event.properties
+      if (!sessionID || !formID) return false
+      const forms = draft.nativeForm[sessionID]
+      if (!forms) return false
+      const result = Binary.search(forms, formID, (f) => f.id)
+      if (result.found) {
+        const next = [...forms]
+        next.splice(result.index, 1)
+        draft.nativeForm[sessionID] = next
         return true
       }
       return false

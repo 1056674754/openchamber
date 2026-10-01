@@ -14,7 +14,7 @@ const DAY_MS = 24 * 60 * 60 * 1000
 function buildState(overrides: Partial<State> = {}): State {
   return {
     ...INITIAL_STATE,
-    question: {},
+    form: {},
     permission: {},
     ...overrides,
   }
@@ -48,7 +48,7 @@ describe("hasPendingBlockingRequests", () => {
   })
 
   test("returns true when at least one session has a pending question", () => {
-    const state = buildState({ question: { ses_a: [buildQuestion()] } })
+    const state = buildState({ form: { ses_a: [buildQuestion()] } })
     expect(hasPendingBlockingRequests(state)).toBe(true)
   })
 
@@ -58,7 +58,7 @@ describe("hasPendingBlockingRequests", () => {
   })
 
   test("treats empty arrays under a session key as no pending work", () => {
-    const state = buildState({ question: { ses_a: [] }, permission: { ses_b: [] } })
+    const state = buildState({ form: { ses_a: [] }, permission: { ses_b: [] } })
     expect(hasPendingBlockingRequests(state)).toBe(false)
   })
 })
@@ -177,7 +177,7 @@ describe("session cache eviction", () => {
       permission: {
         ses_permission: [buildPermission({ sessionID: "ses_permission" })],
       },
-      question: {
+      form: {
         ses_question: [buildQuestion({ sessionID: "ses_question" })],
       },
     })

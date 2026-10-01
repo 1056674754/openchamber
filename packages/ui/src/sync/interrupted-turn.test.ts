@@ -13,7 +13,7 @@ const state = (message = assistant()): InterruptedTurnState => ({
   session_status: { ses_1: { type: 'idle' } },
   message: { ses_1: [message] },
   part: {},
-  question: {},
+  form: {},
   permission: {},
 });
 
@@ -50,7 +50,7 @@ describe('settleInterruptedTurn', () => {
     expect(settleInterruptedTurn(busy, 'ses_1')).toBeNull();
     expect(settleInterruptedTurn(state(assistant(100)), 'ses_1')).toBeNull();
     const blocked = state();
-    blocked.question.ses_1 = [{ id: 'q1' } as never];
+    blocked.form.ses_1 = [{ id: 'q1' } as never];
     expect(settleInterruptedTurn(blocked, 'ses_1')).toBeNull();
     const userTail = state();
     userTail.message.ses_1.push({ id: 'msg_2', sessionID: 'ses_1', role: 'user', time: { created: 2 } } as Message);

@@ -1,10 +1,11 @@
 import { describe, expect, test, beforeEach, mock } from "bun:test"
 import { create, type StoreApi } from "zustand"
-import type { PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { PermissionRequest } from "@opencode-ai/sdk/v2/client"
+import type { FormRequest } from "@/types/form"
 
 const scopedQuestionListCalls: string[] = []
 const scopedPermissionListCalls: string[] = []
-let pendingQuestionsResponse: QuestionRequest[] = []
+let pendingQuestionsResponse: FormRequest[] = []
 let pendingPermissionsResponse: PermissionRequest[] = []
 let pendingQuestionsShouldThrow = false
 let pendingPermissionsShouldThrow = false
@@ -13,7 +14,7 @@ mock.module("@/lib/opencode/client", () => ({
   opencodeClient: {
     getDirectory: () => "/repo",
     getScopedSdkClient: () => ({
-      question: {
+      form: {
         list: mock(async ({ directory }: { directory: string }) => {
           scopedQuestionListCalls.push(directory)
           if (pendingQuestionsShouldThrow) return { error: new Error("question.list failed: simulated") }
@@ -66,13 +67,13 @@ import { INITIAL_STATE, type State } from "../types"
 import type { DirectoryStore } from "../child-store"
 import { resyncBlockingRequestsForDirectory } from "../sync-context"
 
-function buildQuestion(overrides: Partial<QuestionRequest> = {}): QuestionRequest {
+function buildQuestion(overrides: Partial<FormRequest> = {}): FormRequest {
   return {
     id: "que_1",
     sessionID: "ses_a",
     questions: [{ question: "Continue?", header: "Q", options: [{ label: "Yes", description: "" }] }],
     ...overrides,
-  } as QuestionRequest
+  } as FormRequest
 }
 
 function buildPermission(overrides: Partial<PermissionRequest> = {}): PermissionRequest {
@@ -134,8 +135,8 @@ describe("resyncBlockingRequestsForDirectory", () => {
 
     await resyncBlockingRequestsForDirectory("/repo", store)
 
-    expect(store.getState().question["ses_a"]).toHaveLength(1)
-    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
+    expect(store.getState().form["ses_a"]).toHaveLength(1)
+    expect(store.getState().form["ses_a"]?.[0]?.id).toBe("que_1")
     expect(store.getState().permission["ses_a"]).toHaveLength(1)
     expect(store.getState().permission["ses_a"]?.[0]?.id).toBe("perm_1")
   })
@@ -148,7 +149,7 @@ describe("resyncBlockingRequestsForDirectory", () => {
 
     expect(scopedQuestionListCalls).toEqual(["/repo"])
     expect(scopedPermissionListCalls).toHaveLength(0)
-    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
+    expect(store.getState().form["ses_a"]?.[0]?.id).toBe("que_1")
   })
 
   test("limits explicit question recovery to the requested session", async () => {
@@ -162,37 +163,37 @@ describe("resyncBlockingRequestsForDirectory", () => {
 
     await resyncBlockingRequestsForDirectory("/repo", store, ["ses_a"], { includePermissions: false })
 
-    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
-    expect(store.getState().question["ses_b"]).toBe(undefined)
+    expect(store.getState().form["ses_a"]?.[0]?.id).toBe("que_1")
+    expect(store.getState().form["ses_b"]).toBe(undefined)
     expect(scopedPermissionListCalls).toHaveLength(0)
   })
 
   test("preserves an in-flight SSE-delivered question whose signature changed during the fetch", async () => {
     const store = createDirectoryStore({
-      question: { ses_a: [{ ...buildQuestion(), id: "que_initial" }] },
+      form: { ses_a: [{ ...buildQuestion(), id: "que_initial" }] },
     })
     pendingQuestionsResponse = []
 
     const promise = resyncBlockingRequestsForDirectory("/repo", store)
     store.setState({
-      question: { ses_a: [{ ...buildQuestion(), id: "que_sse_arrived" }] },
+      form: { ses_a: [{ ...buildQuestion(), id: "que_sse_arrived" }] },
     })
     await promise
 
-    expect(store.getState().question["ses_a"]).toHaveLength(1)
-    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_sse_arrived")
+    expect(store.getState().form["ses_a"]).toHaveLength(1)
+    expect(store.getState().form["ses_a"]?.[0]?.id).toBe("que_sse_arrived")
   })
 
   test("clears stale entries when API returns no pending requests and signature unchanged", async () => {
     const store = createDirectoryStore({
-      question: { ses_a: [{ ...buildQuestion(), id: "que_stale" }] },
+      form: { ses_a: [{ ...buildQuestion(), id: "que_stale" }] },
     })
     pendingQuestionsResponse = []
     pendingPermissionsResponse = []
 
     await resyncBlockingRequestsForDirectory("/repo", store)
 
-    expect(store.getState().question["ses_a"]).toEqual(undefined)
+    expect(store.getState().form["ses_a"]).toEqual(undefined)
   })
 
   test("ignores questions for sessions the directory does not know about", async () => {
@@ -201,7 +202,7 @@ describe("resyncBlockingRequestsForDirectory", () => {
 
     await resyncBlockingRequestsForDirectory("/repo", store)
 
-    expect(store.getState().question["ses_unknown"]).toEqual(undefined)
+    expect(store.getState().form["ses_unknown"]).toEqual(undefined)
   })
 
   test("returns early without fetching when no candidate sessions are known", async () => {
@@ -213,14 +214,14 @@ describe("resyncBlockingRequestsForDirectory", () => {
 
   test("preserves existing questions when listPendingQuestions throws", async () => {
     const store = createDirectoryStore({
-      question: { ses_a: [{ ...buildQuestion(), id: "que_in_flight" }] },
+      form: { ses_a: [{ ...buildQuestion(), id: "que_in_flight" }] },
     })
     pendingQuestionsShouldThrow = true
 
     const result = await resyncBlockingRequestsForDirectory("/repo", store)
 
-    expect(store.getState().question["ses_a"]).toHaveLength(1)
-    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_in_flight")
+    expect(store.getState().form["ses_a"]).toHaveLength(1)
+    expect(store.getState().form["ses_a"]?.[0]?.id).toBe("que_in_flight")
     expect(result).toEqual({ questions: false, permissions: true })
   })
 
@@ -234,7 +235,7 @@ describe("resyncBlockingRequestsForDirectory", () => {
 
     expect(store.getState().permission["ses_a"]).toHaveLength(1)
     expect(store.getState().permission["ses_a"]?.[0]?.id).toBe("perm_in_flight")
-    expect(result).toEqual({ questions: true, permissions: false })
+    expect(result).toEqual({ forms: true, permissions: false })
   })
 
   test("permission fetch failure does not block question resync", async () => {
@@ -244,8 +245,8 @@ describe("resyncBlockingRequestsForDirectory", () => {
 
     await resyncBlockingRequestsForDirectory("/repo", store)
 
-    expect(store.getState().question["ses_a"]).toHaveLength(1)
-    expect(store.getState().question["ses_a"]?.[0]?.id).toBe("que_1")
+    expect(store.getState().form["ses_a"]).toHaveLength(1)
+    expect(store.getState().form["ses_a"]?.[0]?.id).toBe("que_1")
     expect(scopedPermissionListCalls).toHaveLength(1)
   })
 })

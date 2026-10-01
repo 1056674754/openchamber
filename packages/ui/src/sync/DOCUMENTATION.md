@@ -8,7 +8,7 @@ There are **two distinct session data scopes** in the UI:
 
 1. **Directory-scoped sync stores**
    - Owned by the sync layer child stores created in `sync-context.tsx`
-   - Source for per-directory live session/message/part/permission/question state
+   - Source for per-directory live session/message/part/permission/form state (`form` holds the v1 wire payloads, `nativeForm` the v2 typed ones)
    - Backed by SSE / directory-scoped polling
    - Read via hooks like `useSessions()`, `useDirectorySync()`, `getSyncSessions()`, `getDirectoryState()`
 
@@ -45,7 +45,7 @@ Directory child stores are bounded by count and idle TTL. Eviction refuses pinne
 
 | Layer / Store | Owns | Scope |
 |---|---|---|
-| child directory stores in `sync-context.tsx` | `session`, `message`, `part`, `permission`, `question`, etc. | One directory |
+| child directory stores in `sync-context.tsx` | `session`, `message`, `part`, `permission`, `form`, `nativeForm`, etc. | One directory |
 | `session-ui-store.ts` | Session selection, draft lifecycle, abort prompts, worktree metadata, SDK-facing action entrypoints | App UI state |
 | `useGlobalSessionsStore.ts` | Global active sessions, global archived sessions, `sessionsByDirectory` | All opened project/worktree session lists |
 | `viewport-store.ts` | Scroll anchors, session memory, loading indicators | App UI state |
@@ -107,7 +107,7 @@ Current consumers:
 
 This keeps cold/global lists responsive without requiring a refetch after every change.
 
-Resident sessions prefer child-store state. Sidebar rows use the global session/status cache and directory-specific permission/question subscriptions so one streaming directory does not repaint every row. Cold local and remote rows can use global SSE/status summaries until the session is activated.
+Resident sessions prefer child-store state. Sidebar rows use the global session/status cache and directory-specific permission/form subscriptions so one streaming directory does not repaint every row. Cold local and remote rows can use global SSE/status summaries until the session is activated.
 
 ### Bootstrap hierarchy and catalog isolation
 
@@ -168,11 +168,11 @@ The browser event pipeline treats connection recovery as two separate facts:
 
 After every upstream `ready`, each initialized directory reconciles authoritative live state. Cold summary-only directories are not materialized during reconnect. A replay gap forces the same reconciliation path for resident directories; replay alone is not allowed to claim convergence when the requested cursor is no longer buffered.
 
-When a managed restart or authoritative reconnect settles a Session whose trailing assistant message never completed, `interrupted-turn.ts` marks that message with `MessageAbortedError` and finalizes only pending/running tool parts. Pending questions/permissions block this recovery. A later authoritative completed snapshot replaces the local aborted copy, so reconnect cannot preserve a false interruption after OpenCode actually accepted and finished the turn.
+When a managed restart or authoritative reconnect settles a Session whose trailing assistant message never completed, `interrupted-turn.ts` marks that message with `MessageAbortedError` and finalizes only pending/running tool parts. Pending forms/permissions block this recovery. A later authoritative completed snapshot replaces the local aborted copy, so reconnect cannot preserve a false interruption after OpenCode actually accepted and finished the turn.
 
 Reconnect recovery deliberately uses two session sets:
 
-- **Authority sessions** are every session represented by the directory store's session, status, message, question, or permission state. Statuses and pending questions/permissions are reconciled for this complete set.
+- **Authority sessions** are every session represented by the directory store's session, status, message, form, or permission state. Statuses and pending forms/permissions are reconciled for this complete set.
 - **Materialization sessions** are the smaller subset needing expensive session/message/todo hydration: active status, incomplete or unrenderable messages, relevant parents, and the viewed session.
 
 Failed authoritative fetches must remain distinguishable from successful empty results. A partial reconciliation is retried while the upstream provider stays connected; it must not clear known pending requests or status merely because one fetch failed.
@@ -269,7 +269,8 @@ Keep this in sync with `handleDirectoryEvent` in `sync-context.tsx`:
 | `message.part.updated/removed/delta` | `part` |
 | `vcs.branch.updated` | (none — mutates `draft.vcs` directly) |
 | `permission.asked/replied` | `permission` |
-| `question.asked/replied/rejected` | `question` |
+| `question.asked/replied/rejected` (v1 wire; store field `form`) | `form` |
+| `form.created`/`form.settled` (v2, server-translated; store field `nativeForm`) | `nativeForm` |
 | `lsp.updated` | `lsp` |
 
 ## Adding a new event type

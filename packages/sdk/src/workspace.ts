@@ -8,7 +8,8 @@ export type GuestWorktree = {
   branch: string;
   status: 'ready' | 'pending' | 'invalid' | 'missing';
 };
-export type GuestSessionActivity = 'unknown' | 'idle' | 'running' | 'retrying' | 'waiting-permission' | 'waiting-question';
+// `waiting-question` is the pre-S7 label, kept for hosts still emitting it.
+export type GuestSessionActivity = 'unknown' | 'idle' | 'running' | 'retrying' | 'waiting-permission' | 'waiting-question' | 'waiting-form';
 export type GuestSessionRecord = {
   id: string;
   title: string;

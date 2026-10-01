@@ -1,6 +1,6 @@
 import type { Session, Message, Part } from "@opencode-ai/sdk/v2";
 import type { PermissionRequest, PermissionResponse } from "@/types/permission";
-import type { QuestionRequest } from "@/types/question";
+import type { FormRequest } from "@/types/form";
 
 export type SessionWorktreeAttachment = {
   worktreeRoot: string | null;
@@ -166,7 +166,7 @@ export interface SessionStore {
     messageStreamStates: Map<string, MessageStreamLifecycle>;
     sessionCompactionUntil: Map<string, number>;
     permissions: Map<string, PermissionRequest[]>;
-    questions: Map<string, QuestionRequest[]>;
+    forms: Map<string, FormRequest[]>;
     sessionAbortFlags: Map<string, { timestamp: number; acknowledged: boolean }>;
     attachedFiles: AttachedFile[];
     abortPromptSessionId: string | null;
@@ -262,10 +262,10 @@ export interface SessionStore {
     respondToPermission: (sessionId: string, requestId: string, response: PermissionResponse) => Promise<void>;
     dismissPermission: (sessionId: string, requestId: string) => void;
 
-    addQuestion: (question: QuestionRequest) => void;
-    dismissQuestion: (sessionId: string, requestId: string) => void;
-    respondToQuestion: (sessionId: string, requestId: string, answers: string[] | string[][]) => Promise<void>;
-    rejectQuestion: (sessionId: string, requestId: string) => Promise<void>;
+    addForm: (form: FormRequest) => void;
+    dismissForm: (sessionId: string, requestId: string) => void;
+    replyToForm: (sessionId: string, requestId: string, answers: string[] | string[][]) => Promise<void>;
+    cancelForm: (sessionId: string, requestId: string) => Promise<void>;
 
     clearError: () => void;
     getSessionsByDirectory: (directory: string) => Session[];

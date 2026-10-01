@@ -66,7 +66,7 @@ export {
   useSessionStatus,
   useSessionActivityTimestamp,
   useSessionPermissions,
-  useSessionQuestions,
+  useSessionForms,
   useSessions,
   useSyncSDK,
   useSyncDirectory,
@@ -128,7 +128,7 @@ export {
   getSyncParts,
   getSyncSessionStatus,
   getSyncPermissions,
-  getSyncQuestions,
+  getSyncForms,
 } from "./sync-refs"
 
 // Persisted metadata caches
@@ -154,8 +154,8 @@ export {
   abortCurrentOperation,
   respondToPermission,
   dismissPermission,
-  respondToQuestion,
-  rejectQuestion,
+  replyToForm,
+  cancelForm,
   revertToMessage,
   forkFromMessage,
 } from "./session-actions"

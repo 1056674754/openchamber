@@ -14,6 +14,7 @@ import { useGlobalSyncStore, type GlobalSyncStore } from "./global-sync-store"
 import { ChildStoreManager, type DirectoryStore } from "./child-store"
 import { applyGlobalSessionStatusEvent } from "./global-session-status"
 import { applyGlobalBlockingRequestEvents } from "./global-blocking-requests"
+import { collectVisibleSessionIdsForBlockingRequests } from "@/components/chat/lib/blockingRequests"
 import {
   aggregateLiveSessions,
   aggregateLiveSessionStatuses,
@@ -62,7 +63,8 @@ import { fetchAndHydrateMarkersState } from "@/stores/useSessionMarkersStore"
 import { dispatchRemoteServerEvent, subscribeRemoteServerEvents } from "./remote-event-bus"
 import type { State } from "./types"
 import type { PermissionRequest } from "@/types/permission"
-import type { QuestionRequest } from "@/types/question"
+import type { FormInfo } from "@opencode/client"
+import type { FormRequest } from "@/types/form"
 import * as sessionActions from "./session-actions"
 import { getSessionMaterializationStatus, materializeSessionSnapshots } from "./materialization"
 import { setSessionPrefetch } from "./session-prefetch-cache"
@@ -354,10 +356,10 @@ function pruneExternallyViewedSessions(now = Date.now()) {
     }
   }
 }
-const pendingQuestionToastIds = new Set<string>()
+const pendingFormToastIds = new Set<string>()
 const pendingPermissionToastIds = new Set<string>()
 
-const getQuestionToastKey = (sessionID?: string, requestID?: string) => {
+const getFormToastKey = (sessionID?: string, requestID?: string) => {
   if (!sessionID || !requestID) return null
   return `${sessionID}:${requestID}`
 }
@@ -553,7 +555,7 @@ export async function recoverInterruptedTurnAfterMessageLoad(
   if (isStale?.()) return
   const initial = store.getState()
   if (!hasUnfinishedAssistantTurn(initial, sessionID)) return
-  if ((initial.question?.[sessionID] ?? []).length > 0) return
+  if ((initial.form?.[sessionID] ?? []).length > 0) return
   if ((initial.permission?.[sessionID] ?? []).length > 0) return
 
   if (!initial.session_status?.[sessionID]) {
@@ -574,11 +576,11 @@ export async function recoverInterruptedTurnAfterMessageLoad(
   applyInterruptedTurnSettlement(store, sessionID)
 }
 
-async function listPendingQuestionsForServer(
+async function listPendingFormsForServer(
   directory: string,
   serverId: string,
   sdk?: OpencodeClient,
-): Promise<QuestionRequest[]> {
+): Promise<FormRequest[]> {
   const client = serverId === DEFAULT_SERVER_ID
     ? opencodeClient.getScopedSdkClient(directory)
     : serverRegistry.get(serverId)?.client ?? sdk
@@ -702,6 +704,8 @@ const getSessionIdFromPayload = (event: Event): string | null => {
     || event.type === "question.asked"
     || event.type === "question.replied"
     || event.type === "question.rejected"
+    || (event.type as string) === "form.created"
+    || (event.type as string) === "form.settled"
     || event.type === "session.deleted"
   ) {
     const sessionID = props.sessionID
@@ -1100,13 +1104,14 @@ const updateRoutingIndexFromEvent = (
 }
 
 /**
- * Re-fetch pending questions and permissions for a directory and merge them
+ * Re-fetch pending forms and permissions for a directory and merge them
  * into the directory's child store, preserving any in-flight SSE updates that
  * arrived while the request was pending. Used by reconnect/materialization
  * recovery paths only; normal session switches rely on primary SSE reducer
- * state for `question.asked` / `permission.asked` events. When
- * `candidateSessionIds` is omitted, every session known to the directory store
- * is treated as a candidate; when provided, recovery is limited to those IDs.
+ * state for the blocking-request ask events (the v1 wire's `question.asked`).
+ * When `candidateSessionIds` is omitted, every session known to the directory
+ * store is treated as a candidate; when provided, recovery is limited to
+ * those IDs.
  */
 export async function resyncBlockingRequestsForDirectory(
   directory: string,
@@ -1120,23 +1125,23 @@ export async function resyncBlockingRequestsForDirectory(
     ...before.session.map((session) => session.id),
     ...Object.keys(before.message ?? {}),
     ...Object.keys(before.session_status ?? {}),
-    ...Object.keys(before.question ?? {}),
+    ...Object.keys(before.form ?? {}),
     ...Object.keys(before.permission ?? {}),
   ])
   const candidates = Array.from(candidateIds)
-  if (candidates.length === 0) return { questions: true, permissions: true }
-  let questionsSynced = true
+  if (candidates.length === 0) return { forms: true, permissions: true }
+  let formsSynced = true
   let permissionsSynced = true
 
-  // Re-fetch pending questions that may have been asked during an SSE gap,
+  // Re-fetch pending forms that may have been asked during an SSE gap,
   // reconnect window, or directory materialization gap.
   try {
     const beforeSignatures = new Map(
-      candidates.map((sessionId) => [sessionId, requestSignature(before.question[sessionId])]),
+      candidates.map((sessionId) => [sessionId, requestSignature(before.form[sessionId])]),
     )
-    const pendingQuestions = await listPendingQuestionsForServer(directory, serverId, options?.sdk)
-    const grouped: Record<string, QuestionRequest[]> = {}
-    for (const q of pendingQuestions) {
+    const pendingForms = await listPendingFormsForServer(directory, serverId, options?.sdk)
+    const grouped: Record<string, FormRequest[]> = {}
+    for (const q of pendingForms) {
       if (!q?.id || !q.sessionID) continue
       if (!candidateIds.has(q.sessionID)) continue
       const list = grouped[q.sessionID]
@@ -1147,20 +1152,20 @@ export async function resyncBlockingRequestsForDirectory(
       grouped[sessionId].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     }
 
-    for (const [sessionId, questions] of Object.entries(grouped)) {
-      const knownIds = new Set((before.question[sessionId] ?? []).map((item) => item.id))
+    for (const [sessionId, forms] of Object.entries(grouped)) {
+      const knownIds = new Set((before.form[sessionId] ?? []).map((item) => item.id))
       const isViewed = isViewedInCurrentSession(directory, sessionId)
       if (isViewed) continue
-      for (const question of questions) {
-        if (knownIds.has(question.id)) continue
-        const toastKey = getQuestionToastKey(sessionId, question.id)
-        if (!toastKey || pendingQuestionToastIds.has(toastKey)) continue
-        pendingQuestionToastIds.add(toastKey)
-        const firstQuestion = question.questions?.[0]
+      for (const form of forms) {
+        if (knownIds.has(form.id)) continue
+        const toastKey = getFormToastKey(sessionId, form.id)
+        if (!toastKey || pendingFormToastIds.has(toastKey)) continue
+        pendingFormToastIds.add(toastKey)
+        const firstQuestion = form.questions?.[0]
         const title = firstQuestion?.header?.trim() || "Input needed"
         const description = firstQuestion?.question?.trim() || "Agent is waiting for your response"
         toast.info(title, {
-          id: `question-${toastKey}`,
+          id: `form-${toastKey}`,
           description,
           action: {
             label: "Open session",
@@ -1171,28 +1176,28 @@ export async function resyncBlockingRequestsForDirectory(
     }
 
     store.setState((state: DirectoryStore) => {
-      const merged = { ...state.question }
-      for (const [sessionId, questions] of Object.entries(grouped)) {
-        merged[sessionId] = questions
+      const merged = { ...state.form }
+      for (const [sessionId, forms] of Object.entries(grouped)) {
+        merged[sessionId] = forms
       }
       for (const sessionId of candidates) {
         if (grouped[sessionId]) continue
         const beforeSignature = beforeSignatures.get(sessionId) ?? ""
-        const currentSignature = requestSignature(state.question[sessionId])
+        const currentSignature = requestSignature(state.form[sessionId])
         if (currentSignature !== beforeSignature) continue
         delete merged[sessionId]
       }
-      return { question: merged }
+      return { form: merged }
     })
   } catch {
-    questionsSynced = false
+    formsSynced = false
   }
 
   if (options?.includePermissions === false) {
-    return { questions: questionsSynced, permissions: true }
+    return { forms: formsSynced, permissions: true }
   }
 
-  // Re-fetch pending permissions — same rationale as questions.
+  // Re-fetch pending permissions — same rationale as forms.
   try {
     const beforeSignatures = new Map(
       candidates.map((sessionId) => [sessionId, requestSignature(before.permission[sessionId])]),
@@ -1268,7 +1273,7 @@ export async function resyncBlockingRequestsForDirectory(
     permissionsSynced = false
   }
 
-  return { questions: questionsSynced, permissions: permissionsSynced }
+  return { forms: formsSynced, permissions: permissionsSynced }
 }
 
 async function resyncDirectoryAfterReconnect(
@@ -1388,7 +1393,7 @@ async function resyncDirectoryAfterReconnect(
   })
 
   const blockingRequests = isStale?.()
-    ? { questions: true, permissions: true }
+    ? { forms: true, permissions: true }
     : await resyncBlockingRequestsForDirectory(
       directory,
       store,
@@ -1400,7 +1405,7 @@ async function resyncDirectoryAfterReconnect(
   ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
   return materializationsSynced
     && statusesSynced
-    && blockingRequests.questions
+    && blockingRequests.forms
     && blockingRequests.permissions
 }
 
@@ -1642,17 +1647,17 @@ function handleEvent(
   }
 
   if (payload.type === "question.asked") {
-    const question = payload.properties as QuestionRequest
-    const sessionID = question.sessionID
-    const toastKey = getQuestionToastKey(sessionID, question.id)
+    const form = payload.properties as FormRequest
+    const sessionID = form.sessionID
+    const toastKey = getFormToastKey(sessionID, form.id)
     const isViewed = isViewedInCurrentSession(resolvedDirectory, sessionID)
-    if (!isViewed && toastKey && !pendingQuestionToastIds.has(toastKey)) {
-      pendingQuestionToastIds.add(toastKey)
-      const firstQuestion = question.questions?.[0]
+    if (!isViewed && toastKey && !pendingFormToastIds.has(toastKey)) {
+      pendingFormToastIds.add(toastKey)
+      const firstQuestion = form.questions?.[0]
       const title = firstQuestion?.header?.trim() || "Input needed"
       const description = firstQuestion?.question?.trim() || "Agent is waiting for your response"
       toast.info(title, {
-        id: `question-${toastKey}`,
+        id: `form-${toastKey}`,
         description,
         action: {
           label: "Open session",
@@ -1664,10 +1669,10 @@ function handleEvent(
 
   if (payload.type === "question.replied" || payload.type === "question.rejected") {
     const props = payload.properties as { sessionID?: string; requestID?: string }
-    const toastKey = getQuestionToastKey(props.sessionID, props.requestID)
+    const toastKey = getFormToastKey(props.sessionID, props.requestID)
     if (toastKey) {
-      pendingQuestionToastIds.delete(toastKey)
-      toast.dismiss(`question-${toastKey}`)
+      pendingFormToastIds.delete(toastKey)
+      toast.dismiss(`form-${toastKey}`)
     }
   }
 
@@ -1728,6 +1733,12 @@ function handleEvent(
   const current = store.getState()
   const draft: State = { ...current }
 
+  // SAFETY: v2 form frames ride the same stream but sit outside the v1 SDK
+  // event union, so they cannot be switch cases over `payload.type`.
+  if ((payload.type as string) === "form.created" || (payload.type as string) === "form.settled") {
+    draft.nativeForm = { ...current.nativeForm }
+  }
+
   switch (payload.type) {
     case "session.created":
     case "session.updated":
@@ -1738,7 +1749,8 @@ function handleEvent(
       draft.session_activity = { ...(current.session_activity ?? {}) }
       draft.session_diff = { ...current.session_diff }
       draft.permission = { ...current.permission }
-      draft.question = { ...current.question }
+      draft.form = { ...current.form }
+      draft.nativeForm = { ...current.nativeForm }
       draft.todo = { ...current.todo }
       draft.part = { ...current.part }
       break
@@ -1776,7 +1788,7 @@ function handleEvent(
     case "question.asked":
     case "question.replied":
     case "question.rejected":
-      draft.question = { ...current.question }
+      draft.form = { ...current.form }
       break
     case "lsp.updated":
       draft.lsp = [...current.lsp]
@@ -2577,7 +2589,7 @@ export function SyncProvider(props: {
     return () => clearInterval(stuckCheckInterval)
   }, [childStores, serverId])
 
-  // Re-fetch pending questions/permissions on session-switch.
+  // Re-fetch pending forms/permissions on session-switch.
   // PR #909 only re-fetches on SSE reconnect, leaving an event-drop gap when
   // switching sessions within the same socket — the question.asked event may
   // have arrived while a different session was active and the directory store
@@ -2843,12 +2855,12 @@ export function useSessionPermissions(sessionID: string, directory?: string) {
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-/** Get questions for a specific session */
-export function useSessionQuestions(sessionID: string, directory?: string) {
+/** Get pending forms for a specific session */
+export function useSessionForms(sessionID: string, directory?: string) {
   const store = useDirectoryStore(directory, useServerIdForSession(sessionID), sessionID)
   const getSnapshot = useCallback(() => {
-    if (!sessionID) return EMPTY_QUESTION_REQUESTS
-    return store.getState().question[sessionID] ?? EMPTY_QUESTION_REQUESTS
+    if (!sessionID) return EMPTY_FORM_REQUESTS
+    return store.getState().form[sessionID] ?? EMPTY_FORM_REQUESTS
   }, [sessionID, store])
   const subscribe = useCallback((notify: () => void) => {
     if (!sessionID) return () => undefined
@@ -2886,22 +2898,22 @@ export function useExistingSessionPermissions(sessionID: string, directory?: str
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-export function useExistingSessionQuestions(sessionID: string, directory?: string) {
+export function useExistingSessionForms(sessionID: string, directory?: string) {
   const { childStores } = useSyncSystem()
   const serverId = useServerIdForSession(sessionID)
   const stores = serverId && serverId !== DEFAULT_SERVER_ID
     ? getSyncStoresForServer(serverId)
     : childStores
   const getSnapshot = useCallback(() => {
-    if (!sessionID || !stores) return EMPTY_QUESTION_REQUESTS
+    if (!sessionID || !stores) return EMPTY_FORM_REQUESTS
     if (directory) {
-      return stores.getChild(directory)?.getState().question[sessionID] ?? EMPTY_QUESTION_REQUESTS
+      return stores.getChild(directory)?.getState().form[sessionID] ?? EMPTY_FORM_REQUESTS
     }
     for (const store of stores.children.values()) {
-      const requests = store.getState().question[sessionID]
+      const requests = store.getState().form[sessionID]
       if (requests) return requests
     }
-    return EMPTY_QUESTION_REQUESTS
+    return EMPTY_FORM_REQUESTS
   }, [directory, sessionID, stores])
   const subscribe = useCallback(
     (notify: () => void) => {
@@ -2913,6 +2925,101 @@ export function useExistingSessionQuestions(sessionID: string, directory?: strin
     [directory, stores],
   )
   return React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+/**
+ * The session id OpenCode gives a form no session owns: an MCP elicitation is
+ * raised by a server of the whole location (directory), not by a turn. The
+ * sentinel is kept as-is on the wire; replies go to the location's instance.
+ */
+export const LOCATION_SCOPED_FORM_SESSION_ID = "global"
+
+const areRequestArraysReferentiallyEqual = <T extends { id: string }>(a: readonly T[], b: readonly T[]): boolean => {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return false
+  }
+  return true
+}
+
+/**
+ * Forms for the composer of `sessionID`: the session subtree's own, then the
+ * directory's location-scoped ones. A location-scoped form has no session to
+ * be viewed from, so every session of its directory offers it; the answer is
+ * still sent to that directory's OpenCode instance because the reply resolves
+ * its directory from the store that holds the form.
+ */
+export const collectComposerForms = (
+  sessions: Session[],
+  formsBySession: Record<string, FormInfo[] | undefined>,
+  sessionID: string | null,
+  empty: FormInfo[],
+): FormInfo[] => {
+  if (!sessionID) return empty
+  const scopedIds = collectVisibleSessionIdsForBlockingRequests(sessions, sessionID)
+  const own: FormInfo[] = []
+  const seen = new Set<string>()
+  for (const scopedId of scopedIds) {
+    for (const form of formsBySession[scopedId] ?? []) {
+      if (!form?.id || seen.has(form.id)) continue
+      seen.add(form.id)
+      own.push(form)
+    }
+  }
+  const locationScoped = formsBySession[LOCATION_SCOPED_FORM_SESSION_ID]
+  if (!locationScoped || locationScoped.length === 0) return own.length > 0 ? own : empty
+  return own.length > 0 ? [...own, ...locationScoped] : locationScoped
+}
+
+type ScopedBlockingFormsCache = {
+  sessionID: string | null
+  sessions: Session[] | null
+  formsBySession: Record<string, FormInfo[] | undefined> | null
+  result: FormInfo[]
+}
+
+/**
+ * Pending v2 typed forms for the composer's session subtree (plus the
+ * directory's location-scoped ones), from the `nativeForm` channel the event
+ * reducer feeds. Always empty on the v1 track, so the dock this feeds renders
+ * nothing there.
+ */
+export function useScopedBlockingForms(sessionID: string | null, directory?: string): FormInfo[] {
+  const serverId = useServerIdForSession(sessionID ?? undefined)
+  const cacheRef = useRef<ScopedBlockingFormsCache>({
+    sessionID: null,
+    sessions: null,
+    formsBySession: null,
+    result: EMPTY_NATIVE_FORMS,
+  })
+
+  return useDirectorySync(
+    useCallback((state: State) => {
+      const formsBySession = state.nativeForm
+      const cache = cacheRef.current
+      if (
+        cache.sessionID === sessionID
+        && cache.sessions === state.session
+        && cache.formsBySession === formsBySession
+      ) {
+        return cache.result
+      }
+
+      const next = collectComposerForms(state.session, formsBySession, sessionID, EMPTY_NATIVE_FORMS)
+      const result = areRequestArraysReferentiallyEqual(cache.result, next) ? cache.result : next
+      cacheRef.current = {
+        sessionID,
+        sessions: state.session,
+        formsBySession,
+        result,
+      }
+      return result
+    }, [sessionID]),
+    directory,
+    serverId,
+    sessionID ?? undefined,
+  )
 }
 
 /** Get sessions list for a directory */
@@ -3617,4 +3724,5 @@ export function useIsSessionWorking(sessionID: string, directory?: string): bool
 const EMPTY_MESSAGES: Message[] = []
 const EMPTY_PARTS: Part[] = []
 const EMPTY_PERMISSION_REQUESTS: PermissionRequest[] = []
-const EMPTY_QUESTION_REQUESTS: QuestionRequest[] = []
+const EMPTY_FORM_REQUESTS: FormRequest[] = []
+const EMPTY_NATIVE_FORMS: FormInfo[] = []

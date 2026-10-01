@@ -1,12 +1,12 @@
-export type Locale = 'en' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja' | 'de' | 'tr';
+export type Locale = 'en' | 'zh-CN' | 'zh-TW' | 'uk' | 'es' | 'pt-BR' | 'ko' | 'pl' | 'ja' | 'de' | 'tr' | 'nl';
 
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 
-export const LOCALES = ['en', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'de', 'tr'] as const satisfies readonly Locale[];
+export const LOCALES = ['en', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'de', 'tr', 'nl'] as const satisfies readonly Locale[];
 
 export const DEFAULT_LOCALE: Locale = 'en';
 
-export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.japanese' | 'common.language.german' | 'common.language.turkish'> = {
+export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'common.language.simplifiedChinese' | 'common.language.traditionalChinese' | 'common.language.ukrainian' | 'common.language.spanish' | 'common.language.brazilianPortuguese' | 'common.language.korean' | 'common.language.polish' | 'common.language.japanese' | 'common.language.german' | 'common.language.turkish' | 'common.language.dutch'> = {
   en: 'common.language.english',
   'zh-CN': 'common.language.simplifiedChinese',
   'zh-TW': 'common.language.traditionalChinese',
@@ -18,6 +18,7 @@ export const LOCALE_LABEL_KEYS: Record<Locale, 'common.language.english' | 'comm
   ja: 'common.language.japanese',
   de: 'common.language.german',
   tr: 'common.language.turkish',
+  nl: 'common.language.dutch',
 };
 
 export const LOCALE_STORAGE_KEY = 'openchamber.i18n.v1';
@@ -67,6 +68,9 @@ export function normalizeLocale(value: string | undefined | null): Locale {
   }
   if (normalized === 'tr' || normalized.startsWith('tr-')) {
     return 'tr';
+  }
+  if (normalized === 'nl' || normalized.startsWith('nl-')) {
+    return 'nl';
   }
   return DEFAULT_LOCALE;
 }

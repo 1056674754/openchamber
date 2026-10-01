@@ -1,10 +1,10 @@
 import type { Event } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
-import type { HostPermissionRequest, HostQuestionRequest, HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
+import type { HostPermissionRequest, HostFormRequest, HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { applyGlobalSessionStatusEvents, useGlobalSessionStatusStore } from './global-session-status';
-import { seedGlobalBlockingRequests, type PendingBlockingRequests } from './global-blocking-requests';
+import { seedGlobalBlockingRequests } from './global-blocking-requests';
 
 // Seeds the cross-directory status index from the host's own map.
 //
@@ -119,19 +119,21 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
         return changed ? { sessionStatuses: next } : state;
       });
     }
-    // Pending permissions and questions ride on the same response. They are
+    // Pending permissions and forms ride on the same response. They are
     // not age-limited: the host drops them on reply, deletion, and OpenCode
     // restart, so a listed request is one OpenCode is still waiting on.
+    // (The host payload keys stay `questions` — that wire contract predates
+    // the S7 concept rename.)
     const pending: Array<{
       sessionId: string;
       directory: string;
       permissions: readonly HostPermissionRequest[];
-      questions: readonly HostQuestionRequest[];
+      forms: readonly HostFormRequest[];
     }> = [];
     for (const [sessionId, entry] of Object.entries(snapshot.pending ?? {})) {
       const directory = resolveDirectory(sessionId);
       if (!directory) continue;
-      pending.push({ sessionId, directory, permissions: entry.permissions, questions: entry.questions });
+      pending.push({ sessionId, directory, permissions: entry.permissions, forms: entry.questions });
     }
     seedGlobalBlockingRequests(pending);
   })().finally(() => {

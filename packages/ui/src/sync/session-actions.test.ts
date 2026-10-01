@@ -1,6 +1,6 @@
 import { describe, expect, test, beforeEach, mock } from "bun:test"
 import type { PermissionRequest } from "@/types/permission"
-import type { QuestionRequest } from "@/types/question"
+import type { FormRequest } from "@/types/form"
 
 type MockSdkResult = {
   data?: unknown
@@ -22,13 +22,13 @@ async function expectRejectsWithMessage(promise: Promise<unknown>, message: stri
   expect(caught.message.includes(message)).toBe(true)
 }
 
-// Mock SDK client that records permission / question reply calls
+// Mock SDK client that records permission / form reply calls
 const replyCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 const sessionCalls: Array<{ method: string; params: Record<string, unknown> }> = []
 let permissionReplyResult: MockSdkResult = { data: true }
 let permissionRespondResult: MockSdkResult = { data: true }
-let questionReplyResult: MockSdkResult = { data: true }
-let questionRejectResult: MockSdkResult = { data: true }
+let formReplyResult: MockSdkResult = { data: true }
+let formRejectResult: MockSdkResult = { data: true }
 let sessionAbortResult: MockSdkResult = { data: true }
 let sessionCreateResult: MockSdkResult = { data: null }
 let sessionRevertResult: MockSdkResult = { data: null }
@@ -81,11 +81,11 @@ const mockScopedClient = {
   question: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reply", params })
-      return Promise.resolve(questionReplyResult)
+      return Promise.resolve(formReplyResult)
     }),
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
-      return Promise.resolve(questionRejectResult)
+      return Promise.resolve(formRejectResult)
     }),
   },
   session: {
@@ -135,11 +135,11 @@ const mockSdk = {
   question: {
     reply: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reply", params })
-      return Promise.resolve(questionReplyResult)
+      return Promise.resolve(formReplyResult)
     }),
     reject: mock((params: Record<string, unknown>) => {
       replyCalls.push({ method: "question.reject", params })
-      return Promise.resolve(questionRejectResult)
+      return Promise.resolve(formRejectResult)
     }),
   },
   session: {
@@ -294,8 +294,8 @@ beforeEach(() => {
   globalUpsertedSessions.length = 0
   permissionReplyResult = { data: true }
   permissionRespondResult = { data: true }
-  questionReplyResult = { data: true }
-  questionRejectResult = { data: true }
+  formReplyResult = { data: true }
+  formRejectResult = { data: true }
   sessionAbortResult = { data: true }
   sessionCreateResult = { data: null }
   sessionRevertResult = { data: null }
@@ -331,13 +331,13 @@ beforeEach(() => {
 
 function createStore(
   permissions: Record<string, PermissionRequest[]>,
-  questions: Record<string, QuestionRequest[]> = {},
+  forms: Record<string, FormRequest[]> = {},
   overrides: Partial<DirectoryStore> = {},
 ): StoreApi<DirectoryStore> {
   return create<DirectoryStore>()((set) => ({
     ...INITIAL_STATE,
     permission: permissions,
-    question: questions,
+    form: forms,
     ...overrides,
     patch: (partial) => set(partial),
     replace: (next) => set(next),
@@ -1141,7 +1141,7 @@ describe("dismissOpenPermissionsForSession", () => {
   })
 })
 
-describe("respondToQuestion passes directory", () => {
+describe("replyToForm passes directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
   })
@@ -1149,10 +1149,10 @@ describe("respondToQuestion passes directory", () => {
   test("passes directory to question.reply", async () => {
     const childStores = createChildStores([])
 
-    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    const { setActionRefs, replyToForm } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
-    await respondToQuestion("session-a", "q-1", [["answer1"]])
+    await replyToForm("session-a", "q-1", [["answer1"]])
 
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-1")
@@ -1162,50 +1162,50 @@ describe("respondToQuestion passes directory", () => {
   test("uses explicit directory hint when request is recovered outside the store", async () => {
     const childStores = createChildStores([])
 
-    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    const { setActionRefs, replyToForm } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
-    await respondToQuestion("unknown-session", "q-recovered", [["answer1"]], "/recovered/project")
+    await replyToForm("unknown-session", "q-recovered", [["answer1"]], "/recovered/project")
 
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-recovered")
     expect(replyCalls[0].params.directory).toBe("/recovered/project")
   })
 
-  test("optimistically removes only the replied question after SDK success", async () => {
-    const questions: QuestionRequest[] = [
+  test("optimistically removes only the replied form after SDK success", async () => {
+    const forms: FormRequest[] = [
       { id: "q-1", sessionID: "session-a", questions: [] },
       { id: "q-2", sessionID: "session-a", questions: [] },
     ]
-    const store = createStore({}, { "session-a": questions })
+    const store = createStore({}, { "session-a": forms })
     const childStores = createChildStores([["/test/project", store]])
 
-    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    const { setActionRefs, replyToForm } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
-    await respondToQuestion("session-a", "q-1", [["answer1"]])
+    await replyToForm("session-a", "q-1", [["answer1"]])
 
-    expect(store.getState().question["session-a"]?.map((question) => question.id)).toEqual(["q-2"])
+    expect(store.getState().form["session-a"]?.map((question) => question.id)).toEqual(["q-2"])
   })
 
   test("does not remove a question when SDK reply fails", async () => {
-    questionReplyResult = { data: false }
-    const questions: QuestionRequest[] = [
+    formReplyResult = { data: false }
+    const forms: FormRequest[] = [
       { id: "q-1", sessionID: "session-a", questions: [] },
     ]
-    const store = createStore({}, { "session-a": questions })
+    const store = createStore({}, { "session-a": forms })
     const childStores = createChildStores([["/test/project", store]])
 
-    const { setActionRefs, respondToQuestion } = await import("./session-actions")
+    const { setActionRefs, replyToForm } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
-    await expectRejectsWithMessage(respondToQuestion("session-a", "q-1", [["answer1"]]), "Question reply failed")
+    await expectRejectsWithMessage(replyToForm("session-a", "q-1", [["answer1"]]), "Form reply failed")
 
-    expect(store.getState().question["session-a"]?.map((question) => question.id)).toEqual(["q-1"])
+    expect(store.getState().form["session-a"]?.map((question) => question.id)).toEqual(["q-1"])
   })
 })
 
-describe("rejectQuestion passes directory", () => {
+describe("cancelForm passes directory", () => {
   beforeEach(() => {
     replyCalls.length = 0
   })
@@ -1213,10 +1213,10 @@ describe("rejectQuestion passes directory", () => {
   test("passes directory to question.reject", async () => {
     const childStores = createChildStores([])
 
-    const { setActionRefs, rejectQuestion } = await import("./session-actions")
+    const { setActionRefs, cancelForm } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
-    await rejectQuestion("session-a", "q-2")
+    await cancelForm("session-a", "q-2")
 
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-2")
@@ -1226,10 +1226,10 @@ describe("rejectQuestion passes directory", () => {
   test("uses explicit directory hint when recovered request is rejected outside the store", async () => {
     const childStores = createChildStores([])
 
-    const { setActionRefs, rejectQuestion } = await import("./session-actions")
+    const { setActionRefs, cancelForm } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
-    await rejectQuestion("unknown-session", "q-recovered", "/recovered/project")
+    await cancelForm("unknown-session", "q-recovered", "/recovered/project")
 
     expect(replyCalls.length).toBe(1)
     expect(replyCalls[0].params.requestID).toBe("q-recovered")
@@ -1237,22 +1237,22 @@ describe("rejectQuestion passes directory", () => {
   })
 
   test("optimistically removes rejected questions after SDK success", async () => {
-    const questions: QuestionRequest[] = [
+    const forms: FormRequest[] = [
       { id: "q-1", sessionID: "session-a", questions: [] },
     ]
-    const store = createStore({}, { "session-a": questions })
+    const store = createStore({}, { "session-a": forms })
     const childStores = createChildStores([["/test/project", store]])
 
-    const { setActionRefs, rejectQuestion } = await import("./session-actions")
+    const { setActionRefs, cancelForm } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
 
-    await rejectQuestion("session-a", "q-1")
+    await cancelForm("session-a", "q-1")
 
-    expect(store.getState().question["session-a"]).toBe(undefined)
+    expect(store.getState().form["session-a"]).toBe(undefined)
   })
 })
 
-describe("dismissOpenQuestionsForSession", () => {
+describe("dismissOpenFormsForSession", () => {
   test("dismisses questions for the session subtree without touching unrelated sessions", async () => {
     const rootId = "dismiss-root"
     const childId = "dismiss-child"
@@ -1271,20 +1271,20 @@ describe("dismissOpenQuestionsForSession", () => {
     })
     const childStores = createChildStores([["/test/project", store]])
 
-    const { dismissOpenQuestionsForSession, setActionRefs } = await import("./session-actions")
+    const { dismissOpenFormsForSession, setActionRefs } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
     serverRegistry.indexSession(rootId, DEFAULT_SERVER_ID)
     serverRegistry.indexSession(childId, DEFAULT_SERVER_ID)
 
     try {
-      expect(await dismissOpenQuestionsForSession(rootId)).toBe(true)
+      expect(await dismissOpenFormsForSession(rootId)).toBe(true)
       expect(replyCalls.filter((call) => call.method === "question.reject").map((call) => call.params.requestID).sort()).toEqual([
         "q-child",
         "q-root",
       ])
-      expect(store.getState().question[rootId]).toBe(undefined)
-      expect(store.getState().question[childId]).toBe(undefined)
-      expect(store.getState().question[unrelatedId]?.[0]?.id).toBe("q-unrelated")
+      expect(store.getState().form[rootId]).toBe(undefined)
+      expect(store.getState().form[childId]).toBe(undefined)
+      expect(store.getState().form[unrelatedId]?.[0]?.id).toBe("q-unrelated")
     } finally {
       serverRegistry.forgetSession(rootId)
       serverRegistry.forgetSession(childId)
@@ -1327,8 +1327,8 @@ describe("dismissOpenQuestionsForSession", () => {
     serverRegistry.indexSession(childId, serverId)
 
     try {
-      const { dismissOpenQuestionsForSession } = await import("./session-actions")
-      expect(await dismissOpenQuestionsForSession(rootId)).toBe(true)
+      const { dismissOpenFormsForSession } = await import("./session-actions")
+      expect(await dismissOpenFormsForSession(rootId)).toBe(true)
       expect(remoteCalls.map((call) => call.requestID).sort()).toEqual(["q-remote-child", "q-remote-root"])
       expect(remoteCalls.every((call) => call.directory === "/remote/project")).toBe(true)
       expect(replyCalls.filter((call) => call.method === "question.reject")).toHaveLength(0)
@@ -1341,7 +1341,7 @@ describe("dismissOpenQuestionsForSession", () => {
   })
 
   test("restores the question without discarding the queued send path when rejection fails", async () => {
-    questionRejectResult = { data: false }
+    formRejectResult = { data: false }
     const rootId = "dismiss-failure-root"
     const store = createStore({}, {
       [rootId]: [{ id: "q-failure", sessionID: rootId, questions: [] }],
@@ -1349,13 +1349,13 @@ describe("dismissOpenQuestionsForSession", () => {
     store.setState({ session: [{ id: rootId } as Session] })
     const childStores = createChildStores([["/test/project", store]])
 
-    const { dismissOpenQuestionsForSession, setActionRefs } = await import("./session-actions")
+    const { dismissOpenFormsForSession, setActionRefs } = await import("./session-actions")
     setActionRefs(mockSdk as unknown as OpencodeClient, childStores, () => "/test/project")
     serverRegistry.indexSession(rootId, DEFAULT_SERVER_ID)
 
     try {
-      expect(await dismissOpenQuestionsForSession(rootId)).toBe(true)
-      expect(store.getState().question[rootId]?.[0]?.id).toBe("q-failure")
+      expect(await dismissOpenFormsForSession(rootId)).toBe(true)
+      expect(store.getState().form[rootId]?.[0]?.id).toBe("q-failure")
     } finally {
       serverRegistry.forgetSession(rootId)
     }
@@ -1621,7 +1621,7 @@ describe("moveSessionToDirectory", () => {
     expect(source.getState().session_diff["session-a"]).toBe(undefined)
     expect(source.getState().todo["session-a"]).toBe(undefined)
     expect(source.getState().permission["session-a"]).toBe(undefined)
-    expect(source.getState().question["session-a"]).toBe(undefined)
+    expect(source.getState().form["session-a"]).toBe(undefined)
     expect(source.getState().message["session-a"]).toBe(undefined)
     expect(source.getState().part["message-a"]).toBe(undefined)
     expect(destination.getState().session[0]?.id).toBe("session-a")
@@ -1631,7 +1631,7 @@ describe("moveSessionToDirectory", () => {
     expect(destination.getState().session_diff["session-a"]?.[0]?.file).toBe("changed.ts")
     expect(destination.getState().todo["session-a"]?.[0]?.content).toBe("Check move")
     expect(destination.getState().permission["session-a"]?.[0]?.id).toBe("permission-a")
-    expect(destination.getState().question["session-a"]?.[0]?.id).toBe("question-a")
+    expect(destination.getState().form["session-a"]?.[0]?.id).toBe("question-a")
     expect(destination.getState().message["session-a"]?.[0]?.id).toBe("message-a")
     expect(destination.getState().part["message-a"]?.[0]?.id).toBe("part-a")
     expect(registerSessionDirectoryCalls).toEqual([{ sessionID: "session-a", directory: "/destination" }])

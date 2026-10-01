@@ -1,4 +1,5 @@
 import type { Event, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { FormEventFrame } from "./types"
 
 export type ColdDirectoryEventDecision =
   | { readonly kind: "session"; readonly info: Session }
@@ -7,7 +8,7 @@ export type ColdDirectoryEventDecision =
   | { readonly kind: "materialize" }
   | { readonly kind: "ignore" }
 
-export function classifyColdDirectoryEvent(event: Event): ColdDirectoryEventDecision {
+export function classifyColdDirectoryEvent(event: Event | FormEventFrame): ColdDirectoryEventDecision {
   switch (event.type) {
     case "session.created":
     case "session.updated":
@@ -36,6 +37,7 @@ export function classifyColdDirectoryEvent(event: Event): ColdDirectoryEventDeci
       return { kind: "delete", sessionID: event.properties.sessionID }
     case "permission.asked":
     case "question.asked":
+    case "form.created":
       return { kind: "materialize" }
     default:
       return { kind: "ignore" }

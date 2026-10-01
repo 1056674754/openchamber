@@ -305,15 +305,15 @@ describe("applyDirectoryEvent", () => {
     const initialQuestions = [
       { id: "ques_1", sessionID: "ses_1" } as QuestionRequest,
     ]
-    const draft = state({ question: { ses_1: initialQuestions } })
+    const draft = state({ form: { ses_1: initialQuestions } })
 
     applyDirectoryEvent(draft, {
       type: "question.asked",
       properties: { id: "ques_2", sessionID: "ses_1" } as QuestionRequest,
     } as Event)
 
-    expect(draft.question.ses_1).not.toBe(initialQuestions)
-    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_1", "ques_2"])
+    expect(draft.form.ses_1).not.toBe(initialQuestions)
+    expect(draft.form.ses_1.map((item) => item.id)).toEqual(["ques_1", "ques_2"])
 
     const replacement = {
       id: "ques_2",
@@ -325,26 +325,83 @@ describe("applyDirectoryEvent", () => {
       properties: replacement,
     } as Event)
 
-    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_1", "ques_2"])
-    expect(draft.question.ses_1[1]).toBe(replacement)
+    expect(draft.form.ses_1.map((item) => item.id)).toEqual(["ques_1", "ques_2"])
+    expect(draft.form.ses_1[1]).toBe(replacement)
 
-    const afterAsk = draft.question.ses_1
+    const afterAsk = draft.form.ses_1
     applyDirectoryEvent(draft, {
       type: "question.replied",
       properties: { sessionID: "ses_1", requestID: "ques_1" },
     } as Event)
 
-    expect(draft.question.ses_1).not.toBe(afterAsk)
-    expect(draft.question.ses_1.map((item) => item.id)).toEqual(["ques_2"])
+    expect(draft.form.ses_1).not.toBe(afterAsk)
+    expect(draft.form.ses_1.map((item) => item.id)).toEqual(["ques_2"])
 
-    const afterReply = draft.question.ses_1
+    const afterReply = draft.form.ses_1
     applyDirectoryEvent(draft, {
       type: "question.rejected",
       properties: { sessionID: "ses_1", requestID: "ques_2" },
     } as Event)
 
-    expect(draft.question.ses_1).not.toBe(afterReply)
-    expect(draft.question.ses_1).toEqual([])
+    expect(draft.form.ses_1).not.toBe(afterReply)
+    expect(draft.form.ses_1).toEqual([])
+  })
+
+  test("upserts v2 native forms immutably on form.created", () => {
+    const draft = state()
+    const form = { id: "form_1", sessionID: "ses_1", title: "Pick", fields: [{ key: "answer", type: "boolean" }] } as never
+
+    applyDirectoryEvent(draft, {
+      type: "form.created",
+      properties: { sessionID: "ses_1", form },
+    } as unknown as Event)
+
+    expect(draft.nativeForm.ses_1).toEqual([form])
+
+    const replacement = { id: "form_1", sessionID: "ses_1", title: "Pick 2", fields: [{ key: "answer", type: "boolean" }] } as never
+    applyDirectoryEvent(draft, {
+      type: "form.created",
+      properties: { sessionID: "ses_1", form: replacement },
+    } as unknown as Event)
+
+    expect(draft.nativeForm.ses_1).toEqual([replacement])
+
+    applyDirectoryEvent(draft, {
+      type: "form.created",
+      properties: { sessionID: "ses_1", form: { id: "form_0", sessionID: "ses_1", title: "First", fields: [] } as never },
+    } as unknown as Event)
+
+    expect(draft.nativeForm.ses_1.map((item) => item.id)).toEqual(["form_0", "form_1"])
+  })
+
+  test("removes the settled v2 form and ignores frames without ids", () => {
+    const draft = state({
+      nativeForm: {
+        ses_1: [
+          { id: "form_1", sessionID: "ses_1", title: "A", fields: [] } as never,
+          { id: "form_2", sessionID: "ses_1", title: "B", fields: [] } as never,
+        ],
+      },
+    })
+
+    applyDirectoryEvent(draft, {
+      type: "form.settled",
+      properties: { sessionID: "ses_1", formID: "form_1" },
+    } as unknown as Event)
+
+    expect(draft.nativeForm.ses_1.map((item) => item.id)).toEqual(["form_2"])
+
+    const before = draft.nativeForm.ses_1
+    expect(applyDirectoryEvent(draft, {
+      type: "form.settled",
+      properties: { sessionID: "ses_1", formID: "form_missing" },
+    } as unknown as Event)).toBe(false)
+    expect(draft.nativeForm.ses_1).toBe(before)
+
+    expect(applyDirectoryEvent(draft, {
+      type: "form.created",
+      properties: { sessionID: "ses_1", form: { sessionID: "ses_1", title: "no id", fields: [] } as never },
+    } as unknown as Event)).toBe(false)
   })
 
   test("stamps session_activity when part.updated arrives", () => {
@@ -417,7 +474,7 @@ describe("applyDirectoryEvent", () => {
     ]
     const draft = state({
       session_status: { ses_1: { type: "busy" } as SessionStatus },
-      question: { ses_1: pending },
+      form: { ses_1: pending },
     })
 
     applyDirectoryEvent(draft, {
@@ -425,21 +482,21 @@ describe("applyDirectoryEvent", () => {
       properties: { sessionID: "ses_1", status: { type: "idle" } as SessionStatus },
     } as Event)
 
-    expect(draft.question.ses_1).toBe(pending)
+    expect(draft.form.ses_1).toBe(pending)
   })
 
   test("preserves pending questions on session.idle", () => {
     const pending = [
       { id: "que_1", sessionID: "ses_1" } as QuestionRequest,
     ]
-    const draft = state({ question: { ses_1: pending } })
+    const draft = state({ form: { ses_1: pending } })
 
     applyDirectoryEvent(draft, {
       type: "session.idle",
       properties: { sessionID: "ses_1" },
     } as Event)
 
-    expect(draft.question.ses_1).toBe(pending)
+    expect(draft.form.ses_1).toBe(pending)
   })
 
   test("keeps session_activity when session.status stays non-idle", () => {

@@ -3,9 +3,10 @@
  * Replaces the action methods from the old useSessionStore.
  */
 
+import type { FormValue } from "@opencode/client"
 import type { OpencodeClient, Session, Message, Part, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import type { PermissionRequest } from "@/types/permission"
-import type { QuestionRequest } from "@/types/question"
+import type { FormRequest } from "@/types/form"
 import { Binary } from "./binary"
 import { useSessionUIStore } from "./session-ui-store"
 import { useInputStore } from "./input-store"
@@ -390,7 +391,7 @@ function getSessionDirectory(sessionId: string): string | undefined {
           || Object.prototype.hasOwnProperty.call(state.message, sessionId)
           || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionId)
           || Object.prototype.hasOwnProperty.call(state.permission ?? {}, sessionId)
-          || Object.prototype.hasOwnProperty.call(state.question ?? {}, sessionId)
+          || Object.prototype.hasOwnProperty.call(state.form ?? {}, sessionId)
         ) {
           return directory
         }
@@ -406,7 +407,7 @@ function getSessionDirectory(sessionId: string): string | undefined {
         || Object.prototype.hasOwnProperty.call(state.message, sessionId)
         || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionId)
         || Object.prototype.hasOwnProperty.call(state.permission ?? {}, sessionId)
-        || Object.prototype.hasOwnProperty.call(state.question ?? {}, sessionId)
+        || Object.prototype.hasOwnProperty.call(state.form ?? {}, sessionId)
       ) {
         return directory
       }
@@ -504,13 +505,13 @@ function getSessionReplyClient(sessionId?: string): OpencodeClient {
 
 function findBlockingRequestDirectoryInStores(
   stores: ChildStoreManager,
-  type: "permission" | "question",
+  type: "permission" | "form",
   sessionId: string,
   requestId: string,
 ): string | null {
   for (const [directory, store] of stores.children) {
     const state = store.getState()
-    const requestMap = type === "permission" ? state.permission : state.question
+    const requestMap = type === "permission" ? state.permission : state.form
     const sessionRequests = requestMap[sessionId]
     if (sessionRequests?.some((request) => request.id === requestId)) {
       return directory
@@ -519,7 +520,7 @@ function findBlockingRequestDirectoryInStores(
 
   for (const [directory, store] of stores.children) {
     const state = store.getState()
-    const requestMap = type === "permission" ? state.permission : state.question
+    const requestMap = type === "permission" ? state.permission : state.form
     for (const requests of Object.values(requestMap) as Array<Array<{ id: string }> | undefined>) {
       if (requests?.some((request) => request.id === requestId)) {
         return directory
@@ -531,7 +532,7 @@ function findBlockingRequestDirectoryInStores(
 }
 
 function resolveDirectoryForBlockingRequest(
-  type: "permission" | "question",
+  type: "permission" | "form",
   sessionId: string,
   requestId: string,
 ): string | null {
@@ -576,7 +577,7 @@ function resolveDirectoryForBlockingRequest(
       || Object.prototype.hasOwnProperty.call(state.message, sessionId)
       || Object.prototype.hasOwnProperty.call(state.session_status ?? {}, sessionId)
       || Object.prototype.hasOwnProperty.call(state.permission ?? {}, sessionId)
-      || Object.prototype.hasOwnProperty.call(state.question ?? {}, sessionId)
+      || Object.prototype.hasOwnProperty.call(state.form ?? {}, sessionId)
     ) {
       return directory
     }
@@ -586,7 +587,7 @@ function resolveDirectoryForBlockingRequest(
 }
 
 function getRequestReplyClient(
-  type: "permission" | "question",
+  type: "permission" | "form",
   sessionId: string,
   requestId: string,
 ): OpencodeClient {
@@ -600,7 +601,7 @@ function getRequestReplyClient(
 }
 
 function requireBlockingRequestDirectory(
-  type: "permission" | "question",
+  type: "permission" | "form",
   sessionId: string,
   requestId: string,
 ): string {
@@ -611,7 +612,7 @@ function requireBlockingRequestDirectory(
   return directory
 }
 
-function removeQuestionFromStores(
+function removeFormFromStores(
   stores: ChildStoreManager | undefined,
   sessionId: string,
   requestId: string,
@@ -619,18 +620,18 @@ function removeQuestionFromStores(
   if (!stores) return false
 
   for (const store of stores.children.values()) {
-    const questions = store.getState().question[sessionId]
-    if (!questions || questions.length === 0) continue
-    const next = questions.filter((question) => question.id !== requestId)
-    if (next.length === questions.length) continue
+    const forms = store.getState().form[sessionId]
+    if (!forms || forms.length === 0) continue
+    const next = forms.filter((form) => form.id !== requestId)
+    if (next.length === forms.length) continue
 
-    const question = { ...store.getState().question }
+    const form = { ...store.getState().form }
     if (next.length === 0) {
-      delete question[sessionId]
+      delete form[sessionId]
     } else {
-      question[sessionId] = next
+      form[sessionId] = next
     }
-    store.setState({ question })
+    store.setState({ form })
     return true
   }
 
@@ -663,23 +664,23 @@ function removePermissionFromStores(
   return false
 }
 
-function optimisticRemoveQuestion(sessionId: string, requestId: string): void {
+function optimisticRemoveForm(sessionId: string, requestId: string): void {
   if (!sessionId || !requestId) return
 
   const serverId = serverRegistry.getServerForSession(sessionId)
   if (serverId && serverId !== DEFAULT_SERVER_ID) {
-    if (removeQuestionFromStores(getSyncStoresForServer(serverId), sessionId, requestId)) {
+    if (removeFormFromStores(getSyncStoresForServer(serverId), sessionId, requestId)) {
       return
     }
   }
 
-  if (removeQuestionFromStores(_childStores ?? undefined, sessionId, requestId)) {
+  if (removeFormFromStores(_childStores ?? undefined, sessionId, requestId)) {
     return
   }
 
   for (const entry of getAllSyncStores()) {
     if (entry.serverId === DEFAULT_SERVER_ID || entry.serverId === serverId) continue
-    if (removeQuestionFromStores(entry.childStores, sessionId, requestId)) {
+    if (removeFormFromStores(entry.childStores, sessionId, requestId)) {
       return
     }
   }
@@ -782,7 +783,7 @@ function reconcileSessionMove(
   const diffs = moveRecordEntries(sourceState.session_diff, destinationState.session_diff, [session.id])
   const todos = moveRecordEntries(sourceState.todo, destinationState.todo, [session.id])
   const permissions = moveRecordEntries(sourceState.permission, destinationState.permission, [session.id])
-  const questions = moveRecordEntries(sourceState.question, destinationState.question, [session.id])
+  const forms = moveRecordEntries(sourceState.form, destinationState.form, [session.id])
   const messages = moveRecordEntries(sourceState.message, destinationState.message, [session.id])
   const messageIds = sourceState.message[session.id]?.map((message) => message.id) ?? []
   const parts = moveRecordEntries(sourceState.part, destinationState.part, messageIds)
@@ -794,7 +795,7 @@ function reconcileSessionMove(
     session_diff: diffs.source,
     todo: todos.source,
     permission: permissions.source,
-    question: questions.source,
+    form: forms.source,
     message: messages.source,
     part: parts.source,
   })
@@ -807,7 +808,7 @@ function reconcileSessionMove(
     session_diff: diffs.destination,
     todo: todos.destination,
     permission: permissions.destination,
-    question: questions.destination,
+    form: forms.destination,
     message: messages.destination,
     part: parts.destination,
   })
@@ -2250,33 +2251,50 @@ async function sendPermissionResponse(
 }
 
 // ---------------------------------------------------------------------------
-// Questions
+// Forms (v1 wire: the `question` tool and `client.question.*` endpoints)
 // ---------------------------------------------------------------------------
 
-export async function respondToQuestion(
+/**
+ * Replies to a pending blocking form.
+ *
+ * The v1 track passes the string-array answers the `question.reply` endpoint
+ * takes. The v2 dock components pass the typed-form answer record; that arm
+ * is an explicit throw until S6 wires the v2 send path — the components
+ * passing it are unmounted on the v1 track, so nothing reachable can hit it.
+ */
+export async function replyToForm(
   sessionId: string,
   requestId: string,
-  answers: string[] | string[][],
+  answers: string[] | string[][] | Record<string, FormValue>,
   directoryHint?: string,
 ): Promise<void> {
+  if (!Array.isArray(answers)) {
+    throw new Error("Typed-form replies require an OpenCode 2.x connection (spine S6 send path)")
+  }
   const serverId = resolveBlockingRequestServerId(sessionId, directoryHint)
   await waitForConnectionOrThrow(serverId)
-  const directory = directoryHint ?? requireBlockingRequestDirectory("question", sessionId, requestId)
+  const directory = directoryHint ?? requireBlockingRequestDirectory("form", sessionId, requestId)
   const client = directoryHint
     ? resolveSdkForDirectory(directoryHint, sessionId, serverId)
-    : getRequestReplyClient("question", sessionId, requestId)
+    : getRequestReplyClient("form", sessionId, requestId)
   const result = await client.question.reply({
     requestID: requestId,
     answers: answers as Array<Array<string>>,
     ...(directory ? { directory } : {}),
   })
   if (!result.data) {
-    throw new Error("Question reply failed")
+    throw new Error("Form reply failed")
   }
-  optimisticRemoveQuestion(sessionId, requestId)
+  optimisticRemoveForm(sessionId, requestId)
 }
 
-export async function rejectQuestion(
+/**
+ * Dismisses a pending blocking form. Shapes are identical across protocol
+ * tracks (both are ids), so the v2 dock can call this unchanged; the request
+ * currently goes to the v1 `question.reject` endpoint, and the v2 arm
+ * (`client.form.*`) lands with the S6 send path before any v2 dock mounts.
+ */
+export async function cancelForm(
   sessionId: string,
   requestId: string,
   directoryHint?: string | BlockingRequestTarget,
@@ -2284,26 +2302,26 @@ export async function rejectQuestion(
   const target = typeof directoryHint === "string" ? { directory: directoryHint } : directoryHint
   const serverId = target?.serverId ?? resolveBlockingRequestServerId(sessionId, target?.directory)
   await waitForConnectionOrThrow(serverId)
-  const directory = target?.directory?.trim() || requireBlockingRequestDirectory("question", sessionId, requestId)
+  const directory = target?.directory?.trim() || requireBlockingRequestDirectory("form", sessionId, requestId)
   const client = target?.directory || target?.serverId
     ? resolveSdkForDirectory(directory, sessionId, serverId)
-    : getRequestReplyClient("question", sessionId, requestId)
+    : getRequestReplyClient("form", sessionId, requestId)
   const result = await client.question.reject({
     requestID: requestId,
     ...(directory ? { directory } : {}),
   })
   if (!result.data) {
-    throw new Error("Question rejection failed")
+    throw new Error("Form cancellation failed")
   }
-  optimisticRemoveQuestion(sessionId, requestId)
+  optimisticRemoveForm(sessionId, requestId)
 }
 
-type QuestionDismissalTarget = {
+type FormDismissalTarget = {
   readonly sessionId: string
   readonly requestId: string
   readonly directory: string
   readonly serverId: string
-  readonly question: QuestionRequest
+  readonly form: FormRequest
   readonly stores: ChildStoreManager
 }
 
@@ -2328,7 +2346,7 @@ function computeSessionSubtreeIds(sessions: Session[], rootId: string): Set<stri
   return ids
 }
 
-function collectQuestionDismissalTargets(sessionId: string): QuestionDismissalTarget[] {
+function collectFormDismissalTargets(sessionId: string): FormDismissalTarget[] {
   const indexedServerId = serverRegistry.getServerForSession(sessionId)
   const managersByServer = new Map<string, Set<ChildStoreManager>>()
   const addManager = (serverId: string, stores: ChildStoreManager | null | undefined) => {
@@ -2346,7 +2364,7 @@ function collectQuestionDismissalTargets(sessionId: string): QuestionDismissalTa
     for (const entry of getAllSyncStores()) addManager(entry.serverId, entry.childStores)
   }
 
-  const targets: QuestionDismissalTarget[] = []
+  const targets: FormDismissalTarget[] = []
   const seen = new Set<string>()
   for (const [serverId, managers] of managersByServer) {
     const sessionsById = new Map<string, Session>()
@@ -2359,9 +2377,9 @@ function collectQuestionDismissalTargets(sessionId: string): QuestionDismissalTa
 
     for (const stores of managers) {
       for (const [directory, store] of stores.children) {
-        const questionsBySession = store.getState().question
+        const formsBySession = store.getState().form
         for (const scopedSessionId of subtreeIds) {
-          for (const request of questionsBySession[scopedSessionId] ?? []) {
+          for (const request of formsBySession[scopedSessionId] ?? []) {
             const key = `${serverId}\0${directory}\0${scopedSessionId}\0${request.id}`
             if (seen.has(key)) continue
             seen.add(key)
@@ -2370,7 +2388,7 @@ function collectQuestionDismissalTargets(sessionId: string): QuestionDismissalTa
               requestId: request.id,
               directory,
               serverId,
-              question: request,
+              form: request,
               stores,
             })
           }
@@ -2381,32 +2399,32 @@ function collectQuestionDismissalTargets(sessionId: string): QuestionDismissalTa
   return targets
 }
 
-export async function dismissOpenQuestionsForSession(sessionId: string): Promise<boolean> {
+export async function dismissOpenFormsForSession(sessionId: string): Promise<boolean> {
   if (!sessionId) return false
-  const targets = collectQuestionDismissalTargets(sessionId)
+  const targets = collectFormDismissalTargets(sessionId)
   if (targets.length === 0) return false
 
   for (const target of targets) {
-    removeQuestionFromStores(target.stores, target.sessionId, target.requestId)
+    removeFormFromStores(target.stores, target.sessionId, target.requestId)
   }
 
   await Promise.all(targets.map(async (target) => {
     try {
-      await rejectQuestion(target.sessionId, target.requestId, {
+      await cancelForm(target.sessionId, target.requestId, {
         directory: target.directory,
         serverId: target.serverId,
       })
     } catch (error) {
-      console.error("[session-actions] Failed to dismiss open question on send:", error)
+      console.error("[session-actions] Failed to dismiss open form on send:", error)
       const store = target.stores.getChild(target.directory)
       if (store) {
         const state = store.getState()
-        const current = state.question[target.sessionId] ?? []
-        if (!current.some((question) => question.id === target.requestId)) {
+        const current = state.form[target.sessionId] ?? []
+        if (!current.some((form) => form.id === target.requestId)) {
           store.setState({
-            question: {
-              ...state.question,
-              [target.sessionId]: [...current, target.question],
+            form: {
+              ...state.form,
+              [target.sessionId]: [...current, target.form],
             },
           })
         }

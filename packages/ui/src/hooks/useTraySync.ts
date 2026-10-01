@@ -26,7 +26,7 @@ import type { ProjectEntry } from '@/lib/api/types';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { toast } from '@/components/ui';
 import type { PermissionRequest } from '@/types/permission';
-import type { QuestionRequest } from '@/types/question';
+import type { FormRequest } from '@/types/form';
 import type { ChildStoreManager } from '@/sync/child-store';
 
 // Native tray/menu bar bridge. Electron main owns Tray UI; this hook streams a
@@ -53,7 +53,7 @@ type TraySession = {
 };
 
 type TrayApproval = {
-  kind: 'permission' | 'question';
+  kind: 'permission' | 'form';
   id: string;
   sessionId: string;
   sessionTitle: string;
@@ -99,7 +99,7 @@ const permissionLabel = (request: PermissionRequest): string => {
   return pattern ? `${head}: ${pattern}` : head;
 };
 
-const questionLabel = (request: QuestionRequest): string => {
+const formLabel = (request: FormRequest): string => {
   const first = Array.isArray(request.questions) ? request.questions[0] : undefined;
   return first?.header || first?.question || 'Question';
 };
@@ -235,16 +235,16 @@ const collectFromManager = (
         });
       }
     }
-    for (const [sessionId, requests] of Object.entries(state.question ?? {})) {
+    for (const [sessionId, requests] of Object.entries(state.form ?? {})) {
       for (const request of requests ?? []) {
         if (!request?.id) continue;
         const sid = request.sessionID || sessionId;
         approvals.push({
-          kind: 'question',
+          kind: 'form',
           id: request.id,
           sessionId: sid,
           sessionTitle: '',
-          label: questionLabel(request),
+          label: formLabel(request),
           directory,
           serverId: resolveSessionServerId(sid, serverId),
         });

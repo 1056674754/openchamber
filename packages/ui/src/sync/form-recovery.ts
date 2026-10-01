@@ -1,4 +1,5 @@
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
+import { blocksOnForm } from "@/lib/opencode/tools"
 
 type MessageRecord = {
   readonly info: Message
@@ -7,22 +8,27 @@ type MessageRecord = {
 
 const RECOVERY_DELAYS_MS = [0, 500, 1500] as const
 
-const isActiveQuestionTool = (part: Part): boolean => {
-  if (part.type !== "tool" || part.tool !== "question") return false
+/**
+ * Neither protocol ships a dedicated form tool: a form is raised by the tool
+ * that blocks on it, which on the v1 wire is `question` (`blocksOnForm` knows
+ * the full set, so the v2 track needs no branch here).
+ */
+const isActiveFormTool = (part: Part): boolean => {
+  if (part.type !== "tool" || !blocksOnForm(part.tool)) return false
   return part.state.status === "pending" || part.state.status === "running"
 }
 
-export function hasActiveQuestionToolInCurrentTurn(messages: readonly MessageRecord[]): boolean {
+export function hasActiveFormToolInCurrentTurn(messages: readonly MessageRecord[]): boolean {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (!message) continue
     if (message.info.role === "user") return false
-    if (message.parts.some(isActiveQuestionTool)) return true
+    if (message.parts.some(isActiveFormTool)) return true
   }
   return false
 }
 
-export async function recoverPendingQuestionWithRetry(
+export async function recoverPendingFormWithRetry(
   recover: () => Promise<boolean>,
   options?: {
     readonly isCancelled?: () => boolean
