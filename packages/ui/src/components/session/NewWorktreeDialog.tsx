@@ -1148,12 +1148,12 @@ export function NewWorktreeDialog({
   // Footer content
   const footerContent = (
     <div className={cn('flex gap-2', isMobile ? 'flex-col w-full' : 'flex-row items-center')}>
-      {/* Validation error */}
-      <div className={cn('flex items-center gap-1.5 text-destructive', isMobile ? 'w-full justify-center order-first' : 'mr-auto')}> 
+      {/* Validation error — long server messages (full paths) wrap */}
+      <div className={cn('flex min-w-0 flex-1 items-start gap-1.5 text-destructive', isMobile ? 'w-full justify-center order-first' : 'mr-auto')}>
         {validation.touched && (validation.branchError || validation.worktreeError) && (
           <>
-            <Icon name="error-warning" className="h-3.5 w-3.5" />
-            <span className="typography-micro">
+            <Icon name="error-warning" className="mt-px h-3.5 w-3.5 shrink-0" />
+            <span className="typography-micro min-w-0 [overflow-wrap:anywhere]">
               {validation.branchError || validation.worktreeError}
             </span>
           </>

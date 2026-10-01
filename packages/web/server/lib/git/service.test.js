@@ -1580,3 +1580,112 @@ describe('worktree topology change tracking', () => {
     }
   });
 });
+
+describe('createWorktree from a local base branch', () => {
+  const withDataHome = async (run) => {
+    const previousXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = createTempDir();
+    try {
+      await run();
+    } finally {
+      if (previousXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = previousXdgDataHome;
+      }
+    }
+  };
+
+  const createRepositoryWithRemote = ({ defaultBranch = 'main' } = {}) => {
+    const remote = createTempDir();
+    const repository = createTempDir();
+    runGit(remote, ['init', '--bare', `--initial-branch=${defaultBranch}`]);
+    runGit(repository, ['init', '-b', 'next']);
+    runGit(repository, ['config', 'user.email', 'test@example.com']);
+    runGit(repository, ['config', 'user.name', 'Test']);
+    fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+    runGit(repository, ['add', 'README.md']);
+    runGit(repository, ['commit', '-m', 'init']);
+    runGit(repository, ['remote', 'add', 'origin', remote]);
+    runGit(repository, ['push', 'origin', `HEAD:${defaultBranch}`]);
+    runGit(repository, ['fetch', 'origin']);
+    runGit(repository, ['remote', 'set-head', 'origin', '--auto']);
+    return { remote, repository };
+  };
+
+  // The repository sits on `next` with a local `main` tracking origin/main;
+  // a teammate then pushes one commit to main that was never pulled.
+  const createRepositoryBehindItsRemote = () => {
+    const { remote, repository } = createRepositoryWithRemote({ defaultBranch: 'main' });
+    runGit(repository, ['branch', '--track', 'main', 'origin/main']);
+    const teammate = createTempDir();
+    runGit(teammate, ['clone', remote, '.']);
+    runGit(teammate, ['config', 'user.email', 'teammate@example.com']);
+    runGit(teammate, ['config', 'user.name', 'Teammate']);
+    fs.writeFileSync(path.join(teammate, 'pushed.txt'), 'pushed\n');
+    runGit(teammate, ['add', 'pushed.txt']);
+    runGit(teammate, ['commit', '-m', 'pushed later']);
+    runGit(teammate, ['push', 'origin', 'HEAD:main']);
+    return { repository, pushedHead: runGit(teammate, ['rev-parse', 'HEAD']).trim() };
+  };
+
+  it('starts from the freshly fetched upstream when nothing is unpublished', async () => {
+    if (!canRunGit()) return;
+    await withDataHome(async () => {
+      const { repository, pushedHead } = createRepositoryBehindItsRemote();
+      const localMain = runGit(repository, ['rev-parse', 'main']).trim();
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/fresh-base',
+        worktreeName: 'fresh-base',
+        startRef: 'main',
+      });
+
+      expect(created.sourceFetchFailed).toBeUndefined();
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(pushedHead);
+      expect(runGit(repository, ['rev-parse', 'main']).trim()).toBe(localMain);
+    });
+  }, 30_000);
+
+  it('keeps the local branch when it has unpublished commits', async () => {
+    if (!canRunGit()) return;
+    await withDataHome(async () => {
+      const { repository } = createRepositoryBehindItsRemote();
+      runGit(repository, ['checkout', 'main']);
+      fs.writeFileSync(path.join(repository, 'local.txt'), 'local\n');
+      runGit(repository, ['add', 'local.txt']);
+      runGit(repository, ['commit', '-m', 'unpublished']);
+      runGit(repository, ['checkout', 'next']);
+      const localMain = runGit(repository, ['rev-parse', 'main']).trim();
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/local-base',
+        worktreeName: 'local-base',
+        startRef: 'main',
+      });
+
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(localMain);
+    });
+  }, 30_000);
+
+  it('keeps the local branch and reports it when the fetch fails', async () => {
+    if (!canRunGit()) return;
+    await withDataHome(async () => {
+      const { repository } = createRepositoryBehindItsRemote();
+      runGit(repository, ['remote', 'set-url', 'origin', '/nonexistent/openchamber-unreachable.git']);
+      const localMain = runGit(repository, ['rev-parse', 'main']).trim();
+
+      const created = await createWorktree(repository, {
+        mode: 'new',
+        branchName: 'openchamber/offline-base',
+        worktreeName: 'offline-base',
+        startRef: 'main',
+      });
+
+      expect(created.sourceFetchFailed).toBe(true);
+      expect(runGit(created.path, ['rev-parse', 'HEAD']).trim()).toBe(localMain);
+    });
+  }, 30_000);
+});
