@@ -368,3 +368,35 @@ exists. The plugin is resolved from the workspace `node_modules`.
 - OMA image resizer hook (proof of concept): `../oh-my-openagent/packages/omo-opencode/src/hooks/read-image-resizer/`
 - OpenCode upstream PRs: #30153 (save to disk), #29279 (metadata text), #21633 (clipboard file://)
 - Hermes Agent vision routing: hermes-agent.nousresearch.com/docs/user-guide/features/vision
+
+## v2 Plugin Shape (OpenCode v2 servers)
+
+OpenCode v2 servers load plugins through a domains-based promise API
+(`{ id, setup }`) and no longer accept the v1 hooks table. The plugin's
+default export carries BOTH shapes on the same object — `server` (v1) and
+`setup` (v2) — and each loader reads its own key:
+
+- `src/index.ts` — dual-shape default export.
+- `server.ts` — root entrypoint required by the v2 `Host.resolve`
+  (it looks for `<plugin>/server.*` at the package root, not package.json
+  `main`).
+- `src/v2.ts` — the v2 implementation, typed structurally (no dependency on
+  the @opencode-ai/plugin v2 package).
+
+v2 mapping (details in `src/v2.ts` header):
+
+| v1 | v2 |
+|---|---|
+| `tool` registration | `tool.transform(editor.add)` — zod schemas pass through as Standard Schema |
+| `experimental.session.compacting` | `session.hook("compaction")` |
+| `experimental.chat.system.transform` | `session.hook("context")` (system parts) |
+| `experimental.chat.messages.transform` | `session.hook("context")` (messages) |
+| `chat.message` | `session.hook("prompt")` |
+| `event` | `event.subscribe()` (async iterable) |
+| steer-transform | not ported — v2's session input queue promotes steers mid-turn |
+
+v2 loader notes: config must use the `plugins` key (the legacy `plugin` key
+migrates but configured targets must be plugin package DIRECTORIES whose
+root exposes `server.*`); plugin loading is driven by the server's ambient
+config chain. Verified end-to-end against v2.0.21: project config entry →
+Host.resolve(server.ts) → Module decode (dual shape) → `v2 setup loaded`.
