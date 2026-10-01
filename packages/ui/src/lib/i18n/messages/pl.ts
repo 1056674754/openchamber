@@ -2141,6 +2141,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.sessionError.title': 'OpenCode przerwał tę odpowiedź',
   'chat.sessionError.noDetails': 'OpenCode nie podał szczegółów. Otwórz raport stanu (Ctrl/Cmd+Shift+L), aby zobaczyć ostatnie błędy.',
   'chat.sessionError.noReply': 'OpenCode nie rozpoczął odpowiedzi na tę wiadomość.',
+  'chat.longError.expand': 'Pokaż pełny błąd',
+  'chat.longError.collapse': 'Pokaż mniej',
   'header.sessionTabs.tabMenuAria': 'Akcje karty sesji',
   'header.sessionTabs.closeTab': 'Zamknij kartę',
   'header.sessionTabs.closeOtherTabs': 'Zamknij pozostałe karty',

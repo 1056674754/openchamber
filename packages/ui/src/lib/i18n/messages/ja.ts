@@ -1437,6 +1437,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.sessionError.title': 'OpenCode がこの返答を停止しました',
   'chat.sessionError.noDetails': 'OpenCode から詳細は報告されませんでした。ステータスレポート（Ctrl/Cmd+Shift+L）で最近のエラーを確認してください。',
   'chat.sessionError.noReply': 'OpenCode はこのメッセージへの返答を開始しませんでした。',
+  'chat.longError.expand': 'エラー全体を表示',
+  'chat.longError.collapse': '折りたたむ',
   'header.sessionTabs.tabMenuAria': 'セッションタブの操作',
   'header.sessionTabs.closeTab': 'タブを閉じる',
   'header.sessionTabs.closeOtherTabs': '他のタブを閉じる',

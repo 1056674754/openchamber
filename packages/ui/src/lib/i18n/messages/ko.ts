@@ -1444,6 +1444,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.sessionError.title': 'OpenCode가 이 응답을 중단했습니다',
   'chat.sessionError.noDetails': 'OpenCode가 세부 정보를 보고하지 않았습니다. 상태 보고서(Ctrl/Cmd+Shift+L)에서 최근 오류를 확인하세요.',
   'chat.sessionError.noReply': 'OpenCode가 이 메시지에 대한 응답을 시작하지 않았습니다.',
+  'chat.longError.expand': '전체 오류 표시',
+  'chat.longError.collapse': '간략히 보기',
   'header.sessionTabs.tabMenuAria': '세션 탭 작업',
   'header.sessionTabs.closeTab': '탭 닫기',
   'header.sessionTabs.closeOtherTabs': '다른 탭 닫기',

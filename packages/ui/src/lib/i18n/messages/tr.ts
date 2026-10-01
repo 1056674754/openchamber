@@ -1447,6 +1447,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.sessionError.title': 'OpenCode bu yanıtı durdurdu',
   'chat.sessionError.noDetails': 'OpenCode ayrıntı bildirmedi. Son hataları görmek için durum raporunu açın (Ctrl/Cmd+Shift+L).',
   'chat.sessionError.noReply': 'OpenCode bu mesaja yanıt vermeye başlamadı.',
+  'chat.longError.expand': 'Tüm hatayı göster',
+  'chat.longError.collapse': 'Daha az göster',
   'header.sessionTabs.tabMenuAria': 'Session sekmesi eylemleri',
   'header.sessionTabs.closeTab': 'Sekmeyi kapat',
   'header.sessionTabs.closeOtherTabs': 'Diğer sekmeleri kapat',

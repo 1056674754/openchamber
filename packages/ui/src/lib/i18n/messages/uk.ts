@@ -1403,6 +1403,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.sessionError.title": "OpenCode зупинив цю відповідь",
   "chat.sessionError.noDetails": "OpenCode не повідомив деталей. Відкрий звіт про стан (Ctrl/Cmd+Shift+L), щоб побачити останні помилки.",
   "chat.sessionError.noReply": "OpenCode не почав відповідь на це повідомлення.",
+  "chat.longError.expand": "Показати повну помилку",
+  "chat.longError.collapse": "Згорнути",
   "header.sessionTabs.tabMenuAria": "Дії вкладки сесії",
   "header.sessionTabs.closeTab": "Закрити вкладку",
   "header.sessionTabs.closeOtherTabs": "Закрити інші вкладки",

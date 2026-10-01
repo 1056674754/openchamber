@@ -1403,6 +1403,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.sessionError.title': 'OpenCode 停止了本次回复',
   'chat.sessionError.noDetails': 'OpenCode 未报告任何详情。打开状态报告（Ctrl/Cmd+Shift+L）查看最近的错误。',
   'chat.sessionError.noReply': 'OpenCode 没有开始回复这条消息。',
+  'chat.longError.expand': '显示完整错误',
+  'chat.longError.collapse': '收起',
   'header.sessionTabs.tabMenuAria': '会话标签页操作',
   'header.sessionTabs.closeTab': '关闭标签页',
   'header.sessionTabs.closeOtherTabs': '关闭其他标签页',

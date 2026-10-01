@@ -3,6 +3,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useLatestSessionError } from '@/sync/notification-store';
 import { useDirectoryStore, useSessionStatus } from '@/sync/sync-context';
+import { LongErrorText } from './LongErrorText';
 import { readLastMessageState, type LastMessageState } from './sessionErrorNoticeState';
 
 interface SessionErrorNoticeProps {
@@ -92,7 +93,11 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
           <Icon name="error-warning" className="mt-0.5 size-4 shrink-0 text-[var(--status-error)]" />
           <div className="min-w-0 flex-1 break-words">
             <div className="font-medium text-foreground">{reportedError ? t('chat.sessionError.title') : t('chat.sessionError.noReply')}</div>
-            <div className="mt-1 text-foreground/80">{name ? `${name}: ${detail}` : detail}</div>
+            <LongErrorText text={name ? `${name}: ${detail}` : detail}>
+              {(visibleText) => (
+                <div className="mt-1 text-foreground/80">{visibleText}</div>
+              )}
+            </LongErrorText>
           </div>
         </div>
       </div>

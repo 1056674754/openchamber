@@ -994,29 +994,11 @@ const JsonToolOutput: React.FC<{
 }> = ({ jsonResult, renderedOutput, syntaxTheme }) => {
     const { t } = useI18n();
     const jsonViewMode = useUIStore((state) => state.toolJsonViewMode);
-    const [copiedJson, setCopiedJson] = React.useState(false);
-
-    React.useEffect(() => {
-        setCopiedJson(false);
-    }, [renderedOutput]);
 
     const handleJsonViewChange = React.useCallback((view: ToolJsonViewMode, event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation();
         useUIStore.getState().setToolJsonViewMode(view);
     }, []);
-
-    const handleCopyOutput = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
-        event.stopPropagation();
-        const result = await copyTextToClipboard(renderedOutput);
-        if (!result.ok) {
-            toast.error(t('chat.toolPart.copyOutputFailed'));
-            return;
-        }
-        setCopiedJson(true);
-        if (typeof window !== 'undefined') {
-            window.setTimeout(() => setCopiedJson(false), 1200);
-        }
-    }, [renderedOutput, t]);
 
     return (
             <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
@@ -1063,17 +1045,7 @@ const JsonToolOutput: React.FC<{
                     >
                         <Icon name="code-box" className="h-3.5 w-3.5" />
                     </Button>
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
-                        onClick={handleCopyOutput}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        aria-label={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-                        title={copiedJson ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
-                    >
-                        <Icon name={copiedJson ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
-                    </Button>
+                    <CopyToolOutputButton output={renderedOutput} />
                 </div>
                 {jsonViewMode === 'summary' ? (
                     <div className="max-h-[400px] overflow-auto pr-12">
@@ -1100,6 +1072,43 @@ const JsonToolOutput: React.FC<{
                     </div>
                 )}
             </div>
+    );
+};
+
+/** Copies a tool's whole output as plain text; shown on JSON and shell output. */
+const CopyToolOutputButton: React.FC<{ output: string }> = ({ output }) => {
+    const { t } = useI18n();
+    const [copied, setCopied] = React.useState(false);
+
+    React.useEffect(() => {
+        setCopied(false);
+    }, [output]);
+
+    const handleCopy = React.useCallback(async (event: React.MouseEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        const result = await copyTextToClipboard(output);
+        if (!result.ok) {
+            toast.error(t('chat.toolPart.copyOutputFailed'));
+            return;
+        }
+        setCopied(true);
+        if (typeof window !== 'undefined') {
+            window.setTimeout(() => setCopied(false), 1200);
+        }
+    }, [output, t]);
+
+    return (
+        <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6 rounded-md bg-[var(--surface-elevated)]/80 text-muted-foreground hover:text-foreground"
+            onClick={handleCopy}
+            onPointerDown={(event) => event.stopPropagation()}
+            aria-label={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+            title={copied ? t('chat.toolPart.copiedOutput') : t('chat.toolPart.copyOutput')}
+        >
+            <Icon name={copied ? 'check' : 'file-copy'} className="h-3.5 w-3.5" />
+        </Button>
     );
 };
 
@@ -1163,8 +1172,30 @@ const ToolScrollableTextOutput: React.FC<{
         return <JsonToolOutput jsonResult={jsonResult} renderedOutput={renderedOutput} syntaxTheme={syntaxTheme} />;
     }
 
+    if (part.tool === 'bash') {
+        return (
+            <div className="relative typography-code text-muted-foreground/90">
+                <div className="absolute right-1 top-1 z-10">
+                    <CopyToolOutputButton output={renderedOutput} />
+                </div>
+                <div className="pr-8">
+                    <SyntaxHighlighter
+                        style={syntaxTheme}
+                        language={outputLanguage}
+                        PreTag="div"
+                        customStyle={TOOL_COLLAPSED_CUSTOM_STYLE}
+                        codeTagProps={CODE_TAG_PROPS}
+                        wrapLongLines
+                    >
+                        {renderedOutput}
+                    </SyntaxHighlighter>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className={part.tool === 'bash' ? 'typography-code text-muted-foreground/90' : undefined}>
+        <div>
             <SyntaxHighlighter
                 style={syntaxTheme}
                 language={outputLanguage}

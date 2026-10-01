@@ -1447,6 +1447,8 @@ export const dict = {
   'chat.sessionError.title': 'OpenCode stopped this reply',
   'chat.sessionError.noDetails': 'OpenCode reported no details. Open the status report (Ctrl/Cmd+Shift+L) to see recent errors.',
   'chat.sessionError.noReply': 'OpenCode did not start a reply to this message.',
+  'chat.longError.expand': 'Show full error',
+  'chat.longError.collapse': 'Show less',
   'header.sessionTabs.tabMenuAria': 'Session tab actions',
   'header.sessionTabs.closeTab': 'Close tab',
   'header.sessionTabs.closeOtherTabs': 'Close other tabs',

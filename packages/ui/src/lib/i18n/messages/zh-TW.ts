@@ -1339,6 +1339,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.sessionError.title': 'OpenCode 停止了本次回覆',
   'chat.sessionError.noDetails': 'OpenCode 未回報任何詳情。開啟狀態報告（Ctrl/Cmd+Shift+L）查看最近的錯誤。',
   'chat.sessionError.noReply': 'OpenCode 沒有開始回覆這則訊息。',
+  'chat.longError.expand': '顯示完整錯誤',
+  'chat.longError.collapse': '收合',
   'header.sessionTabs.tabMenuAria': '工作階段分頁動作',
   'header.sessionTabs.closeTab': '關閉分頁',
   'header.sessionTabs.closeOtherTabs': '關閉其他分頁',
