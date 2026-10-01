@@ -1,4 +1,6 @@
 import { createUpstreamSseReader } from '../event-stream/upstream-reader.js';
+import { translateWireEvent } from '../event-stream/translate-v2.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
 
 export const createOpenCodeWatcherRuntime = (deps) => {
   const {
@@ -69,9 +71,14 @@ export const createOpenCodeWatcherRuntime = (deps) => {
       return;
     }
 
+    // Direct-reader fallback (no shared hub). On the v2 track the upstream
+    // speaks the 2.x wire vocabulary from `/api/event`; payloads are
+    // translated here rather than in each consumer, matching the hub's
+    // translated intake. The v1 path is unchanged.
+    const v2Track = resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2';
     reader = createUpstreamSseReader({
       signal,
-      buildUrl: () => buildOpenCodeUrl('/global/event', ''),
+      buildUrl: () => buildOpenCodeUrl(v2Track ? '/api/event' : '/global/event', ''),
       getHeaders: getOpenCodeAuthHeaders,
       fetchImpl,
       stallTimeoutMs: upstreamStallTimeoutMs,
@@ -83,6 +90,10 @@ export const createOpenCodeWatcherRuntime = (deps) => {
       onEvent(event) {
         const payload = unwrapGlobalEventPayload(event.payload);
         if (!payload || typeof payload !== 'object') {
+          return;
+        }
+        if (v2Track) {
+          for (const translated of translateWireEvent(payload)) onPayload(translated);
           return;
         }
         onPayload(payload);

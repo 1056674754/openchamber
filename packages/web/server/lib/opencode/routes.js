@@ -8,9 +8,10 @@ import {
   getProviderAuthStates,
   removeProviderAuth as removeProviderAuthWithAdapter,
 } from '../subscriptions/auth-adapter.js';
-import { buildDeferredRestartResponse } from './config-mutation-response.js';
+import { buildAppliedResponse, buildDeferredRestartResponse } from './config-mutation-response.js';
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { settingsSurfaceOf } from './settings-files.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -266,16 +267,26 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
     };
   };
 
-  const readOpenCodeCurrentVersion = async () => {
-    const response = await fetch(buildOpenCodeUrl('/global/health', ''), {
+  // Dual-track version probe (spine OC2-S3): the v1 track asks the legacy
+  // `/global/health` unchanged; OpenCode 2.x answers `/api/info` (2.0.8
+  // removed `/global/health` and the older `/api/health`).
+  const v2TrackActive = () => resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2';
+
+  const fetchOpenCodeVersionPayload = async () => {
+    const response = await fetch(buildOpenCodeUrl(v2TrackActive() ? '/api/info' : '/global/health', ''), {
       method: 'GET',
       headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
     });
     const payload = await response.json().catch(() => null);
+    return { ok: response.ok, status: response.status, statusText: response.statusText, payload };
+  };
+
+  const readOpenCodeCurrentVersion = async () => {
+    const { ok, payload } = await fetchOpenCodeVersionPayload();
     const currentVersion = typeof payload?.version === 'string'
       ? payload.version.trim().replace(/^v/, '')
       : null;
-    return { ok: response.ok, currentVersion };
+    return { ok, currentVersion };
   };
 
   const pruneExpiredPendingMcpAuthContexts = () => {
@@ -333,6 +344,17 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
         success: false,
         code: 'OPENCODE_UPGRADE_IN_PROGRESS',
         error: 'An OpenCode upgrade is already in progress.',
+      });
+    }
+    // OpenCode 2.x has no upgrade route (upstream `654705f7d`): the
+    // replacement is whatever installed OpenCode in the first place, which
+    // OpenChamber cannot run on the user's behalf. Answer plainly rather than
+    // letting `/global/upgrade` 404.
+    if (v2TrackActive()) {
+      return res.status(409).json({
+        success: false,
+        code: 'OPENCODE_UPGRADE_UNSUPPORTED',
+        error: 'OpenCode 2 updates through its own installer. Run the update the way you installed OpenCode, then restart OpenChamber.',
       });
     }
 
@@ -431,18 +453,14 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
         });
       }
 
-      const [healthResponse, latestVersion] = await Promise.all([
-        fetch(buildOpenCodeUrl('/global/health', ''), {
-          method: 'GET',
-          headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-        }),
+      const [{ ok: healthOk, status: healthStatus, statusText: healthStatusText, payload: health }, latestVersion] = await Promise.all([
+        fetchOpenCodeVersionPayload(),
         fetchLatestOpenCodeVersion(),
       ]);
-      const health = await healthResponse.json().catch(() => null);
-      if (!healthResponse.ok) {
-        return res.status(healthResponse.status).json({
+      if (!healthOk) {
+        return res.status(healthStatus).json({
           available: null,
-          error: health?.error || healthResponse.statusText || 'Failed to read OpenCode version',
+          error: health?.error || healthStatusText || 'Failed to read OpenCode version',
           upgrade: capability,
         });
       }
@@ -472,6 +490,24 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
 
   app.get('/api/opencode/health', async (_req, res) => {
     try {
+      // v2 track (spine OC2-S3): OpenCode 2.0.8 removed `/api/health`;
+      // a 200 from `/api/info` is the readiness signal (no `healthy` field).
+      // OpenChamber's own `{ healthy }` response shape stays as its clients
+      // know it. The v1 probe is unchanged.
+      if (v2TrackActive()) {
+        const infoResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
+          method: 'GET',
+          headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        });
+        if (!infoResponse.ok) {
+          const info = await infoResponse.json().catch(() => null);
+          return res.status(infoResponse.status).json({
+            healthy: false,
+            error: info?.error || infoResponse.statusText || 'OpenCode health check failed',
+          });
+        }
+        return res.json({ healthy: true });
+      }
       const healthResponse = await fetch(buildOpenCodeUrl('/api/health', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
@@ -494,15 +530,11 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
 
   app.get('/api/opencode/version', async (_req, res) => {
     try {
-      const healthResponse = await fetch(buildOpenCodeUrl('/global/health', ''), {
-        method: 'GET',
-        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
-      });
-      const health = await healthResponse.json().catch(() => null);
-      if (!healthResponse.ok) {
-        return res.status(healthResponse.status).json({
+      const { ok, status, statusText, payload: health } = await fetchOpenCodeVersionPayload();
+      if (!ok) {
+        return res.status(status).json({
           version: null,
-          error: health?.error || healthResponse.statusText || 'Failed to read OpenCode version',
+          error: health?.error || statusText || 'Failed to read OpenCode version',
         });
       }
       const version = typeof health?.version === 'string' ? health.version.replace(/^v/, '') : null;
@@ -789,6 +821,18 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       });
       const hasStoredAuth = authResult.states[providerID]?.configured === true;
       const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
+
+      // v2 track (spine OC2-S3): OpenCode 2 reloads provider config live, so
+      // the save is applied when it lands on disk. The v1 track keeps the
+      // deferred-restart contract.
+      if (v2TrackActive()) {
+        return res.json({
+          providerId: upsertResult.providerId,
+          path: upsertResult.path,
+          config: upsertResult.config,
+          ...buildAppliedResponse('Provider configuration saved.'),
+        });
+      }
       const pendingRestart = markPendingConfigRestart(`provider ${providerID} upserted (${scope})`, {
         scope: 'providers',
         entityId: providerID,
@@ -839,6 +883,17 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       }
 
       let removed = false;
+      if (scope === 'auth' && v2TrackActive()) {
+        // OpenCode 2 owns credentials: it imported `auth.json` once and now
+        // keeps them in its own store behind `/api/credential` (upstream
+        // `654705f7d`). OpenChamber can still remove a provider's CONFIG
+        // (those files are ours), but a credential has to be removed where it
+        // lives. The v1 track keeps the existing auth removal.
+        return res.status(409).json({
+          error: 'OpenCode 2 stores provider credentials itself. Disconnect the provider in Settings, which asks OpenCode to remove it.',
+          code: 'PROVIDER_CREDENTIAL_OWNED_BY_OPENCODE',
+        });
+      }
       if (scope === 'auth') {
         const { removeProviderAuth: removeLegacyProviderAuth } = await getAuthLibrary();
         const result = await removeProviderAuthWithAdapter(providerId, {
@@ -868,6 +923,12 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       }
 
       if (removed) {
+        if (v2TrackActive()) {
+          return res.json({
+            removed,
+            ...buildAppliedResponse('Provider disconnected successfully.'),
+          });
+        }
         const pendingRestart = markPendingConfigRestart(`provider ${providerId} disconnected (${scope})`, {
           scope: 'providers',
           entityId: providerId,
@@ -1000,6 +1061,10 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       }
 
       await fs.promises.writeFile(AGENTS_MD_PATH, content, 'utf8');
+      // v2 track (spine OC2-S3): instructions are watched and reloaded live.
+      if (v2TrackActive()) {
+        return res.json(buildAppliedResponse('AGENTS.md saved.'));
+      }
       const pendingRestart = markPendingConfigRestart('global behavior (AGENTS.md) updated', {
         scope: 'behavior',
         entityId: 'agents-md',

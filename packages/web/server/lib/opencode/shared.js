@@ -3,6 +3,8 @@ import path from 'path';
 import os from 'os';
 import yaml from 'yaml';
 import { parse as parseJsonc, printParseErrorCode } from 'jsonc-parser';
+import { readMcpEntry, readSectionEntry } from './config-v2.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
 
 // ============== PATH CONSTANTS ==============
 
@@ -10,6 +12,23 @@ const OPENCODE_CONFIG_DIR = path.join(
   process.env.XDG_CONFIG_HOME?.trim() || path.join(os.homedir(), '.config'),
   'opencode',
 );
+
+/**
+ * v2-track config discovery (spine OC2-S3, upstream `654705f7d`): OpenCode 2
+ * resolves its global config directory as `OPENCODE_CONFIG_DIR` when set, else
+ * `$XDG_CONFIG_HOME/opencode`, else `~/.config/opencode`. OpenCode 1.x never
+ * reads `OPENCODE_CONFIG_DIR`, so the env is honored only on the v2 track to
+ * keep the fork and the managed binary looking at the same files.
+ */
+const v2TrackActive = () => resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2';
+
+const resolveOpencodeConfigDir = () => {
+  if (v2TrackActive()) {
+    const configured = process.env.OPENCODE_CONFIG_DIR?.trim();
+    if (configured) return path.resolve(configured);
+  }
+  return OPENCODE_CONFIG_DIR;
+};
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const COMMAND_DIR = path.join(OPENCODE_CONFIG_DIR, 'commands');
 const SKILL_DIR = path.join(OPENCODE_CONFIG_DIR, 'skills');
@@ -94,6 +113,17 @@ function writeMdFile(filePath, frontmatter, body) {
 
 function getProjectConfigCandidates(workingDirectory) {
   if (!workingDirectory) return [];
+  if (v2TrackActive()) {
+    // OpenCode 2 lets a file under `.opencode/` override the one beside it at
+    // the project root (upstream `654705f7d`), so the highest-priority file is
+    // the one OpenChamber reads and writes for the project scope.
+    return [
+      path.join(workingDirectory, '.opencode', 'opencode.json'),
+      path.join(workingDirectory, '.opencode', 'opencode.jsonc'),
+      path.join(workingDirectory, 'opencode.json'),
+      path.join(workingDirectory, 'opencode.jsonc'),
+    ];
+  }
   return [
     path.join(workingDirectory, 'opencode.json'),
     path.join(workingDirectory, 'opencode.jsonc'),
@@ -117,12 +147,20 @@ function getProjectConfigPath(workingDirectory) {
 }
 
 function getConfigPaths(workingDirectory) {
+  const configDir = resolveOpencodeConfigDir();
   return {
-    userPaths: [
-      path.join(OPENCODE_CONFIG_DIR, 'config.json'),
-      path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
-      path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
-    ],
+    // OpenCode 2 no longer discovers the v1-era `config.json`, so the v2 track
+    // stops reading and writing it (upstream `654705f7d`).
+    userPaths: v2TrackActive()
+      ? [
+        path.join(configDir, 'opencode.json'),
+        path.join(configDir, 'opencode.jsonc'),
+      ]
+      : [
+        path.join(OPENCODE_CONFIG_DIR, 'config.json'),
+        path.join(OPENCODE_CONFIG_DIR, 'opencode.json'),
+        path.join(OPENCODE_CONFIG_DIR, 'opencode.jsonc'),
+      ],
     projectPath: getProjectConfigPath(workingDirectory),
     // Resolve at call time so OPENCODE_CONFIG changes (and tests) take effect.
     // CUSTOM_CONFIG_FILE (still exported) is a load-time snapshot only.
@@ -139,6 +177,9 @@ function getPrimaryUserConfigPath(userPaths) {
     }
   }
 
+  if (v2TrackActive()) {
+    return path.join(resolveOpencodeConfigDir(), 'opencode.json');
+  }
   return CONFIG_FILE;
 }
 
@@ -328,36 +369,64 @@ function throwIfLayerError(layers, filePath) {
   throw error;
 }
 
+/**
+ * Look one entry up in a config object, accepting both OpenCode 2 section keys
+ * (`agents`/`commands`/`providers`, `mcp.servers`) and the v1 keys v2 still
+ * decodes (`agent`/`command`/`provider`, flat `mcp`). `sectionKind` is
+ * `agents`, `commands`, `providers`, or `mcp`. Returns the section key the
+ * entry was found under so writers can rewrite the same file in place.
+ */
+function lookupSectionEntry(config, sectionKind, entryName) {
+  if (sectionKind === 'mcp') {
+    return readMcpEntry(config, entryName);
+  }
+  return readSectionEntry(config, sectionKind, entryName);
+}
+
 function getJsonEntrySource(layers, sectionKey, entryName) {
   const { userConfig, userOverrideConfig, projectConfig, customConfig, paths } = layers;
+  // On the v2 track an entry may live under either spelling; look both up and
+  // report where it was found so the v2 writer can rewrite it in place.
+  const findEntry = v2TrackActive()
+    ? (config, filePath) => {
+      const entry = lookupSectionEntry(config, sectionKey, entryName);
+      if (entry.value === undefined) return null;
+      return {
+        section: entry.value,
+        config,
+        path: filePath,
+        exists: true,
+        sectionKey: entry.key,
+        legacy: entry.legacy,
+      };
+    }
+    : (config, filePath) => {
+      const section = config?.[sectionKey]?.[entryName];
+      return section !== undefined
+        ? { section, config, path: filePath, exists: true }
+        : null;
+    };
+
   if (paths.customPath) {
     throwIfLayerError(layers, paths.customPath);
-    const customSection = customConfig?.[sectionKey]?.[entryName];
-    if (customSection !== undefined) {
-      return { section: customSection, config: customConfig, path: paths.customPath, exists: true };
-    }
+    const custom = findEntry(customConfig, paths.customPath);
+    if (custom) return custom;
   }
 
   if (paths.projectPath && !getLayerError(layers, paths.projectPath)) {
-    const projectSection = projectConfig?.[sectionKey]?.[entryName];
-    if (projectSection !== undefined) {
-      return { section: projectSection, config: projectConfig, path: paths.projectPath, exists: true };
-    }
+    const project = findEntry(projectConfig, paths.projectPath);
+    if (project) return project;
   }
 
   if (paths.userOverridePath) {
     throwIfLayerError(layers, paths.userOverridePath);
-    const userOverrideSection = userOverrideConfig?.[sectionKey]?.[entryName];
-    if (userOverrideSection !== undefined) {
-      return { section: userOverrideSection, config: userOverrideConfig, path: paths.userOverridePath, exists: true };
-    }
+    const userOverride = findEntry(userOverrideConfig, paths.userOverridePath);
+    if (userOverride) return userOverride;
   }
 
   throwIfLayerError(layers, paths.userPath);
-  const userSection = userConfig?.[sectionKey]?.[entryName];
-  if (userSection !== undefined) {
-    return { section: userSection, config: userConfig, path: paths.userPath, exists: true };
-  }
+  const user = findEntry(userConfig, paths.userPath);
+  if (user) return user;
 
   return { section: null, config: null, path: null, exists: false };
 }
@@ -674,6 +743,7 @@ export {
   readConfig,
   getConfigForPath,
   writeConfig,
+  lookupSectionEntry,
   getJsonEntrySource,
   getJsonWriteTarget,
   getAncestors,

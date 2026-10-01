@@ -133,7 +133,67 @@ const runCachedGitRead = async (key, ttlMs, task) => {
   return promise;
 };
 
-export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
+import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from '../opencode/protocol-mode.js';
+
+// A removal should not hang on an unresponsive OpenCode server: disposal is
+// best-effort and `removeWorktree` swallows its failure.
+const WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS = 5_000;
+
+const formatOpenCodeDisposalError = (error) => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (error?.data?.message) {
+    return error.data.message;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'OpenCode instance disposal failed';
+  }
+};
+
+/**
+ * Builds the best-effort disposal hook handed to `removeWorktree` (upstream
+ * `0a19aa804` + `309ddc2b1`, spine OC2-S3). The URL and auth headers are route
+ * dependencies, so this module never resolves the OpenCode runtime itself, and
+ * both are read at call time.
+ *
+ * Dual-track: OpenCode 1.x exposes `POST /instance/dispose` through the
+ * bundled SDK; OpenCode 2.x has no instance route — evicting the location
+ * (`DELETE /api/debug/location`) drops its cached services (file watchers,
+ * LSP, MCP), which is what held the worktree folder. The eviction is a plain
+ * fetch so the request shape cannot drift with the `@opencode/client` pin.
+ */
+const createWorktreeInstanceDisposer = ({ buildOpenCodeUrl, getOpenCodeAuthHeaders }) => {
+  return async (worktreeDirectory) => {
+    const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
+    if (resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2') {
+      const url = new URL(`${baseUrl}/api/debug/location`);
+      url.searchParams.set('location[directory]', worktreeDirectory);
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        throw new Error(`OpenCode location eviction failed with HTTP ${response.status}`);
+      }
+      return;
+    }
+    const client = createOpencodeClient({ baseUrl, headers: getOpenCodeAuthHeaders() });
+    const result = await client.instance.dispose(
+      { directory: worktreeDirectory },
+      { signal: AbortSignal.timeout(WORKTREE_INSTANCE_DISPOSE_TIMEOUT_MS) }
+    );
+    if (result?.error) {
+      throw new Error(formatOpenCodeDisposalError(result.error));
+    }
+  };
+};
+
+export function registerGitRoutes(app, { emitWorktreeChanged, buildOpenCodeUrl, getOpenCodeAuthHeaders } = {}) {
   let gitLibraries = null;
   const getGitLibraries = async () => {
     if (!gitLibraries) {
@@ -166,6 +226,8 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
   };
 
   const isNonRepoGitError = (error) => /not a git repository/i.test(extractGitErrorText(error));
+
+  const canDisposeWorktreeInstance = Boolean(buildOpenCodeUrl && getOpenCodeAuthHeaders);
 
   const nonRepoStatusPayload = () => ({
     isGitRepository: false,
@@ -1266,6 +1328,9 @@ export function registerGitRoutes(app, { emitWorktreeChanged } = {}) {
       const result = await removeWorktree(directory, {
         directory: worktreeDirectory,
         deleteLocalBranch: req.body?.deleteLocalBranch === true,
+        disposeInstance: canDisposeWorktreeInstance
+          ? createWorktreeInstanceDisposer({ buildOpenCodeUrl, getOpenCodeAuthHeaders })
+          : undefined,
       });
       res.json({ success: Boolean(result) });
     } catch (error) {

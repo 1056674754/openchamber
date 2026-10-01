@@ -365,4 +365,40 @@ describe('OpenCode env runtime', () => {
       wrapperType: 'cmd-wrapper',
     });
   });
+
+  it('resolves an npm-installed OpenCode 2.x cmd shim to its packaged Windows executable', () => {
+    setPlatform('win32');
+    const npmDir = createTempDir('openchamber-opencode-npm-v2-');
+    const shim = path.join(npmDir, 'opencode.cmd');
+    const nativeBinary = path.join(npmDir, 'node_modules', '@opencode', 'cli', 'bin', 'opencode.exe');
+    fs.mkdirSync(path.dirname(nativeBinary), { recursive: true });
+    fs.writeFileSync(nativeBinary, '');
+    fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe" %*\r\n');
+    const { runtime } = createRuntime({});
+
+    expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({
+      binary: nativeBinary,
+      args: [],
+      wrapperType: 'native-wrapper',
+    });
+  });
+
+  it('still resolves a 1.x npm cmd shim to its packaged Windows executable', () => {
+    setPlatform('win32');
+    const npmDir = createTempDir('openchamber-opencode-npm-v1-');
+    const shim = path.join(npmDir, 'opencode.cmd');
+    // The 1.x shim launches its own package's bin shim, which postinstall
+    // replaced with the platform binary — arch-independent path.
+    const nativeBinary = path.join(npmDir, 'node_modules', 'opencode-ai', 'bin', 'opencode.exe');
+    fs.mkdirSync(path.dirname(nativeBinary), { recursive: true });
+    fs.writeFileSync(nativeBinary, '');
+    fs.writeFileSync(shim, '@ECHO off\r\n"%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe" %*\r\n');
+    const { runtime } = createRuntime({});
+
+    expect(runtime.resolveManagedOpenCodeLaunchSpec(shim)).toEqual({
+      binary: nativeBinary,
+      args: [],
+      wrapperType: 'native-wrapper',
+    });
+  });
 });

@@ -9,6 +9,8 @@ import {
   getJsonWriteTarget,
   writeConfig,
 } from './shared.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
+import { deleteMcpEntry, toMcpEntity, writeMcpEntry } from './config-v2.js';
 
 // ============== MCP CONFIG HELPERS ==============
 
@@ -40,8 +42,42 @@ function ensureProjectMcpConfigPath(workingDirectory) {
   return path.join(configDir, 'opencode.json');
 }
 
+// The v2 track (spine OC2-S3) answers in the canonical v2 entry shape and
+// reports where an entry lives; the v1 track keeps its exact response shape.
+const v2TrackActive = () => resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2';
+
+function readMcpEntriesAcrossLayers(layers) {
+  const result = new Map();
+  for (const config of [layers?.userConfig, layers?.userOverrideConfig, layers?.projectConfig, layers?.customConfig]) {
+    const mcp = config && typeof config === 'object' && !Array.isArray(config) ? config.mcp : null;
+    if (!mcp || typeof mcp !== 'object' || Array.isArray(mcp)) continue;
+    for (const [name, value] of Object.entries(mcp)) {
+      if (name === 'servers' || name === 'timeout' || !isMcpServerValue(value)) continue;
+      result.set(name, value);
+    }
+  }
+  return result;
+}
+
+const isMcpServerValue = (value) => (
+  value && typeof value === 'object' && !Array.isArray(value)
+  && (value.type === 'local' || value.type === 'remote')
+);
+
 function listMcpConfigs(workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
+  if (v2TrackActive()) {
+    return Array.from(readMcpEntriesAcrossLayers(layers).entries()).map(([name, value]) => {
+      const source = getJsonEntrySource(layers, 'mcp', name);
+      return {
+        name,
+        ...toMcpEntity(value),
+        scope: resolveMcpScopeFromPath(layers, source.path),
+        sectionKey: source.sectionKey,
+        legacy: Boolean(source.legacy),
+      };
+    });
+  }
   const mcp = layers?.mergedConfig?.mcp || {};
 
   return Object.entries(mcp)
@@ -61,6 +97,18 @@ function listMcpConfigs(workingDirectory) {
  */
 function getMcpConfig(name, workingDirectory) {
   const layers = readConfigLayers(workingDirectory);
+  if (v2TrackActive()) {
+    const entry = readMcpEntriesAcrossLayers(layers).get(name);
+    if (!entry) return null;
+    const source = getJsonEntrySource(layers, 'mcp', name);
+    return {
+      name,
+      ...toMcpEntity(entry),
+      scope: resolveMcpScopeFromPath(layers, source.path),
+      sectionKey: source.sectionKey,
+      legacy: Boolean(source.legacy),
+    };
+  }
   const entry = layers?.mergedConfig?.mcp?.[name];
 
   if (!entry) {
@@ -105,11 +153,18 @@ function createMcpConfig(name, mcpConfig, workingDirectory, scope) {
     config.mcp = {};
   }
 
-  const { name: _ignoredName, ...entryData } = mcpConfig;
-  config.mcp[name] = buildMcpEntry(entryData);
+  const { name: _ignoredName, scope: _ignoredScope, ...entryData } = mcpConfig;
+  if (v2TrackActive()) {
+    // v2 keeps servers at `mcp.servers` in the canonical entry shape
+    // (upstream `654705f7d`); a name still stored under the v1 key moves over.
+    writeMcpEntry(config, name, toMcpEntity(entryData));
+  } else {
+    config.mcp[name] = buildMcpEntry(entryData);
+  }
 
   writeConfig(config, targetPath);
   console.log(`Created MCP server config: ${name}`);
+  return { path: targetPath };
 }
 
 /**
@@ -130,13 +185,20 @@ function updateMcpConfig(name, updates, workingDirectory) {
     config.mcp = {};
   }
 
-  const existing = config.mcp[name];
-  const { name: _ignoredName, ...updateData } = updates;
-
-  config.mcp[name] = buildMcpEntry({ ...existing, ...updateData });
+  const { name: _ignoredName, scope: _ignoredScope, ...updateData } = updates;
+  if (v2TrackActive()) {
+    // A server still stored under the v1 `mcp.<name>` key is rewritten into
+    // `mcp.servers` in the same file (upstream `654705f7d`).
+    const existing = toMcpEntity(source.section);
+    writeMcpEntry(config, name, toMcpEntity({ ...existing, ...updateData }));
+  } else {
+    const existing = config.mcp[name];
+    config.mcp[name] = buildMcpEntry({ ...existing, ...updateData });
+  }
 
   writeConfig(config, targetPath);
   console.log(`Updated MCP server config: ${name}`);
+  return { path: targetPath };
 }
 
 /**
@@ -147,6 +209,15 @@ function deleteMcpConfig(name, workingDirectory) {
   const source = getJsonEntrySource(layers, 'mcp', name);
   const targetPath = source.path || CONFIG_FILE;
   const config = source.config || (fs.existsSync(targetPath) ? readConfigFile(targetPath) : {});
+
+  if (v2TrackActive()) {
+    if (!deleteMcpEntry(config, name)) {
+      throw new Error(`MCP server "${name}" not found`);
+    }
+    writeConfig(config, targetPath);
+    console.log(`Deleted MCP server config: ${name}`);
+    return { path: targetPath };
+  }
 
   if (!config.mcp || typeof config.mcp !== 'object' || config.mcp[name] === undefined) {
     throw new Error(`MCP server "${name}" not found`);
@@ -160,6 +231,7 @@ function deleteMcpConfig(name, workingDirectory) {
 
   writeConfig(config, targetPath);
   console.log(`Deleted MCP server config: ${name}`);
+  return { path: targetPath };
 }
 
 /**

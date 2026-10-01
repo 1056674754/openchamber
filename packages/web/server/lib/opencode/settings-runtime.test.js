@@ -38,6 +38,37 @@ const createRuntime = async ({ mergePersistedSettings = (current, changes) => ({
   };
 };
 
+const createRuntimeWithManagedPluginHook = async (onManagedPluginSettingsChanged) => {
+  const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
+  const settingsFilePath = path.join(tempRoot, 'settings.json');
+  const runtime = createSettingsRuntime({
+    fsPromises,
+    path,
+    crypto,
+    SETTINGS_FILE_PATH: settingsFilePath,
+    sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
+    sanitizeSettingsUpdate: (settings) => settings,
+    mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+    normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
+    normalizeStringArray: (values) => Array.isArray(values) ? values.filter((value) => typeof value === 'string') : [],
+    formatSettingsResponse: (settings) => settings,
+    resolveDirectoryCandidate: (value) => value,
+    normalizeManagedRemoteTunnelHostname: (value) => value,
+    normalizeManagedRemoteTunnelPresets: (value) => value,
+    normalizeManagedRemoteTunnelPresetTokens: (value) => value,
+    syncManagedRemoteTunnelConfigWithPresets: async () => {},
+    upsertManagedRemoteTunnelToken: async () => {},
+    onManagedPluginSettingsChanged,
+  });
+
+  return {
+    runtime,
+    cleanup: async () => {
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    },
+  };
+};
+
 describe('settings runtime', () => {
   it('only remaps project plan paths within the migrated storage directory', async () => {
     const { runtime, settingsFilePath, tempRoot, cleanup } = await createRuntime();
@@ -396,6 +427,39 @@ describe('settings runtime: per-surface profile keys', () => {
       await expect(runtime.readSettingsFromDisk({ surface: 'mobile' })).resolves.toMatchObject({ fontSize: 130 });
       await expect(runtime.readSettingsFromDisk()).resolves.toMatchObject({ fontSize: 100, showReasoningTraces: false });
     } finally {
+      await cleanup();
+    }
+  });
+});
+
+describe('settings runtime: managed plugin settings hook', () => {
+  it('refreshes the managed config when a managed-plugin setting changes', async () => {
+    const onManagedPluginSettingsChanged = vi.fn(async () => {});
+    const { runtime, cleanup } = await createRuntimeWithManagedPluginHook(onManagedPluginSettingsChanged);
+    try {
+      await runtime.persistSettings({ agentWebToolEnabled: false });
+      expect(onManagedPluginSettingsChanged).toHaveBeenCalledTimes(1);
+
+      // An unrelated key never triggers the hook.
+      await runtime.persistSettings({ fontSize: 130 });
+      expect(onManagedPluginSettingsChanged).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps persisting when the hook fails', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onManagedPluginSettingsChanged = vi.fn(async () => {
+      throw new Error('managed config write failed');
+    });
+    const { runtime, cleanup } = await createRuntimeWithManagedPluginHook(onManagedPluginSettingsChanged);
+    try {
+      await runtime.persistSettings({ agentMemoryToolEnabled: true });
+      expect(onManagedPluginSettingsChanged).toHaveBeenCalledTimes(1);
+      await expect(runtime.readSettingsFromDisk()).resolves.toMatchObject({ agentMemoryToolEnabled: true });
+    } finally {
+      warnSpy.mockRestore();
       await cleanup();
     }
   });

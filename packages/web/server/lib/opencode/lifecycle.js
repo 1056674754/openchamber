@@ -3,6 +3,8 @@ import net from 'node:net';
 import { stripAppImageArgv0Leak } from '../inherited-env.js';
 import { finalizeInterruptedOpenCodeRuns } from './interrupted-runs.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, recordProtocolModeFromVersion, resolveProtocolMode } from './protocol-mode.js';
+import { topUpV1Migration } from './v1-migration-topup.js';
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -25,6 +27,10 @@ const STARTUP_TIMEOUT_MS = parsePositiveInt(
   30000
 );
 const OPENCODE_HEALTH_PATH = '/global/health';
+// v2-track readiness path (spine OC2-S3): OpenCode 2.0.8 removed
+// `/global/health`; `GET /api/info` answering 200 is the whole readiness
+// answer, and its payload carries `{ version, pid, urls, paths }`.
+const OPENCODE_V2_INFO_PATH = '/api/info';
 const MANAGED_STDERR_TAIL_MAX_BYTES = 32 * 1024;
 const HEALTH_FAILURE_DETAIL_MAX_LENGTH = 1000;
 
@@ -99,6 +105,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     onOpenCodeRestarted = null,
     now = Date.now,
     startupTimeoutMs = STARTUP_TIMEOUT_MS,
+    topUpV1SessionMigration = topUpV1Migration,
   } = deps;
 
   const listListeningProcessIds = (port) => {
@@ -497,14 +504,24 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         stdout += chunk.toString();
         const lines = stdout.split('\n');
         for (const line of lines) {
-          if (!line.startsWith('opencode server listening')) continue;
-          const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
-          if (!match) {
-            finish(reject, new Error(`Failed to parse server url from output: ${line}`));
+          // v1 prints `opencode server listening on <url>`; OpenCode 2.x drops
+          // the `opencode` prefix (upstream 654705f7d). The v1 form is matched
+          // first so its malformed-line error is preserved exactly, then the
+          // unprefixed v2 form resolves the same URL.
+          if (line.startsWith('opencode server listening')) {
+            const match = line.match(/on\s+(https?:\/\/[^\s]+)/);
+            if (!match) {
+              finish(reject, new Error(`Failed to parse server url from output: ${line}`));
+              return;
+            }
+            finish(resolve, match[1]);
             return;
           }
-          finish(resolve, match[1]);
-          return;
+          const v2Match = line.match(/server listening on\s+(https?:\/\/\S+)/);
+          if (v2Match) {
+            finish(resolve, v2Match[1]);
+            return;
+          }
         }
       };
 
@@ -615,11 +632,58 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     });
   };
 
+  /**
+   * v2-track readiness probe: a 200 from `/api/info` is the whole answer, and
+   * its `version` records the protocol mode. Returns `{ matched: false }` when
+   * the server does not answer, so callers keep their v1 failure detail
+   * verbatim.
+   */
+  const probeOpenCodeInfo = async () => {
+    try {
+      const response = await fetch(buildOpenCodeUrl(OPENCODE_V2_INFO_PATH, ''), {
+        method: 'GET',
+        headers: {
+          Accept: 'application/json',
+          ...getOpenCodeAuthHeaders(),
+        },
+        signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        return { matched: false, status: response.status };
+      }
+      const body = await response.json().catch(() => null);
+      if (typeof body?.version === 'string' && body.version.trim()) {
+        recordProtocolModeFromVersion(DEFAULT_PROTOCOL_MODE_SERVER_ID, body.version.trim(), 'info-probe');
+      }
+      return { matched: true, healthy: true, failure: null };
+    } catch {
+      return { matched: false, status: null };
+    }
+  };
+
+  const v2TrackActive = () => resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2';
+
   const probeOpenCodeHealthDetailed = async () => {
     if (!state.openCodePort || (!state.openCodeProcess && state.isExternalOpenCode)) {
       return {
         healthy: false,
         failure: { class: 'error', detail: 'Managed OpenCode process or port is unavailable' },
+      };
+    }
+
+    // A recorded v2 instance never had `/global/health`; probe `/api/info`
+    // directly. Every other resolution (v1 default, env override) keeps the
+    // v1 probe first and falls back once it fails, so a v1 server's outcome
+    // and failure detail are unchanged.
+    if (v2TrackActive()) {
+      const v2 = await probeOpenCodeInfo();
+      if (v2.matched) return { healthy: true, failure: null };
+      return {
+        healthy: false,
+        failure: {
+          class: 'invalid_response',
+          detail: `Info endpoint returned HTTP ${v2.status ?? 'unknown'}`,
+        },
       };
     }
 
@@ -633,6 +697,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
       });
       if (!response.ok) {
+        if ((await probeOpenCodeInfo()).matched) return { healthy: true, failure: null };
         return {
           healthy: false,
           failure: { class: 'invalid_response', detail: `Health endpoint returned HTTP ${response.status ?? 'unknown'}` },
@@ -642,16 +707,21 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       try {
         body = await response.json();
       } catch {
+        if ((await probeOpenCodeInfo()).matched) return { healthy: true, failure: null };
         return {
           healthy: false,
           failure: { class: 'invalid_response', detail: 'Health endpoint returned invalid JSON' },
         };
       }
       if (body?.healthy !== true) {
+        if ((await probeOpenCodeInfo()).matched) return { healthy: true, failure: null };
         return {
           healthy: false,
           failure: { class: 'invalid_response', detail: 'Health endpoint did not report healthy=true' },
         };
+      }
+      if (typeof body?.version === 'string' && body.version.trim()) {
+        recordProtocolModeFromVersion(DEFAULT_PROTOCOL_MODE_SERVER_ID, body.version.trim(), 'health-probe');
       }
       return { healthy: true, failure: null };
     } catch (error) {
@@ -688,9 +758,36 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         signal: controller.signal,
       });
       clearTimeout(timeout);
-      if (!response.ok) return false;
-      const body = await response.json().catch(() => null);
-      return body?.healthy === true;
+      if (response.ok) {
+        const body = await response.json().catch(() => null);
+        if (body?.healthy === true) {
+          if (typeof body?.version === 'string' && body.version.trim()) {
+            recordProtocolModeFromVersion(DEFAULT_PROTOCOL_MODE_SERVER_ID, body.version.trim(), 'external-health');
+          }
+          return true;
+        }
+      } else if (v2TrackActive() || response.status === 404) {
+        // OpenCode 2.x has no `/global/health`; a 200 from `/api/info` is the
+        // readiness answer (spine OC2-S3). A 404 from the v1 probe is the only
+        // cheap hint that the upstream might be 2.x, so only then spend the
+        // extra request.
+        const infoResponse = await fetch(`${base.replace(/\/+$/, '')}${OPENCODE_V2_INFO_PATH}`, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            ...getOpenCodeAuthHeaders(),
+          },
+          signal: controller.signal,
+        });
+        if (infoResponse.ok) {
+          const info = await infoResponse.json().catch(() => null);
+          if (typeof info?.version === 'string' && info.version.trim()) {
+            recordProtocolModeFromVersion(DEFAULT_PROTOCOL_MODE_SERVER_ID, info.version.trim(), 'external-info');
+          }
+          return true;
+        }
+      }
+      return false;
     } catch {
       return false;
     }
@@ -751,6 +848,11 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           ...process.env,
           ...managedOpenCodeEnv,
           PATH: envPath,
+          // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
+          // user's own OPENCODE_PASSWORD would otherwise win and every request
+          // we send with openCodePassword would get 401 (upstream 8dd842a3b).
+          // OpenCode 1.x ignores the variable, so v1 behaviour is unchanged.
+          OPENCODE_PASSWORD: openCodePassword,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
         })),
       });
@@ -797,6 +899,22 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   const startOpenCode = async () => {
+    // Re-arm OpenCode's own V1 -> V2 session import for sessions a bundled
+    // OpenCode 1.x created after the migration already completed (upstream
+    // `654705f7d` + `ee99e079d`). Managed process only, before spawn, never
+    // fatal: the module self-guards by skipping databases without a completed
+    // v2 migration, so a pure v1 install is untouched.
+    if (!state.isExternalOpenCode && !state.isShuttingDown) {
+      try {
+        const topUp = topUpV1SessionMigration();
+        if (topUp && topUp.status !== 'skipped') {
+          console.log('[OpenCode] V1 session migration top-up:', topUp);
+        }
+      } catch (error) {
+        console.warn('[OpenCode] V1 session migration top-up failed:', error instanceof Error ? error.message : error);
+      }
+    }
+
     let lastError = null;
     for (let attempt = 1; attempt <= START_OPEN_CODE_MAX_ATTEMPTS; attempt += 1) {
       try {
@@ -983,6 +1101,14 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout = null;
 
         if (!response.ok) {
+          // v2 fallback (spine OC2-S3): OpenCode 2.x has no `/global/health`;
+          // a 200 from `/api/info` means ready, and its version records the
+          // mode. The v1 error text is kept when the fallback also fails.
+          if ((await probeOpenCodeInfo()).matched) {
+            state.isOpenCodeReady = true;
+            state.lastOpenCodeError = null;
+            return;
+          }
           lastError = new Error(`OpenCode health endpoint responded with status ${response.status}`);
           await new Promise((resolve) => setTimeout(resolve, intervalMs));
           continue;
@@ -990,11 +1116,19 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
 
         const body = await response.json().catch(() => null);
         if (body?.healthy !== true) {
+          if ((await probeOpenCodeInfo()).matched) {
+            state.isOpenCodeReady = true;
+            state.lastOpenCodeError = null;
+            return;
+          }
           lastError = new Error('OpenCode health endpoint returned unhealthy response');
           await new Promise((resolve) => setTimeout(resolve, intervalMs));
           continue;
         }
 
+        if (typeof body?.version === 'string' && body.version.trim()) {
+          recordProtocolModeFromVersion(DEFAULT_PROTOCOL_MODE_SERVER_ID, body.version.trim(), 'ready-wait');
+        }
         state.isOpenCodeReady = true;
         state.lastOpenCodeError = null;
         return;
@@ -1025,17 +1159,28 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     }
 
     const deadline = Date.now() + timeoutMs;
+    // v2 track (upstream 654705f7d): `/api/agent` answers `{ location, data }`
+    // and names agents `id`. The v1 request shape is untouched.
+    const v2Track = resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2';
     while (Date.now() < deadline) {
       try {
-        const response = await fetch(buildOpenCodeUrl('/agent'), {
+        const response = await fetch(buildOpenCodeUrl(v2Track ? '/api/agent' : '/agent'), {
           method: 'GET',
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
         });
 
         if (response.ok) {
-          const agents = await response.json();
-          if (Array.isArray(agents) && agents.some((agent) => agent?.name === agentName)) {
-            return;
+          if (v2Track) {
+            const body = await response.json();
+            const agents = Array.isArray(body) ? body : body?.data;
+            if (Array.isArray(agents) && agents.some((agent) => agent?.id === agentName)) {
+              return;
+            }
+          } else {
+            const agents = await response.json();
+            if (Array.isArray(agents) && agents.some((agent) => agent?.name === agentName)) {
+              return;
+            }
           }
         }
       } catch {

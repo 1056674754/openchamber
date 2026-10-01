@@ -642,14 +642,36 @@ export const createOpenCodeEnvRuntime = (deps) => {
     return isExecutable(trimmed) ? trimmed : null;
   };
 
+  // Dual npm layout resolution (spine OC2-S3, upstream `654705f7d`):
+  // OpenCode 2.x publishes as `@opencode/cli` with `@opencode/cli-<platform>`
+  // optional dependencies; 1.x used `opencode-ai` / `opencode-<platform>`. The
+  // 1.x names stay in every candidate list so a 1.x-only install keeps
+  // resolving exactly as before.
+  const WINDOWS_X64_NATIVE_PACKAGES = [
+    path.join('@opencode', 'cli-windows-x64-baseline'),
+    path.join('@opencode', 'cli-windows-x64'),
+    'opencode-windows-x64-baseline',
+    'opencode-windows-x64',
+  ];
+  const WINDOWS_ARM64_NATIVE_PACKAGES = [
+    path.join('@opencode', 'cli-windows-arm64'),
+    'opencode-windows-arm64',
+  ];
+
+  // An npm-installed OpenCode lives under one of these package directories:
+  // `@opencode/cli` (OpenCode 2.x) or `opencode-ai` (1.x). Both ship a
+  // `bin/opencode(.exe)` that postinstall replaces with the platform binary
+  // from the matching optional dependency.
+  const OPENCODE_NPM_PACKAGE_DIRS = [path.join('@opencode', 'cli'), 'opencode-ai'];
+
   const getWindowsNativeOpencodePackageNames = () => {
     if (process.arch === 'arm64') {
-      return ['opencode-windows-arm64'];
+      return WINDOWS_ARM64_NATIVE_PACKAGES;
     }
     if (process.arch === 'x64') {
       // Prefer the baseline build when bypassing package-manager wrappers so the
       // direct binary still runs on hosts without AVX2 support.
-      return ['opencode-windows-x64-baseline', 'opencode-windows-x64'];
+      return WINDOWS_X64_NATIVE_PACKAGES;
     }
     return [];
   };
@@ -659,15 +681,18 @@ export const createOpenCodeEnvRuntime = (deps) => {
       return null;
     }
 
-    const packageShim = path.join(nodeModulesDir, 'opencode-ai', 'bin', 'opencode.exe');
-    if (isExecutable(packageShim)) {
-      return packageShim;
+    for (const packageDir of OPENCODE_NPM_PACKAGE_DIRS) {
+      const packageShim = path.join(nodeModulesDir, packageDir, 'bin', 'opencode.exe');
+      if (isExecutable(packageShim)) {
+        return packageShim;
+      }
     }
 
     for (const packageName of getWindowsNativeOpencodePackageNames()) {
       const candidates = [
         path.join(nodeModulesDir, packageName, 'bin', 'opencode.exe'),
-        path.join(nodeModulesDir, 'opencode-ai', 'node_modules', packageName, 'bin', 'opencode.exe'),
+        ...OPENCODE_NPM_PACKAGE_DIRS.map((packageDir) =>
+          path.join(nodeModulesDir, packageDir, 'node_modules', packageName, 'bin', 'opencode.exe')),
       ];
     for (const candidate of candidates) {
         if (isExecutable(candidate)) {
@@ -704,13 +729,18 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     try {
       const content = fs.readFileSync(wrapperPath, 'utf8');
-      const launcherMatch = content.match(/node_modules[\\/]+opencode-ai[\\/]+bin[\\/]+opencode/i);
+      const launcherMatch = content.match(/node_modules[\\/]+(?:@opencode[\\/]+cli|opencode-ai)[\\/]+bin[\\/]+opencode/i);
       if (!launcherMatch) {
         return null;
       }
 
       const launcherPath = path.resolve(path.dirname(wrapperPath), launcherMatch[0].replace(/[\\/]+/g, path.sep));
-      return path.dirname(path.dirname(path.dirname(launcherPath)));
+      // Walk back up to `node_modules`: past `bin`, the package directory and,
+      // for the scoped 2.x package, its scope.
+      const depth = /[\\/]@opencode[\\/]/i.test(launcherMatch[0]) ? 4 : 3;
+      let nodeModulesDir = launcherPath;
+      for (let index = 0; index < depth; index += 1) nodeModulesDir = path.dirname(nodeModulesDir);
+      return nodeModulesDir;
     } catch {
       return null;
     }
@@ -748,6 +778,13 @@ export const createOpenCodeEnvRuntime = (deps) => {
 
     if (lower.endsWith(`${path.sep}node_modules${path.sep}opencode-ai${path.sep}bin${path.sep}opencode`)) {
       pushCandidate(path.dirname(path.dirname(fileDir)));
+    }
+
+    // OpenCode 2.x scoped npm layout: `node_modules/@opencode/cli/bin/opencode`
+    // (spine OC2-S3).
+    if (lower.endsWith(`${path.sep}node_modules${path.sep}@opencode${path.sep}cli${path.sep}bin${path.sep}opencode`)
+      || lower.endsWith(`${path.sep}node_modules${path.sep}@opencode${path.sep}cli${path.sep}bin${path.sep}opencode.exe`)) {
+      pushCandidate(path.dirname(path.dirname(path.dirname(fileDir))));
     }
 
     if (path.basename(fileDir).toLowerCase() === 'npm') {

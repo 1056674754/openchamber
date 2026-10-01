@@ -378,6 +378,8 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: builtInExtensionsDir });
     registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService });
     registerGitRoutes(app, {
+      buildOpenCodeUrl,
+      getOpenCodeAuthHeaders,
       emitWorktreeChanged: ({ directories, at }) => {
         const clients = getOpenChamberEventClients();
         for (const client of clients) {

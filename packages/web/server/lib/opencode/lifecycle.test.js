@@ -13,7 +13,8 @@ const finalizeInterruptedOpenCodeRunsMock = vi.fn(() => ({
   updatedMessages: 0,
 }));
 
-vi.mock('node:child_process', () => ({
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...(await importOriginal()),
   spawn: spawnMock,
   spawnSync: spawnSyncMock,
 }));
@@ -132,6 +133,8 @@ const createRuntime = (overrides = {}) => {
       SHELL_ONLY: 'yes',
       OPENCODE_SERVER_PASSWORD: 'shell-password',
     })),
+    // Never let a test touch the real `~/.local/share/opencode/opencode.db`.
+    topUpV1SessionMigration: vi.fn(() => ({ status: 'skipped', missing: 0, revisited: 0, reason: 'no-database' })),
     persistManagedOpenCodeAuth: vi.fn(),
     restoreManagedOpenCodeAuth: vi.fn(() => false),
     ...dependencyOverrides,
@@ -476,6 +479,10 @@ describe('OpenCode lifecycle', () => {
       if (text.includes('/global/health')) {
         return { ok: false, json: async () => ({ healthy: false }) };
       }
+      if (text.includes('/api/info')) {
+        // No v2 upstream in this scenario: the fallback probe must fail too.
+        return { ok: false, json: async () => ({}) };
+      }
       return { ok: true, json: async () => ({}) };
     });
 
@@ -576,6 +583,10 @@ describe('OpenCode lifecycle', () => {
           ok: previousManagedPortHealthy,
           json: async () => ({ healthy: previousManagedPortHealthy }),
         };
+      }
+      if (text.includes('/api/info')) {
+        // No v2 upstream in this scenario: the fallback probe must fail too.
+        return { ok: false, json: async () => ({}) };
       }
       return { ok: true, json: async () => ({}) };
     });
@@ -941,5 +952,98 @@ describe('OpenCode lifecycle', () => {
 
     connectSpy.mockRestore();
     vi.useRealTimers();
+  });
+
+  it('tops up the v1 session migration before spawning managed OpenCode', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const calls = [];
+    const topUpV1SessionMigration = vi.fn(() => {
+      calls.push('top-up');
+      return { status: 'scheduled', missing: 3, revisited: 0 };
+    });
+    const child = createMockChild();
+    spawnMock.mockImplementation(() => {
+      calls.push('spawn');
+      const spawned = createMockChild();
+      queueMicrotask(() => spawned.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return spawned;
+    });
+    globalThis.fetch = vi.fn(async () => ({ ok: false, json: async () => ({}) }));
+
+    const runtime = createRuntime({ topUpV1SessionMigration });
+    await runtime.startOpenCode();
+
+    expect(topUpV1SessionMigration).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual(['top-up', 'spawn']);
+  });
+
+  it('records the protocol mode from the v1 health payload without changing readiness', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const { resetProtocolModes, getStoredProtocolModeEntry } = await import('./protocol-mode.js');
+    resetProtocolModes();
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => child.stdout.emit('data', 'opencode server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes('/global/health')) {
+        return { ok: true, json: async () => ({ healthy: true, version: '1.18.31' }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+
+    const runtime = createRuntime({});
+    await runtime.startOpenCode();
+    await runtime.triggerHealthCheck();
+
+    expect(runtime.testState.isOpenCodeReady).toBe(true);
+    expect(getStoredProtocolModeEntry('default')?.mode).toBe('v1');
+    expect(getStoredProtocolModeEntry('default')?.version).toBe('1.18.31');
+    resetProtocolModes();
+  });
+
+  it('answers readiness from /api/info on the v2 track and records its version', async () => {
+    delete process.env.OPENCODE_BINARY;
+    process.env.OPENCHAMBER_PROTOCOL_MODE = 'v2';
+    const { resetProtocolModes, getStoredProtocolModeEntry } = await import('./protocol-mode.js');
+    resetProtocolModes();
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes('/api/info')) {
+        return { ok: true, json: async () => ({ version: '2.0.14', pid: 1 }) };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+
+    const runtime = createRuntime({});
+    runtime.testState.openCodePort = 45678;
+    await runtime.waitForOpenCodeReady(2000, 50);
+
+    expect(runtime.testState.isOpenCodeReady).toBe(true);
+    expect(getStoredProtocolModeEntry('default')?.mode).toBe('v2');
+    expect(getStoredProtocolModeEntry('default')?.version).toBe('2.0.14');
+    resetProtocolModes();
+    delete process.env.OPENCHAMBER_PROTOCOL_MODE;
+  });
+
+  it('accepts an OpenCode 2.x child that prints its listening URL without the opencode prefix', async () => {
+    delete process.env.OPENCODE_BINARY;
+    const child = createMockChild();
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => child.stdout.emit('data', 'server listening on http://127.0.0.1:45678\n'));
+      return child;
+    });
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url).includes('/api/info')) {
+        return { ok: true, json: async () => ({ version: '2.0.14', pid: 1 }) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+
+    const runtime = createRuntime({});
+    await runtime.startOpenCode();
+
+    expect(runtime.testState.openCodePort).toBe(45678);
+    expect(runtime.testState.isOpenCodeReady).toBe(true);
   });
 });

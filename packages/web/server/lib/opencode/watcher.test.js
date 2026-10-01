@@ -236,4 +236,50 @@ describe('createOpenCodeWatcherRuntime', () => {
     expect(events.size).toBe(0);
     expect(statuses.size).toBe(0);
   });
+
+  it('reads /api/event and translates v2 wire payloads on the v2 track', async () => {
+    process.env.OPENCHAMBER_PROTOCOL_MODE = 'v2';
+    const { resetProtocolModes } = await import('./protocol-mode.js');
+    resetProtocolModes();
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const payloads = [];
+    const fetchCalls = [];
+
+    const watcher = createOpenCodeWatcherRuntime({
+      waitForOpenCodePort: async () => {},
+      buildOpenCodeUrl: (path) => `http://127.0.0.1:4096${path}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      onPayload(payload) {
+        payloads.push(payload);
+        watcher.stop();
+      },
+      fetchImpl: async (url, options) => {
+        fetchCalls.push(String(url));
+        return createSseResponse({
+          signal: options.signal,
+          blocks: [
+            // A v2 wire event (v2 carries `data`, no `session.status` of its
+            // own) that the translator folds into the v1 status vocabulary.
+            'id: evt-2\ndata: {"type":"session.execution.started","id":"evt-2","data":{"sessionID":"ses_2"}}\n\n',
+          ],
+        });
+      },
+    });
+
+    try {
+      await watcher.start();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(fetchCalls).toEqual(['http://127.0.0.1:4096/api/event']);
+      expect(payloads.length).toBeGreaterThan(0);
+      // The translated payload must be the server's own v1 vocabulary, not
+      // the v2 wire shape.
+      expect(payloads.some((payload) => payload?.type === 'session.status')).toBe(true);
+    } finally {
+      watcher.stop();
+      delete process.env.OPENCHAMBER_PROTOCOL_MODE;
+      resetProtocolModes();
+      vi.restoreAllMocks();
+    }
+  });
 });

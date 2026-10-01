@@ -1,3 +1,5 @@
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
+
 export const createHmrStateRuntime = (dependencies) => {
   const {
     globalThisLike,
@@ -33,9 +35,18 @@ export const createHmrStateRuntime = (dependencies) => {
     if (typeof hmrState.userProvidedOpenCodePassword !== 'undefined') {
       return;
     }
-    const initialPassword = typeof processLike.env.OPENCODE_SERVER_PASSWORD === 'string'
-      ? processLike.env.OPENCODE_SERVER_PASSWORD.trim()
-      : '';
+    // Upstream `8dd842a3b` (#138): OpenCode 2 reads OPENCODE_PASSWORD before
+    // the legacy OPENCODE_SERVER_PASSWORD, so on the v2 track a user-provided
+    // OPENCODE_PASSWORD is the password the managed server actually uses.
+    // OpenCode 1.x never reads OPENCODE_PASSWORD — honoring it there would
+    // authenticate against a value the server ignores — so the v1 track keeps
+    // reading the legacy variable only.
+    const candidates = resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID, processLike.env) === 'v2'
+      ? [processLike.env.OPENCODE_PASSWORD, processLike.env.OPENCODE_SERVER_PASSWORD]
+      : [processLike.env.OPENCODE_SERVER_PASSWORD];
+    const initialPassword = candidates
+      .map((value) => (typeof value === 'string' ? value.trim() : ''))
+      .find((value) => value.length > 0) || '';
     hmrState.userProvidedOpenCodePassword = initialPassword || null;
   };
 

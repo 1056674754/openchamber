@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildDeferredRestartResponse } from './config-mutation-response.js';
+import { buildAppliedResponse, buildDeferredRestartResponse } from './config-mutation-response.js';
 
 describe('config mutation response helpers', () => {
   test('includes the authoritative pending restart snapshot', () => {
@@ -14,5 +14,19 @@ describe('config mutation response helpers', () => {
       pendingRestart,
       message: 'Saved.',
     });
+  });
+
+  test('applied response carries plain success plus the mutation details', () => {
+    expect(buildAppliedResponse('Agent saved.', { path: '/tmp/agents/x.md', scope: 'project', source: 'md' })).toEqual({
+      success: true,
+      message: 'Agent saved.',
+      path: '/tmp/agents/x.md',
+      scope: 'project',
+      source: 'md',
+    });
+  });
+
+  test('applied response omits details when none are given', () => {
+    expect(buildAppliedResponse('Saved.')).toEqual({ success: true, message: 'Saved.' });
   });
 });

@@ -1,4 +1,5 @@
-import { buildDeferredRestartResponse } from './config-mutation-response.js';
+import { buildAppliedResponse, buildDeferredRestartResponse } from './config-mutation-response.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
 
 export const registerConfigEntityRoutes = (app, dependencies) => {
   const {
@@ -27,17 +28,32 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     expandSnippets,
   } = dependencies;
 
-  const completeMcpMutation = async (res, action, name, applyChange) => {
-    applyChange();
-    const pastTense = action === 'delete' ? 'deleted' : `${action}d`;
-    const pendingRestart = markPendingConfigRestart(`mcp ${action}`, {
-      scope: 'mcp',
-      entityId: name,
+  // v2 track (spine OC2-S3): OpenCode 2 watches every config file it reads and
+  // rebuilds live, so a mutation that lands on disk is already applied — no
+  // pending restart is recorded and the answer carries where the mutation
+  // landed. The v1 track keeps the deferred-restart contract unchanged.
+  const respondConfigMutation = (res, message, restartReason, scope, entityId, result) => {
+    if (resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2') {
+      return res.json(buildAppliedResponse(message, result));
+    }
+    const pendingRestart = markPendingConfigRestart(restartReason, {
+      scope,
+      entityId,
     });
-    return res.json(buildDeferredRestartResponse(
-      `MCP server "${name}" ${pastTense}. Restart OpenCode to apply.`,
-      pendingRestart,
-    ));
+    return res.json(buildDeferredRestartResponse(`${message} Restart OpenCode to apply.`, pendingRestart));
+  };
+
+  const completeMcpMutation = async (res, action, name, applyChange) => {
+    const result = applyChange();
+    const pastTense = action === 'delete' ? 'deleted' : `${action}d`;
+    return respondConfigMutation(
+      res,
+      `MCP server "${name}" ${pastTense}.`,
+      `mcp ${action}`,
+      'mcp',
+      name,
+      result,
+    );
   };
 
   app.get('/api/config/agents/:name', async (req, res) => {
@@ -94,15 +110,15 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Config received:', JSON.stringify(config, null, 2));
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
-      createAgent(agentName, config, directory, scope);
-      const pendingRestart = markPendingConfigRestart('agent creation', {
-        scope: 'agents',
-        entityId: agentName,
-      });
-      res.json(buildDeferredRestartResponse(
-        `Agent ${agentName} created successfully. Restart OpenCode to apply.`,
-        pendingRestart,
-      ));
+      const created = createAgent(agentName, config, directory, scope);
+      respondConfigMutation(
+        res,
+        `Agent ${agentName} created successfully.`,
+        'agent creation',
+        'agents',
+        agentName,
+        created,
+      );
     } catch (error) {
       console.error('Failed to create agent:', error);
       res.status(500).json({ error: error.message || 'Failed to create agent' });
@@ -122,18 +138,18 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Updates:', JSON.stringify(updates, null, 2));
       console.log('[Server] Working directory:', directory);
 
-      updateAgent(agentName, updates, directory);
-      const pendingRestart = markPendingConfigRestart('agent update', {
-        scope: 'agents',
-        entityId: agentName,
-      });
+      const updated = updateAgent(agentName, updates, directory);
 
       console.log(`[Server] Agent ${agentName} updated successfully`);
 
-      res.json(buildDeferredRestartResponse(
-        `Agent ${agentName} updated successfully. Restart OpenCode to apply.`,
-        pendingRestart,
-      ));
+      respondConfigMutation(
+        res,
+        `Agent ${agentName} updated successfully.`,
+        'agent update',
+        'agents',
+        agentName,
+        updated,
+      );
     } catch (error) {
       console.error('[Server] Failed to update agent:', error);
       console.error('[Server] Error stack:', error.stack);
@@ -151,14 +167,13 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
 
       const scope = req.body?.scope;
       deleteAgent(agentName, directory, scope);
-      const pendingRestart = markPendingConfigRestart('agent deletion', {
-        scope: 'agents',
-        entityId: agentName,
-      });
-      res.json(buildDeferredRestartResponse(
-        `Agent ${agentName} deleted successfully. Restart OpenCode to apply.`,
-        pendingRestart,
-      ));
+      respondConfigMutation(
+        res,
+        `Agent ${agentName} deleted successfully.`,
+        'agent deletion',
+        'agents',
+        agentName,
+      );
     } catch (error) {
       console.error('Failed to delete agent:', error);
       res.status(500).json({ error: error.message || 'Failed to delete agent' });
@@ -207,9 +222,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:POST /api/config/mcp] Creating MCP server: ${name}`);
 
-      await completeMcpMutation(res, 'create', name, () => {
-        createMcpConfig(name, config, directory, scope);
-      });
+      await completeMcpMutation(res, 'create', name, () => createMcpConfig(name, config, directory, scope));
     } catch (error) {
       console.error('[API:POST /api/config/mcp/:name] Failed:', error);
       res.status(500).json({ error: error.message || 'Failed to create MCP server' });
@@ -226,9 +239,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:PATCH /api/config/mcp] Updating MCP server: ${name}`);
 
-      await completeMcpMutation(res, 'update', name, () => {
-        updateMcpConfig(name, updates, directory);
-      });
+      await completeMcpMutation(res, 'update', name, () => updateMcpConfig(name, updates, directory));
     } catch (error) {
       console.error('[API:PATCH /api/config/mcp/:name] Failed:', error);
       if (error?.message === `MCP server "${req.params.name}" not found`) {
@@ -247,9 +258,7 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
       console.log(`[API:DELETE /api/config/mcp] Deleting MCP server: ${name}`);
 
-      await completeMcpMutation(res, 'delete', name, () => {
-        deleteMcpConfig(name, directory);
-      });
+      await completeMcpMutation(res, 'delete', name, () => deleteMcpConfig(name, directory));
     } catch (error) {
       console.error('[API:DELETE /api/config/mcp/:name] Failed:', error);
       res.status(500).json({ error: error.message || 'Failed to delete MCP server' });
@@ -294,15 +303,15 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Config received:', JSON.stringify(config, null, 2));
       console.log('[Server] Scope:', scope, 'Working directory:', directory);
 
-      createCommand(commandName, config, directory, scope);
-      const pendingRestart = markPendingConfigRestart('command creation', {
-        scope: 'commands',
-        entityId: commandName,
-      });
-      res.json(buildDeferredRestartResponse(
-        `Command ${commandName} created successfully. Restart OpenCode to apply.`,
-        pendingRestart,
-      ));
+      const created = createCommand(commandName, config, directory, scope);
+      respondConfigMutation(
+        res,
+        `Command ${commandName} created successfully.`,
+        'command creation',
+        'commands',
+        commandName,
+        created,
+      );
     } catch (error) {
       console.error('Failed to create command:', error);
       res.status(500).json({ error: error.message || 'Failed to create command' });
@@ -322,18 +331,18 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       console.log('[Server] Updates:', JSON.stringify(updates, null, 2));
       console.log('[Server] Working directory:', directory);
 
-      updateCommand(commandName, updates, directory);
-      const pendingRestart = markPendingConfigRestart('command update', {
-        scope: 'commands',
-        entityId: commandName,
-      });
+      const updated = updateCommand(commandName, updates, directory);
 
       console.log(`[Server] Command ${commandName} updated successfully`);
 
-      res.json(buildDeferredRestartResponse(
-        `Command ${commandName} updated successfully. Restart OpenCode to apply.`,
-        pendingRestart,
-      ));
+      respondConfigMutation(
+        res,
+        `Command ${commandName} updated successfully.`,
+        'command update',
+        'commands',
+        commandName,
+        updated,
+      );
     } catch (error) {
       console.error('[Server] Failed to update command:', error);
       console.error('[Server] Error stack:', error.stack);
@@ -350,14 +359,13 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
       }
 
       deleteCommand(commandName, directory);
-      const pendingRestart = markPendingConfigRestart('command deletion', {
-        scope: 'commands',
-        entityId: commandName,
-      });
-      res.json(buildDeferredRestartResponse(
-        `Command ${commandName} deleted successfully. Restart OpenCode to apply.`,
-        pendingRestart,
-      ));
+      respondConfigMutation(
+        res,
+        `Command ${commandName} deleted successfully.`,
+        'command deletion',
+        'commands',
+        commandName,
+      );
     } catch (error) {
       console.error('Failed to delete command:', error);
       res.status(500).json({ error: error.message || 'Failed to delete command' });

@@ -41,6 +41,13 @@ const ensureNotificationTemplateShape = (templates) => {
   return { templates: next, changed };
 };
 
+/** Settings that decide which OpenChamber plugins the managed OpenCode loads. */
+const MANAGED_PLUGIN_SETTINGS_KEYS = new Set([
+  'agentControlToolEnabled',
+  'agentWebToolEnabled',
+  'agentMemoryToolEnabled',
+]);
+
 export const createSettingsRuntime = (deps) => {
   const {
     fsPromises,
@@ -59,6 +66,7 @@ export const createSettingsRuntime = (deps) => {
     normalizeManagedRemoteTunnelPresetTokens,
     syncManagedRemoteTunnelConfigWithPresets,
     upsertManagedRemoteTunnelToken,
+    onManagedPluginSettingsChanged = async () => {},
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
@@ -1090,7 +1098,18 @@ export const createSettingsRuntime = (deps) => {
         }
       }
 
-      await writeSettingsToDisk(next, { surface, changedKeys: Object.keys(sanitized) });
+      const changedKeys = Object.keys(sanitized);
+      await writeSettingsToDisk(next, { surface, changedKeys });
+      // OpenChamber's own OpenCode plugins live in a config file OpenCode
+      // watches (managed-config-file, spine OC2-S2/S3), so flipping one of
+      // these switches takes effect in the running process instead of waiting
+      // for a restart. Wiring the callback is OC2-S8 (index.js); until then it
+      // defaults to a no-op.
+      if (changedKeys.some((key) => MANAGED_PLUGIN_SETTINGS_KEYS.has(key))) {
+        await Promise.resolve(onManagedPluginSettingsChanged(next)).catch((error) => {
+          console.warn('Failed to refresh the managed OpenCode config:', error?.message ?? error);
+        });
+      }
       console.log(`[persistSettings] Successfully saved ${next.projects?.length || 0} projects to disk`);
       return formatSettingsResponse(next);
     };

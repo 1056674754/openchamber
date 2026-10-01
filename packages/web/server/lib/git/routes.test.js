@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const gitLibraries = {
   stageFiles: vi.fn(),
@@ -8,6 +8,7 @@ const gitLibraries = {
   getWorktrees: vi.fn(),
   observeWorktreeTopology: vi.fn(),
   subscribeWorktreeTopologyChanges: vi.fn(),
+  removeWorktree: vi.fn(),
 };
 
 vi.mock('./index.js', () => ({
@@ -18,6 +19,7 @@ vi.mock('./index.js', () => ({
   getWorktrees: gitLibraries.getWorktrees,
   observeWorktreeTopology: gitLibraries.observeWorktreeTopology,
   subscribeWorktreeTopologyChanges: gitLibraries.subscribeWorktreeTopologyChanges,
+  removeWorktree: gitLibraries.removeWorktree,
 }));
 
 const { registerGitRoutes } = await import('./routes.js');
@@ -285,5 +287,92 @@ describe('git routes status discovery', () => {
     expect(gitLibraries.isGitRepository).toHaveBeenCalledWith('/opened/git-project');
     expect(gitLibraries.getStatus).toHaveBeenCalledWith('/opened/git-project', { mode: undefined });
     expect(response.body).toMatchObject({ current: 'main' });
+  });
+});
+
+describe('git worktree removal instance disposal', () => {
+  const originalProtocolMode = process.env.OPENCHAMBER_PROTOCOL_MODE;
+
+  const stubRemoveWorktree = () => {
+    gitLibraries.removeWorktree.mockImplementation(async (directory, input) => {
+      await input?.disposeInstance?.('/repo/wt');
+      return true;
+    });
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    gitLibraries.removeWorktree.mockReset();
+    if (typeof originalProtocolMode === 'string') {
+      process.env.OPENCHAMBER_PROTOCOL_MODE = originalProtocolMode;
+    } else {
+      delete process.env.OPENCHAMBER_PROTOCOL_MODE;
+    }
+    protocolMode.resetProtocolModes();
+  });
+
+  let protocolMode;
+  it('evicts the OpenCode 2 location through DELETE /api/debug/location on the v2 track', async () => {
+    delete process.env.OPENCODE_BINARY;
+    process.env.OPENCHAMBER_PROTOCOL_MODE = 'v2';
+    protocolMode = await import('../opencode/protocol-mode.js');
+    protocolMode.resetProtocolModes();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    stubRemoveWorktree();
+
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, {
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test' }),
+    });
+
+    const response = createMockResponse();
+    await getRoute('DELETE', '/api/git/worktrees')(
+      { query: { directory: '/repo' }, body: { directory: '/repo/wt' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [input, init] = fetchMock.mock.calls[0];
+    const request = new Request(input, init);
+    // OpenCode 2's location eviction; the v1 /instance/dispose route is gone.
+    expect(request.method).toBe('DELETE');
+    const url = new URL(request.url);
+    expect(url.origin + url.pathname).toBe('http://opencode.test/api/debug/location');
+    expect(url.searchParams.get('location[directory]')).toBe('/repo/wt');
+    expect(request.headers.get('authorization')).toBe('Bearer test');
+  });
+
+  it('keeps the v1 SDK instance disposal unchanged', async () => {
+    delete process.env.OPENCODE_BINARY;
+    delete process.env.OPENCHAMBER_PROTOCOL_MODE;
+    protocolMode = await import('../opencode/protocol-mode.js');
+    protocolMode.resetProtocolModes();
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+    stubRemoveWorktree();
+
+    const { app, getRoute } = createRouteRegistry();
+    registerGitRoutes(app, {
+      buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+      getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test' }),
+    });
+
+    const response = createMockResponse();
+    await getRoute('DELETE', '/api/git/worktrees')(
+      { query: { directory: '/repo' }, body: { directory: '/repo/wt' } },
+      response,
+    );
+
+    expect(response.statusCode).toBe(200);
+    // The v1 track keeps its SDK route: POST /instance/dispose.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [input, init] = fetchMock.mock.calls[0];
+    const request = new Request(input, init);
+    expect(request.method).toBe('POST');
+    expect(request.url).toBe('http://opencode.test/instance/dispose?directory=%2Frepo%2Fwt');
+    expect(request.headers.get('authorization')).toBe('Bearer test');
   });
 });
