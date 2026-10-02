@@ -144,6 +144,7 @@ export const createOpenChamberControlService = (dependencies) => {
     sessionService,
     scheduledTaskService,
     browserControl = null,
+    fileOpen = null,
     agentMemoryActions = null,
     createClient = createOpencodeClient,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
@@ -474,6 +475,16 @@ export const createOpenChamberControlService = (dependencies) => {
         return agentMemoryActions.execute(action, input, contextDirectory || input.directory);
       }
       if (action.startsWith('browser.')) return executeBrowserAction(action, input, contextDirectory, options.signal);
+      if (action === 'file.open') {
+        if (!fileOpen) {
+          throw new OpenChamberControlError('The file viewer is not available on this server', 503);
+        }
+        return fileOpen.request({
+          path: asNonEmptyString(input.path),
+          directory: asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory),
+          sessionId: asNonEmptyString(options.contextSessionId),
+        });
+      }
       if (action === 'projects.list') return { projects: await projects() };
       if (action === 'models.list') return models();
       if (action === 'schedule.status') return scheduledTaskService.status();

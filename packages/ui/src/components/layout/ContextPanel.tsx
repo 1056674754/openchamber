@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolvePreviewHeaderDisplayUrl } from '@/lib/previewDisplayUrl';
 import { isEditorEventTarget } from '@/lib/editorFocus';
+import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
@@ -2915,6 +2916,17 @@ export const ContextPanel: React.FC = () => {
     if (!directoryKey || activeServerId === UNRESOLVED_SERVER_ID) return;
     return registerBrowserOpener(activeServerId, (url) => openContextBrowser(directoryKey, url));
   }, [activeServerId, directoryKey, openContextBrowser]);
+
+  // The agent asked for a file to be shown. It opens in front of whatever tab
+  // the user had, on purpose: the agent is pointing at a result, and the prior
+  // tab is one click away.
+  const openContextFile = useUIStore((state) => state.openContextFile);
+  React.useEffect(() => subscribeOpenchamberEvents((event) => {
+    if (event.type !== 'file-open-request') return;
+    const directory = event.directory ?? effectiveDirectory;
+    if (!directory) return;
+    openContextFile(directory, event.path);
+  }), [effectiveDirectory, openContextFile]);
 
   const renderTabPaneContent = React.useCallback((
     tab: ContextPanelTabLike,

@@ -1003,7 +1003,9 @@ export const useConfigStore = create<ConfigStore>()(
                 opencodeDefaultModel: undefined,
                 settingsAutoCreateWorktree: false,
                 settingsGitmojiEnabled: false,
-                settingsDefaultFileViewerPreview: false,
+                // Artifacts an agent produces are opened to be looked at:
+                // the preview comes first unless the user turns it off.
+                settingsDefaultFileViewerPreview: true,
                 settingsZenModel: undefined,
                 settingsMessageStreamTransport: 'ws',
                 // Voice provider preference - load from localStorage or default to 'browser'
@@ -1905,7 +1907,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsDefaultAgent: openChamberDefaults.defaultAgent,
                                     settingsAutoCreateWorktree: openChamberDefaults.autoCreateWorktree ?? false,
                                     settingsGitmojiEnabled: openChamberDefaults.gitmojiEnabled ?? false,
-                                    settingsDefaultFileViewerPreview: openChamberDefaults.defaultFileViewerPreview ?? false,
+                                    settingsDefaultFileViewerPreview: openChamberDefaults.defaultFileViewerPreview ?? true,
                                     settingsZenModel: resolvedZenModel,
                                     settingsMessageStreamTransport: openChamberDefaults.messageStreamTransport ?? state.settingsMessageStreamTransport ?? 'ws',
                                     sttProvider: openChamberDefaults.sttProvider ?? state.sttProvider,

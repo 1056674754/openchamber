@@ -105,3 +105,29 @@ describe('OpenChamber control authority', () => {
     expect(result.directory).toBe('/resolved-repo');
   });
 });
+
+describe('file.open', () => {
+  test('hands the path, the session directory and the session to the file viewer', async () => {
+    const request = async (input) => ({ path: '/repo/out.csv', size: 3, opened: true, input });
+    const service = createService({ fileOpen: { request } });
+
+    const result = await service.execute('file.open', { serverId: 'default', path: 'out.csv' }, '/repo', { contextSessionId: 'ses_1' });
+
+    expect(result.path).toBe('/repo/out.csv');
+    expect(result.input).toEqual({ path: 'out.csv', directory: '/repo', sessionId: 'ses_1' });
+  });
+
+  test('lets an explicit directory win over the session directory', async () => {
+    const request = async (input) => ({ path: '/other/out.csv', size: 3, opened: true, input });
+    const service = createService({ fileOpen: { request } });
+
+    const result = await service.execute('file.open', { serverId: 'default', path: 'out.csv', directory: '/other' }, '/repo');
+
+    expect(result.input).toEqual({ path: 'out.csv', directory: '/other', sessionId: null });
+  });
+
+  test('answers 503 when this server has no file viewer wired', async () => {
+    const service = createService({});
+    await expect(service.execute('file.open', { serverId: 'default', path: 'out.csv' }, '/repo')).rejects.toMatchObject({ statusCode: 503 });
+  });
+});

@@ -41,10 +41,15 @@ import { cn, getModifierLabel, getRevealLabelKey, hasModifier } from '@/lib/util
 import {
   getLanguageFromExtension,
   getImageMimeType,
+  isAudioFile,
   isBinaryFile,
+  isDelimitedTableFile,
   isDrawioFile,
+  isFontFile,
   isImageFile,
+  isMermaidFile,
   isSvgFile,
+  isVideoFile,
   looksLikeBinaryText,
 } from '@/lib/toolHelpers';
 import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/fileEditorAutosave';
@@ -93,6 +98,13 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveJsonFileViewState } from './jsonFileViewState';
 import { MarkdownPreviewSearch } from './MarkdownPreviewSearch';
 import { useFilePreviewScrollPosition } from './useFilePreviewScrollPosition';
+import { useFileTreeUpload } from './files/useFileTreeUpload';
+import { BinaryArtifact } from './files/previews/BinaryArtifact';
+import { FontArtifact } from './files/previews/FontArtifact';
+import { ImageArtifact } from './files/previews/ImageArtifact';
+import { MediaArtifact } from './files/previews/MediaArtifact';
+import { TableArtifact } from './files/previews/TableArtifact';
+import { useMarkdownLocalAssets } from './files/previews/useMarkdownLocalAssets';
 
 type FileNode = {
   name: string;
@@ -421,6 +433,8 @@ interface FileRowProps {
     canReveal: boolean;
   };
   downloadFile?: (path: string) => Promise<void>;
+  /** Directories only: open the system picker to upload into this folder. */
+  onUploadFiles?: (directoryPath: string) => void;
   contextMenuPath: string | null;
   setContextMenuPath: (path: string | null) => void;
   /** A plain click opens a preview tab; `pin` (double-click) keeps it. */
@@ -442,6 +456,7 @@ const FileRow: React.FC<FileRowProps> = ({
   badge,
   permissions,
   downloadFile,
+  onUploadFiles,
   contextMenuPath,
   setContextMenuPath,
   onSelect,
@@ -453,8 +468,9 @@ const FileRow: React.FC<FileRowProps> = ({
   const isDir = node.type === 'directory';
   const { canRename, canCreateFile, canCreateFolder, canDelete, canReveal } = permissions;
   const canDownload = !isDir && Boolean(downloadFile);
+  const canUploadHere = isDir && Boolean(onUploadFiles);
   const canRevealPath = canReveal && !isBrowserClient;
-  const hasMenuActions = canRename || canCreateFile || canCreateFolder || canDelete || canDownload || canRevealPath;
+  const hasMenuActions = canRename || canCreateFile || canCreateFolder || canDelete || canDownload || canRevealPath || canUploadHere;
 
   const handleContextMenu = React.useCallback((event?: React.MouseEvent) => {
     if (!hasMenuActions) {
@@ -545,6 +561,15 @@ const FileRow: React.FC<FileRowProps> = ({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" side={isMobile ? "bottom" : "bottom"} onCloseAutoFocus={() => setContextMenuPath(null)}>
+              {canUploadHere && (
+                <DropdownMenuItem onClick={(e) => {
+                  e.stopPropagation();
+                  setContextMenuPath(null);
+                  onUploadFiles?.(node.path);
+                }}>
+                  <Icon name="attachment-2" className="mr-2 size-4" /> {t('sidebarFilesTree.menu.uploadFiles')}
+                </DropdownMenuItem>
+              )}
               {canRename && (
                 <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onOpenDialog('rename', node); }}>
                   <Icon name="edit" className="mr-2 size-4" /> {t('sidebarFilesTree.menu.rename')}
@@ -769,9 +794,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const [htmlViewMode, setHtmlViewMode] = React.useState<PreviewViewMode>('edit');
   const [drawioViewMode, setDrawioViewMode] = React.useState<PreviewViewMode>('preview');
   const [drawioRemountNonce, setDrawioRemountNonce] = React.useState(0);
+  const [svgViewMode, setSvgViewMode] = React.useState<PreviewViewMode>('preview');
+  const [mermaidViewMode, setMermaidViewMode] = React.useState<PreviewViewMode>('preview');
+  const [tableViewMode, setTableViewMode] = React.useState<'table' | 'text'>('table');
+  // Byte size of the open file, for the artifact meta line.
+  const [artifactSize, setArtifactSize] = React.useState<number | null>(null);
   const textViewModeByPathRef = React.useRef<Record<string, TextViewMode>>({});
   const mdViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
   const htmlViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const svgViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const mermaidViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const tableViewModeByPathRef = React.useRef<Record<string, 'table' | 'text'>>({});
   const drawioViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
   const diagramAutoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const diagramXmlRef = React.useRef('');
@@ -1237,6 +1270,14 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     inFlightDirsRef.current.delete(normalized);
     await loadDirectory(normalized);
   }, [loadDirectory, refreshRoot]);
+
+  // Uploads from the folder menu and the tree toolbar (the system picker;
+  // mobile offers gallery/camera/files). Existing names go through the
+  // replace-confirmation dialog the hook renders via uploadElements.
+  const fileTreeUpload = useFileTreeUpload({ root, refreshDirectory });
+  const uploadFilesToDirectory = React.useCallback((directoryPath: string) => {
+    fileTreeUpload.pickFiles(normalizePath(directoryPath));
+  }, [fileTreeUpload]);
 
   const lastFilesViewDirRef = React.useRef<string>('');
   const lastFilesViewTreeKeyRef = React.useRef<string>('');
@@ -2349,6 +2390,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
             badge={isDir ? getFolderBadge(node.path) : undefined}
             permissions={fileRowPermissions}
             downloadFile={files.downloadFile}
+            onUploadFiles={fileTreeUpload.canUpload ? uploadFilesToDirectory : undefined}
             contextMenuPath={contextMenuPath}
             setContextMenuPath={setContextMenuPath}
             onSelect={handleSelectFile}
@@ -2368,11 +2410,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
   const isSelectedImage = Boolean(selectedFile?.path && isImageFile(selectedFile.path));
   const isSelectedSvg = Boolean(selectedFile?.path && isSvgFile(selectedFile.path));
+  // SVG is text with a picture in it: the toggle decides which one is shown.
+  const isSvgSource = isSelectedSvg && svgViewMode === 'edit';
+  const isSelectedVideo = Boolean(selectedFile?.path && isVideoFile(selectedFile.path));
+  const isSelectedMedia = isSelectedVideo || Boolean(selectedFile?.path && isAudioFile(selectedFile.path));
+  const isSelectedFont = Boolean(selectedFile?.path && isFontFile(selectedFile.path));
   const isSelectedBinary = Boolean(
     selectedFile?.path
     && (isBinaryFile(selectedFile.path) || contentDetectedBinary)
   );
-  const isUnsupportedBinary = isSelectedBinary && !isSelectedImage;
+  const isUnsupportedBinary = isSelectedBinary && !isSelectedImage && !isSelectedMedia && !isSelectedFont;
+  // Everything the viewer shows as an artifact rather than as text.
+  const isSelectedNonText = isSelectedBinary || (isSelectedImage && !isSvgSource);
   const pendingNavigationTargetPath = React.useMemo(
     () => normalizePath(pendingFileNavigation?.path ?? ''),
     [pendingFileNavigation?.path],
@@ -2384,8 +2433,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       && selectedFilePath === pendingNavigationTargetPath
       && !fileLoading
       && !fileError
-      && !isSelectedImage
-      && !isUnsupportedBinary,
+      && !isSelectedNonText,
   );
 
   const displaySelectedPath = React.useMemo(() => {
@@ -2399,6 +2447,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
   const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
   const isDrawio = Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
+  const isMermaid = Boolean(selectedFile?.path && isMermaidFile(selectedFile.path));
+  const isTable = Boolean(selectedFile?.path && isDelimitedTableFile(selectedFile.path));
   const jsonFileViewState = React.useMemo(
     () => (isJson ? resolveJsonFileViewState(jsonViewMode, draftContent) : null),
     [draftContent, isJson, jsonViewMode],
@@ -2406,8 +2456,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const invalidJsonError = jsonFileViewState?.kind === 'invalid-source'
     ? jsonFileViewState.error
     : null;
-  const isTextFile = Boolean(selectedFile && !isSelectedImage && !isUnsupportedBinary);
-  const canUseShikiFileView = isTextFile && !isMarkdown && !(isHtml && htmlViewMode === 'preview') && !isDrawio;
+  const isTextFile = Boolean(selectedFile && !isSelectedBinary && (!isSelectedImage || isSelectedSvg));
+  const canUseShikiFileView = isTextFile && !isMarkdown && !isDrawio
+    && !(isHtml && htmlViewMode === 'preview')
+    && !(isSelectedSvg && svgViewMode === 'preview')
+    && !(isMermaid && mermaidViewMode === 'preview')
+    && !(isTable && tableViewMode === 'table');
   const staticLanguageExtension = React.useMemo(
     () => (selectedFilePath ? languageByExtension(selectedFilePath) : null),
     [selectedFilePath],
@@ -2499,6 +2553,12 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
     setDrawioViewMode(drawioViewModeByPathRef.current[selectedPath] ?? 'preview');
 
+    // Artifacts an agent produces are opened to be looked at: the picture,
+    // the diagram, the table come first regardless of the text-first setting.
+    setSvgViewMode(svgViewModeByPathRef.current[selectedPath] ?? 'preview');
+    setMermaidViewMode(mermaidViewModeByPathRef.current[selectedPath] ?? 'preview');
+    setTableViewMode(tableViewModeByPathRef.current[selectedPath] ?? 'table');
+
     let jsonDefault: 'tree' | 'text' = settingsDefaultFileViewerPreview ? 'tree' : 'text';
     try {
       const stored = localStorage.getItem(JSON_VIEWER_MODE_KEY);
@@ -2535,6 +2595,41 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const getMdViewMode = React.useCallback((): PreviewViewMode => {
     return mdViewMode;
   }, [mdViewMode]);
+
+  const saveSvgViewMode = React.useCallback((mode: PreviewViewMode) => {
+    const selectedPath = selectedFile?.path;
+    if (selectedPath) svgViewModeByPathRef.current[selectedPath] = mode;
+    setSvgViewMode(mode);
+  }, [selectedFile?.path]);
+
+  const saveMermaidViewMode = React.useCallback((mode: PreviewViewMode) => {
+    const selectedPath = selectedFile?.path;
+    if (selectedPath) mermaidViewModeByPathRef.current[selectedPath] = mode;
+    setMermaidViewMode(mode);
+  }, [selectedFile?.path]);
+
+  const saveTableViewMode = React.useCallback((mode: 'table' | 'text') => {
+    const selectedPath = selectedFile?.path;
+    if (selectedPath) tableViewModeByPathRef.current[selectedPath] = mode;
+    setTableViewMode(mode);
+  }, [selectedFile?.path]);
+
+  // Size for the artifact meta line. Text loads already stat the file; the
+  // artifact kinds never read content, so they ask once here.
+  React.useEffect(() => {
+    const selectedPath = selectedFile?.path;
+    setArtifactSize(null);
+    if (!selectedPath || loadedFilePath !== selectedPath) return;
+    let cancelled = false;
+    void readFileStat(selectedPath, selectedFileReadOptions)
+      .then((stat) => {
+        if (!cancelled && stat) setArtifactSize(stat.size);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [fileContentRevision, loadedFilePath, readFileStat, selectedFile?.path, selectedFileReadOptions]);
 
   // In-preview find for the rendered Markdown preview (Ctrl/Cmd+F).
   const [mdPreviewFindOpen, setMdPreviewFindOpen] = React.useState(false);
@@ -3144,6 +3239,85 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         : runtimeImageSrc))
     : '';
 
+  // Media and fonts stream through the same authenticated raw endpoint the
+  // image viewer uses; a blob URL keeps auth identical on web, desktop and
+  // relay paths.
+  const mediaFontSrc = (isSelectedMedia || isSelectedFont) && selectedFile?.path ? runtimeImageSrc : '';
+
+  const downloadButton = selectedFile && files.downloadFile ? (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={() => {
+        const fn = files.downloadFile;
+        if (!fn || !selectedFile) return;
+        void fn(selectedFile.path).catch((error) => {
+          console.error('Download failed:', error);
+          toast.error(t('sidebarFilesTree.toast.operationFailed'));
+        });
+      }}
+    >
+      <Icon name="download" className="mr-2 size-4" />
+      {t('filesView.editor.saveFile')}
+    </Button>
+  ) : null;
+
+  // Everything shown as an artifact rather than as editable text. One place
+  // for both the docked and the fullscreen viewer, so they cannot drift.
+  const renderArtifactPreview = (file: FileNode): React.ReactNode => {
+    if (isSelectedImage && !isSvgSource) {
+      return <ImageArtifact src={imageSrc} name={file.name} sizeBytes={artifactSize} />;
+    }
+    if (isSelectedMedia) {
+      return (
+        <MediaArtifact
+          kind={isSelectedVideo ? 'video' : 'audio'}
+          src={mediaFontSrc}
+          name={file.name}
+          sizeBytes={artifactSize}
+          download={downloadButton}
+        />
+      );
+    }
+    if (isSelectedFont) {
+      return <FontArtifact key={mediaFontSrc} src={mediaFontSrc} name={file.name} sizeBytes={artifactSize} />;
+    }
+    if (isUnsupportedBinary) {
+      return <BinaryArtifact name={file.name} path={file.path} sizeBytes={artifactSize} download={downloadButton} />;
+    }
+    if (isTable && tableViewMode === 'table') {
+      return <TableArtifact path={file.path} content={fileContent} sizeBytes={artifactSize} />;
+    }
+    if (isMermaid && mermaidViewMode === 'preview') {
+      return (
+        // The whole panel is the diagram: the same fill-the-container styling
+        // the fullscreen mermaid dialog uses, not the chat block's capped height.
+        <div className="h-full min-h-0 overflow-hidden">
+          <ErrorBoundary
+            fallback={
+              <div className="m-3 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+                <div className="mb-1 font-medium text-destructive">{t('filesView.error.previewUnavailable')}</div>
+                <div className="text-sm text-muted-foreground">{t('filesView.error.switchToEditMode')}</div>
+              </div>
+            }
+          >
+            <SimpleMarkdownRenderer
+              content={`\`\`\`mermaid\n${fileContent}\n\`\`\``}
+              className="markdown-mermaid-fullscreen h-full"
+              enableFileReferences={false}
+              allowMermaidWheelZoom
+            />
+          </ErrorBoundary>
+        </div>
+      );
+    }
+    return null;
+  };
+  const artifactPreview = selectedFile && !fileLoading && !fileError
+    ? renderArtifactPreview(selectedFile)
+    : null;
+
   React.useEffect(() => {
     let cancelled = false;
 
@@ -3192,7 +3366,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   }, [currentDirectory, fileContentRevision, files, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
 
   React.useEffect(() => {
-    if (runtime.isDesktop || !selectedFile?.path || !isSelectedImage || isSelectedSvg) {
+    // Images keep the desktop's direct file read; media and fonts always go
+    // through the server so auth/relay paths stay the ones already proven.
+    const usesDesktopFileRead = runtime.isDesktop && isSelectedImage && !isSelectedSvg;
+    const usesRawAssetBlob = (isSelectedImage && !isSelectedSvg) || isSelectedMedia || isSelectedFont;
+    if (usesDesktopFileRead || !selectedFile?.path || !usesRawAssetBlob) {
       setRuntimeImageSrc('');
       return;
     }
@@ -3241,7 +3419,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [currentDirectory, fileContentRevision, isSelectedImage, isSelectedSvg, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
+  }, [currentDirectory, fileContentRevision, isSelectedImage, isSelectedSvg, isSelectedMedia, isSelectedFont, runtime.isDesktop, selectedFile?.path, selectedFileReadOptions, serverBaseUrl, t]);
 
   const blockWidgets = React.useMemo(() => {
     return buildCodeMirrorCommentWidgets({
@@ -3275,12 +3453,40 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const { setScroller: setFullscreenMarkdownScroll } = useFilePreviewScrollPosition(markdownPreviewActive ? `${filePositionKey}:markdown:fullscreen` : null);
   const setMainMarkdownScroller = React.useCallback((node: HTMLDivElement | null) => {
     mdPreviewContainerRef.current = node;
+    setMdPreviewNode(node);
     setMainMarkdownScroll(node);
   }, [setMainMarkdownScroll]);
   const setFullscreenMarkdownScroller = React.useCallback((node: HTMLDivElement | null) => {
     mdFullscreenPreviewContainerRef.current = node;
+    setMdFullscreenPreviewNode(node);
     setFullscreenMarkdownScroll(node);
   }, [setFullscreenMarkdownScroll]);
+  const [mdPreviewNode, setMdPreviewNode] = React.useState<HTMLDivElement | null>(null);
+  const [mdFullscreenPreviewNode, setMdFullscreenPreviewNode] = React.useState<HTMLDivElement | null>(null);
+  // A relative link in a rendered Markdown file opens that file here; the
+  // context panel owns the tab, the files view consumes the focus path.
+  const openLinkedFile = React.useCallback((absolutePath: string) => {
+    if (!root) return;
+    useUIStore.getState().openContextFile(root, absolutePath);
+  }, [root]);
+  const markdownLocalAssetsActive = isMarkdown && getMdViewMode() === 'preview' && !fileLoading;
+  const markdownAssetsColorScheme = currentTheme.metadata.variant === 'dark' ? 'dark' : 'light';
+  useMarkdownLocalAssets({
+    container: mdPreviewNode,
+    filePath: selectedFile?.path ?? null,
+    workspaceRoot: root || null,
+    onOpenFile: openLinkedFile,
+    enabled: markdownLocalAssetsActive,
+    colorScheme: markdownAssetsColorScheme,
+  });
+  useMarkdownLocalAssets({
+    container: mdFullscreenPreviewNode,
+    filePath: selectedFile?.path ?? null,
+    workspaceRoot: root || null,
+    onOpenFile: openLinkedFile,
+    enabled: markdownLocalAssetsActive,
+    colorScheme: markdownAssetsColorScheme,
+  });
 
   const renderShikiFileView = React.useCallback((file: FileNode, content: string, restoreScroll: ReturnType<typeof useFilePreviewScrollPosition>['restore']) => {
     return (
@@ -3394,7 +3600,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {!isSelectedImage && (
+        {!isSelectedNonText && (
           <>
             <Button
               variant="ghost"
@@ -3469,6 +3675,37 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
               saveTextViewMode(textViewMode === 'view' ? 'edit' : 'view');
             }}
           />
+        )}
+
+        {isSelectedSvg && (
+          <PreviewToggleButton
+            currentMode={svgViewMode}
+            onToggle={() => saveSvgViewMode(svgViewMode === 'preview' ? 'edit' : 'preview')}
+          />
+        )}
+
+        {isMermaid && (
+          <PreviewToggleButton
+            currentMode={mermaidViewMode}
+            onToggle={() => saveMermaidViewMode(mermaidViewMode === 'preview' ? 'edit' : 'preview')}
+          />
+        )}
+
+        {isTable && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => saveTableViewMode(tableViewMode === 'table' ? 'text' : 'table')}
+            className="size-6 p-0 text-muted-foreground opacity-65 hover:bg-transparent hover:opacity-100 focus-visible:bg-transparent active:bg-transparent"
+            title={tableViewMode === 'table' ? t('filesView.artifact.table.showSource') : t('filesView.artifact.table.showTable')}
+            aria-label={tableViewMode === 'table' ? t('filesView.artifact.table.showSource') : t('filesView.artifact.table.showTable')}
+          >
+            {tableViewMode === 'table' ? (
+              <Icon name="code-sslash" className="size-4" />
+            ) : (
+              <Icon name="list-check-2" className="size-4" />
+            )}
+          </Button>
         )}
 
         {(isMarkdown || isHtmlFile(selectedFile?.path ?? '')) && (
@@ -3897,37 +4134,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
               )
           ) : fileError ? (
             <div className="p-3 typography-ui text-[color:var(--status-error)]">{fileError}</div>
-          ) : isSelectedImage ? (
-            <div className="flex h-full items-center justify-center p-3">
-              <img
-                src={imageSrc}
-                alt={selectedFile?.name ?? t('filesView.editor.imageAltFallback')}
-                className="max-w-full max-h-[70vh] object-contain rounded-md border border-border/30 bg-primary/10"
-              />
-            </div>
-          ) : isUnsupportedBinary ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-              <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
-              <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
-              {files.downloadFile ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const downloadFile = files.downloadFile;
-                    if (!downloadFile || !selectedFile) return;
-                    void downloadFile(selectedFile.path).catch((error) => {
-                      console.error('Download failed:', error);
-                      toast.error(t('sidebarFilesTree.toast.operationFailed'));
-                    });
-                  }}
-                >
-                  <Icon name="download" className="mr-2 size-4" />
-                  {t('filesView.editor.saveFile')}
-                </Button>
-              ) : null}
-            </div>
+          ) : artifactPreview ? (
+            artifactPreview
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
             <div className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
               <DiagramEditor
@@ -4184,6 +4392,17 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           >
             <Icon name="folder-add" className="size-4" />
           </Button>
+          {fileTreeUpload.canUpload && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => uploadFilesToDirectory(currentDirectory)}
+              className="size-8 p-0 flex-shrink-0"
+              title={t('sidebarFilesTree.actions.uploadFilesTitle')}
+            >
+              <Icon name="attachment-2" className="size-4" />
+            </Button>
+          )}
           <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="size-8 p-0 flex-shrink-0">
             <Icon name="refresh" className="size-4" />
           </Button>
@@ -4254,37 +4473,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
               )
           ) : fileError ? (
             <div className="p-4 typography-ui text-[color:var(--status-error)]">{fileError}</div>
-          ) : isSelectedImage ? (
-            <div className="flex h-full items-center justify-center p-4">
-              <img
-                src={imageSrc}
-                alt={selectedFile.name}
-                className="max-w-full max-h-full object-contain rounded-md border border-border/30 bg-primary/10"
-              />
-            </div>
-          ) : isUnsupportedBinary ? (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-              <div className="typography-ui-header text-foreground">{t('filesView.editor.cannotPreviewBinary')}</div>
-              <div className="max-w-md typography-ui text-muted-foreground">{t('filesView.editor.binaryFileDescription')}</div>
-              {files.downloadFile ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const downloadFile = files.downloadFile;
-                    if (!downloadFile || !selectedFile) return;
-                    void downloadFile(selectedFile.path).catch((error) => {
-                      console.error('Download failed:', error);
-                      toast.error(t('sidebarFilesTree.toast.operationFailed'));
-                    });
-                  }}
-                >
-                  <Icon name="download" className="mr-2 size-4" />
-                  {t('filesView.editor.saveFile')}
-                </Button>
-              ) : null}
-            </div>
+          ) : artifactPreview ? (
+            artifactPreview
           ) : isMarkdown && getMdViewMode() === 'preview' ? (
             <div className="relative h-full min-h-0">
               <div
@@ -4385,6 +4575,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         onClose={handleCloseDialog}
         inputRef={dialogInputRef}
       />
+      {fileTreeUpload.uploadElements}
       {fullscreenViewer}
       {isMobile ? (
         showMobilePageContent ? (

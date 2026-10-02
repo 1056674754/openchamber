@@ -727,6 +727,36 @@ export function isSvgFile(filePath: string): boolean {
   return getFileExtension(filePath) === 'svg';
 }
 
+// Playable in a browser media element: the viewer plays these instead of
+// offering a download. What a runtime's engine cannot decode (an HEVC .mov,
+// a .mkv) still opens; the element reports the failure and the viewer says so.
+const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga', 'opus', 'weba'];
+const VIDEO_EXTENSIONS = ['mp4', 'm4v', 'webm', 'mov', 'ogv', 'mkv'];
+const FONT_EXTENSIONS = ['ttf', 'otf', 'woff', 'woff2'];
+
+export function isAudioFile(filePath: string): boolean {
+  return AUDIO_EXTENSIONS.includes(getFileExtension(filePath));
+}
+
+export function isVideoFile(filePath: string): boolean {
+  return VIDEO_EXTENSIONS.includes(getFileExtension(filePath));
+}
+
+export function isFontFile(filePath: string): boolean {
+  return FONT_EXTENSIONS.includes(getFileExtension(filePath));
+}
+
+/** Comma- or tab-separated text the viewer can lay out as a table. */
+export function isDelimitedTableFile(filePath: string): boolean {
+  const ext = getFileExtension(filePath);
+  return ext === 'csv' || ext === 'tsv';
+}
+
+export function isMermaidFile(filePath: string): boolean {
+  const ext = getFileExtension(filePath);
+  return ext === 'mmd' || ext === 'mermaid';
+}
+
 const BINARY_FILE_EXTENSIONS = new Set([
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
   'zip', 'rar', '7z', 'gz', 'tgz', 'tar', 'bz2', 'xz', 'jar', 'war', 'apk', 'dmg', 'iso',
