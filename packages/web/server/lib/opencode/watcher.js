@@ -45,7 +45,9 @@ export const createOpenCodeWatcherRuntime = (deps) => {
     if (globalEventHub) {
       // Translated intake (spine OC2-S2): the hub hands v1 vocabulary on a v2
       // upstream and the same events on v1; hubs without the method keep the
-      // direct subscription.
+      // direct subscription. The events of isolated spaces feed this watcher
+      // too, so live status, unread marks and notifications work for a space's
+      // sessions as for the host's.
       const subscribe = globalEventHub.subscribeTranslatedEvent ?? globalEventHub.subscribeEvent.bind(globalEventHub);
       unsubscribeEvent = subscribe((event) => {
         const payload = unwrapGlobalEventPayload(event.payload);
@@ -53,7 +55,7 @@ export const createOpenCodeWatcherRuntime = (deps) => {
           return;
         }
         onPayload(payload);
-      });
+      }, { spaces: true });
       unsubscribeStatus = globalEventHub.subscribeStatus((status) => {
         if (signal.aborted) {
           return;

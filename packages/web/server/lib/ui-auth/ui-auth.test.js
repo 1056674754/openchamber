@@ -338,6 +338,50 @@ describe('ui auth client credential seam', () => {
     }
   });
 
+  it('admits an isolated space\'s sockets and raw file by path shape, and nothing else under the prefix', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const auth = createUiAuth({
+      password: 'secret',
+      clientAuthController: {
+        authenticateBearerToken: async (token) => token === 'client-token' ? { ok: true, clientId: 'device-1' } : null,
+      },
+    });
+
+    const mintReq = { method: 'POST', path: '/auth/url-token', headers: { authorization: 'Bearer client-token', accept: 'application/json' } };
+    const mintRes = createResponse();
+    await auth.handleUrlAuthToken(mintReq, mintRes);
+    const urlToken = mintRes.body.token;
+
+    // The sockets and the raw file of an isolated space, by path shape, and nothing else under the prefix.
+    for (const socket of ['terminal/ws', 'dev-tunnel', 'event/ws', 'global/event/ws']) {
+      const spaceWsReq = {
+        method: 'GET',
+        path: `/api/spaces/a1b2c3d4e5f6/${socket}`,
+        url: `/api/spaces/a1b2c3d4e5f6/${socket}?oc_url_token=${encodeURIComponent(urlToken)}`,
+        headers: { upgrade: 'websocket' },
+      };
+      expect(await auth.ensureSessionToken(spaceWsReq, null)).toBe('client:device-1');
+    }
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/spaces/a1b2c3d4e5f6/dictation/ws',
+      url: `/api/spaces/a1b2c3d4e5f6/dictation/ws?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { upgrade: 'websocket' },
+    }, null)).toBe(null);
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/spaces/a1b2c3d4e5f6/fs/raw',
+      url: `/api/spaces/a1b2c3d4e5f6/fs/raw?path=x.png&oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'image/png' },
+    }, null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/spaces/a1b2c3d4e5f6/session',
+      url: `/api/spaces/a1b2c3d4e5f6/session?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'application/json' },
+    }, null)).toBe(null);
+  });
+
   it('issues desktop client tokens with the UI session expiry', async () => {
     const createUiAuth = await loadCreateUiAuth();
     let createClientInput = null;

@@ -157,6 +157,57 @@ export const writeSseChunkWithBackpressure = async (res, value, signal) => {
   return !signal?.aborted && !res.writableEnded && !res.destroyed;
 };
 
+// The fields a session-list record may carry when it leaves the server (upstream d67dcca2d).
+// The isolated-spaces session index runs every record a space reports through it, because a
+// space's list is untrusted data; the host's own answers go out unsanitized as before.
+const SESSION_LIST_ALLOWED_FIELDS = [
+  'id',
+  'parentID',
+  'projectID',
+  'location',
+  'subpath',
+  'title',
+  'agent',
+  'model',
+  'cost',
+  'tokens',
+  'outcome',
+  'time',
+  'metadata',
+  'fork',
+];
+
+export const sanitizeSessionListItem = (session) => {
+  if (!session || typeof session !== 'object' || Array.isArray(session)) {
+    return session;
+  }
+
+  const sanitized = {};
+  for (const key of SESSION_LIST_ALLOWED_FIELDS) {
+    if (key in session) {
+      sanitized[key] = session[key];
+    }
+  }
+
+  // Only the revert marker: the staged file list and its snapshot are what make
+  // a reverted session's record large.
+  const revert = session.revert;
+  if (revert && typeof revert === 'object' && !Array.isArray(revert)) {
+    const revertMarker = {};
+    if (typeof revert.messageID === 'string') {
+      revertMarker.messageID = revert.messageID;
+    }
+    if (typeof revert.partID === 'string') {
+      revertMarker.partID = revert.partID;
+    }
+    if (Object.keys(revertMarker).length > 0) {
+      sanitized.revert = revertMarker;
+    }
+  }
+
+  return sanitized;
+};
+
 export const createSseBoundaryTracker = () => {
   const decoder = new TextDecoder();
   let tail = '';

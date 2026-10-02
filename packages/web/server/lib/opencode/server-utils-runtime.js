@@ -22,6 +22,8 @@ export const createServerUtilsRuntime = (dependencies) => {
     setOpenCodeNotReadySince,
     clearLastOpenCodeError,
     getLoginShellPath,
+    getMergeSpaceSessionList = null,
+    getSpaceEventHub = null,
   } = dependencies;
 
   const setOpenCodePort = (port) => {
@@ -233,6 +235,9 @@ export const createServerUtilsRuntime = (dependencies) => {
       ensureOpenCodeApiPrefix,
       getSseUpstreamStallTimeoutMs: getUpstreamStallTimeoutMs,
       getUiNotificationClients,
+      // Read when the proxy is set up, after `main` decided whether the spaces host exists.
+      mergeSpaceSessionList: typeof getMergeSpaceSessionList === 'function' ? getMergeSpaceSessionList() : null,
+      spaceEventHub: typeof getSpaceEventHub === 'function' ? getSpaceEventHub() : null,
     });
   };
 

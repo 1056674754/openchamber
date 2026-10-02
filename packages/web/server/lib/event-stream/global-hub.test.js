@@ -313,3 +313,47 @@ describe('global hub protocol-mode intake (spine OC2-S2)', () => {
     }
   });
 });
+
+// Fork adaptation of upstream d67dcca2d's space-event tests to this hub's dual-track API:
+// the fork's hub has no per-event `serialize`/`translated` handles and numbers injected
+// events itself (`spaces-…`), so the assertions below pin the fork's shapes instead.
+describe('events of isolated spaces in the global hub', () => {
+  const makeHub = () => createGlobalMessageStreamHub({
+    buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+    getOpenCodeAuthHeaders: () => ({}),
+    upstreamReconnectDelayMs: 100,
+    fetchImpl: async () => createSseResponse({ blocks: [] }),
+  });
+
+  it('delivers an injected space event to subscribers that asked for spaces only, numbered and replayable like the host\'s', () => {
+    const hub = makeHub();
+    const plain = [];
+    const translatedPlain = [];
+    const translatedWithSpaces = [];
+    const withSpaces = [];
+    hub.subscribeEvent((event) => plain.push(event));
+    hub.subscribeEvent((event) => withSpaces.push(event), { spaces: true });
+    hub.subscribeTranslatedEvent((event) => translatedPlain.push(event));
+    hub.subscribeTranslatedEvent((event) => translatedWithSpaces.push(event), { spaces: true });
+    hub.injectEvent({ payload: { type: 'session.updated', properties: {} }, directory: '/spaces/a1b2c3d4e5f6/repo', spaceId: 'a1b2c3d4e5f6' });
+    expect(plain).toHaveLength(0);
+    expect(withSpaces).toHaveLength(1);
+    expect(withSpaces[0]).toMatchObject({ spaceId: 'a1b2c3d4e5f6', directory: '/spaces/a1b2c3d4e5f6/repo' });
+    expect(withSpaces[0].eventId).toMatch(/^spaces-/);
+    // The fork's translated track gates the same way.
+    expect(translatedPlain).toHaveLength(0);
+    expect(translatedWithSpaces).toHaveLength(1);
+    expect(translatedWithSpaces[0]).toMatchObject({ spaceId: 'a1b2c3d4e5f6' });
+    hub.injectEvent({ payload: { type: 'session.updated', properties: {} }, directory: '/spaces/a1b2c3d4e5f6/repo', spaceId: 'a1b2c3d4e5f6' });
+    expect(hub.replayFrom(withSpaces[0].eventId).events.map((entry) => entry.eventId)).toEqual([withSpaces[1].eventId]);
+  });
+
+  it('marks a host event with no space, so every subscriber sees it', () => {
+    const hub = makeHub();
+    const seen = [];
+    hub.subscribeEvent((event) => seen.push(event.spaceId));
+    hub.subscribeEvent((event) => seen.push(event.spaceId), { spaces: true });
+    hub.injectEvent({ payload: { type: 'session.updated', properties: {} }, directory: '/home/me', spaceId: null });
+    expect(seen).toEqual([null, null]);
+  });
+});
