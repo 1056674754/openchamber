@@ -1,5 +1,6 @@
 
 import { OPENCHAMBER_SDK_API_VERSION, OPENCHAMBER_SDK_CHANNEL } from './api-version.ts';
+import type { FileEditorChange, FileEditorDocument, FileSnapshotRequest, FileSnapshotResultPayload } from './file-editor.ts';
 import type { GuestSessionWorktree, GuestStorageRequest, GuestStorageResult, GuestWorkspaceQuery, GuestWorkspaceSnapshot, GuestWorkspaceSubscription, GuestWorkspaceUpdate, GuestWorktree } from './workspace.ts';
 
 export type HostThemeMode = 'light' | 'dark';
@@ -58,8 +59,8 @@ export type SessionSnapshot = {
   agent?: string;
 };
 
-/** Which host chrome mounted this iframe. Not `openSurface`. */
-export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background';
+/** Which host chrome mounted this iframe. Not `openSurface`. `file` is an extension's file editor frame. */
+export type GuestHostSurface = 'panel' | 'dialog' | 'page' | 'background' | 'file';
 
 export type GuestConnection = {
   connected: boolean;
@@ -549,6 +550,12 @@ export type HostItemMessage = Envelope & { type: 'item'; payload: { item: GuestI
 /** Host → guest request. The guest answers with `resolve-result` carrying the same `id`. */
 export type HostResolveMessage = Envelope & { type: 'resolve'; id: string; payload: ResolveRequest };
 export type HostActionMessage = Envelope & { type: 'action'; id: string; payload: GuestActionItem };
+/** The file a `file` surface edits; pushed after `ready` and again whenever the frame reconnects. */
+export type HostFileOpenMessage = Envelope & { type: 'file-open'; payload: FileEditorDocument };
+/** Host → guest request. The guest answers with `file-snapshot-result` carrying the same `id`. */
+export type HostFileSnapshotMessage = Envelope & { type: 'file-snapshot'; id: string; payload: FileSnapshotRequest };
+/** The snapshot with this `version` is on disk. */
+export type HostFileSavedMessage = Envelope & { type: 'file-saved'; payload: { version: string } };
 export type HostResultMessage = Envelope & { type: 'result'; id: string } & (
   | { ok: true; payload?: HostResultPayload }
   | { ok: false; error: string; code: HostRequestErrorCode }
@@ -565,6 +572,9 @@ export type HostMessage =
   | HostItemMessage
   | HostResolveMessage
   | HostActionMessage
+  | HostFileOpenMessage
+  | HostFileSnapshotMessage
+  | HostFileSavedMessage
   | HostResultMessage;
 
 type GuestCall<Type extends string, Payload = never> = Envelope & { type: Type; id: string } & (
@@ -597,6 +607,14 @@ export type GuestBadgeMessage = GuestCall<'badge', BadgeRequest>;
 export type GuestResolveResultMessage = Envelope & { type: 'resolve-result'; id: string; payload: ResolveResultPayload };
 /** Completes a host `action`. The host sends no `result` back. */
 export type GuestActionResultMessage = Envelope & { type: 'action-result'; id: string; payload: ActionResultPayload };
+/** Answers a host `file-snapshot` by `id`. The host sends no `result` back. */
+export type GuestFileSnapshotResultMessage = Envelope & { type: 'file-snapshot-result'; id: string; payload: FileSnapshotResultPayload };
+/** A file editor's state changed. Fire and forget. */
+export type GuestFileChangeMessage = Envelope & { type: 'file-change'; payload: FileEditorChange };
+/** The user asked to save (Cmd/Ctrl+S inside the frame). Fire and forget. */
+export type GuestFileSaveMessage = Envelope & { type: 'file-save' };
+/** The editor cannot open this file; the host shows its source instead. Fire and forget. */
+export type GuestFileUnsupportedMessage = Envelope & { type: 'file-unsupported' };
 
 export type GuestMessage =
   | GuestCall<'workspace-read', GuestWorkspaceQuery>
@@ -627,7 +645,11 @@ export type GuestMessage =
   | GuestGenerateMessage
   | GuestBadgeMessage
   | GuestActionResultMessage
-  | GuestResolveResultMessage;
+  | GuestResolveResultMessage
+  | GuestFileSnapshotResultMessage
+  | GuestFileChangeMessage
+  | GuestFileSaveMessage
+  | GuestFileUnsupportedMessage;
 
 const serviceStatusSet: ReadonlySet<string> = new Set(SERVICE_STATUS_VALUES);
 
@@ -666,6 +688,7 @@ export const isGenerateResult = (
 const HOST_PUSH_TYPES: ReadonlySet<string> = new Set([
   'workspace',
   'ready', 'directory', 'session', 'connection', 'settings', 'session-lifecycle', 'item', 'resolve', 'action',
+  'file-open', 'file-snapshot', 'file-saved',
 ]);
 
 /** What a postMessage payload may carry before it is read as a host message. */

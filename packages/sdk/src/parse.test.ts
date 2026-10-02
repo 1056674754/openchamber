@@ -218,6 +218,27 @@ describe('parseManifest', () => {
     }
   });
 
+  test('accepts declared https origins and derives the origins grant', () => {
+    const result = parseManifest({
+      apiVersion: 1,
+      contributes: { panel: validBlock.contributes.panel, origins: ['https://fonts.example.com', 'https://api.example.com:8443'] },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.contributes.origins).toEqual(['https://fonts.example.com', 'https://api.example.com:8443']);
+      expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['origins']);
+    }
+  });
+
+  test('rejects origins that are not plain unique https origins', () => {
+    for (const bad of [['http://fonts.example.com'], ['https://fonts.example.com/path'], ['https://*.example.com'], ['https://a.test', 'https://a.test'], [], ['https://u:p@a.test'], new Array(9).fill(0).map((_, i) => `https://a${i}.test`)]) {
+      // Junk on purpose: this is what an untrusted package.json may carry.
+      const result = parseManifest({ apiVersion: 1, contributes: { panel: validBlock.contributes.panel, origins: bad as string[] } });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe('invalid-origins');
+    }
+  });
+
   test('accepts object socket bindings with per-platform candidates', () => {
     const result = parseManifest({
       apiVersion: 1,
@@ -952,6 +973,65 @@ describe('page-less extensions', () => {
         expect(result.message).toContain('needs panel.entry');
       }
     }
+  });
+
+  test('a service that provides the browser needs no panel or background entry', () => {
+    const result = withContributes({
+      service: { entry: 'service/main.js', runtime: 'host', provides: ['browser'] },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.contributes.service?.provides).toEqual(['browser']);
+      expect(hasGuestPage(result.manifest.contributes)).toBe(false);
+      expect(requestedGuestCapabilities(result.manifest.contributes)).toEqual(['service']);
+    }
+  });
+
+  test('refuses an unknown or repeated provides role as invalid-service', () => {
+    expect(withContributes({
+      service: { entry: 'service/main.js', runtime: 'host', provides: ['browser', 'browser'] },
+    })).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parseManifestJson(JSON.stringify({
+      apiVersion: 1,
+      contributes: { panel: pageless, service: { entry: 'service/main.js', runtime: 'host', provides: ['printer'] } },
+    }))).toMatchObject({ ok: false, code: 'invalid-service' });
+    expect(parseManifestJson(JSON.stringify({
+      apiVersion: 1,
+      contributes: { panel: pageless, service: { entry: 'service/main.js', runtime: 'host', provides: [] } },
+    }))).toMatchObject({ ok: false, code: 'invalid-service' });
+  });
+
+  test('a surface service needs no panel entry; with one, panel.dock and panel.size place it', () => {
+    const ok = withContributes({ service: { entry: 'service/main.js', runtime: 'host', surface: true } });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.manifest.contributes.service?.surface).toBe(true);
+
+    const withStrip = parseManifest({
+      apiVersion: 1,
+      contributes: {
+        panel: { ...pageless, entry: 'panel/index.html', dock: 'right', size: 240 },
+        service: { entry: 'service/main.js', runtime: 'host', surface: true },
+      },
+    });
+    expect(withStrip.ok).toBe(true);
+    if (withStrip.ok) expect(withStrip.manifest.contributes.panel).toMatchObject({ dock: 'right', size: 240 });
+
+    expect(parseManifest({
+      apiVersion: 1,
+      contributes: { panel: { ...pageless, entry: 'panel/index.html', dock: 'bottom' } },
+    })).toMatchObject({ ok: false, code: 'invalid-panel' });
+    expect(parseManifest({
+      apiVersion: 1,
+      contributes: {
+        panel: { ...pageless, entry: 'panel/index.html', size: 8 },
+        service: { entry: 'service/main.js', runtime: 'host', surface: true },
+      },
+    })).toMatchObject({ ok: false, code: 'invalid-panel' });
+
+    expect(parseManifestJson(JSON.stringify({
+      apiVersion: 1,
+      contributes: { panel: pageless, service: { entry: 'service/main.js', runtime: 'host', surface: false } },
+    }))).toMatchObject({ ok: false, code: 'invalid-service' });
   });
 
   test('still reports a malformed page-only field by its own code', () => {
