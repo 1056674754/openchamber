@@ -197,4 +197,44 @@ describe('notification trigger runtime', () => {
       data: expect.objectContaining({ type: 'error' }),
     }));
   });
+
+  it('skips a permission notification the per-request getter answered automatically', async () => {
+    const { runtime, sendPushToAllUiSessions } = createRuntime();
+    runtime.setGetIsSessionAutoAccepting(async (sessionId, directory, permissionId) => (
+      sessionId === 'main' && permissionId === 'answered'
+    ));
+
+    await runtime.maybeSendPushForTrigger({
+      type: 'permission.asked',
+      properties: { sessionID: 'main', directory: '/workspace/project', id: 'answered', permission: 'bash' },
+    });
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+
+    // A different request in the same session is not covered by that answer.
+    await runtime.maybeSendPushForTrigger({
+      type: 'permission.asked',
+      properties: { sessionID: 'main', directory: '/workspace/project', id: 'held', permission: 'bash' },
+    });
+    await vi.waitFor(() => {
+      expect(sendPushToAllUiSessions).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('notifies about a safety-held request even though the session auto-accepts', async () => {
+    // The session is registered as auto-accepting, but the per-request getter
+    // (the permission runtime) says this request was held, not answered: the
+    // user must hear about it (upstream segb 1bc709ed0).
+    const { runtime, sendPushToAllUiSessions } = createRuntime();
+    runtime.setAutoAcceptSession('main', true);
+    runtime.setGetIsSessionAutoAccepting(async () => false);
+
+    await runtime.maybeSendPushForTrigger({
+      type: 'permission.asked',
+      properties: { sessionID: 'main', directory: '/workspace/project', id: 'held', permission: 'bash' },
+    });
+
+    await vi.waitFor(() => {
+      expect(sendPushToAllUiSessions).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -102,7 +102,9 @@ import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
-import { stopAllGuestServices } from './lib/guests/service.js';
+import { beginGuestServiceShutdown, stopAllGuestServices } from './lib/guests/service.js';
+import { isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR } from './lib/enterprise-mode.js';
+import { isLoopbackBindHost, isNetworkExposedBindHost } from './lib/security/bind-host.js';
 import { createSessionGoalRuntime } from './lib/session-goal/runtime.js';
 import { createSessionAssistRuntime } from './lib/session-assist/runtime.js';
 import { createContextObligatoryRuntime } from './lib/context-obligatory/runtime.js';
@@ -130,7 +132,7 @@ import { createRemoteClientAuthRuntime } from './lib/client-auth/remote-clients.
 import { createClientPairingRuntime } from './lib/client-auth/pairing.js';
 import { registerClientAuthPairingRoutes } from './lib/client-auth/pairing-routes.js';
 import { createPairingLanHelpers } from './lib/client-auth/pairing-lan.js';
-import { createRelayService } from './lib/relay/service.js';
+import { createRelayService, relayBlockedByEnterprise } from './lib/relay/service.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 import { createProxyMiddleware, responseInterceptor } from 'http-proxy-middleware';
 import webPush from 'web-push';
@@ -1103,10 +1105,16 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   broadcastGlobalUiEvent,
   evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
   onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
+  // A pre-modes `true` policy entry becomes `safety` when the old global
+  // safety-net switch was on, `auto` otherwise; the runtime converts and
+  // persists once (upstream segb 1bc709ed0).
+  resolveLegacyEnabledMode: async () => ((await routingRuntime.legacySafetyNetEnabled()) ? 'safety' : 'auto'),
 });
 permissionAutoAcceptRuntime.start();
+// A request the safety net held still needs the user, so only one that was
+// actually answered automatically skips the notification.
 notificationTriggerRuntime.setGetIsSessionAutoAccepting(
-  (sessionId, directory) => permissionAutoAcceptRuntime.isSessionAutoAccepting(sessionId, directory),
+  (sessionId, directory, permissionId) => permissionAutoAcceptRuntime.isPermissionAutoAnswered(sessionId, directory, permissionId),
 );
 
 // Queued follow-up messages are delivered by the server so a closed tab or a
@@ -1536,6 +1544,13 @@ const openChamberSessionService = createOpenChamberSessionService({
   getOpenCodeAuthHeaders,
   waitForOpenCodeReady,
   sessionKnowledgeRuntime,
+  // OpenChamber-owned session state [spine S4]: the stores live beside this
+  // instance under the server's authoritative data dir, and metadata writes
+  // broadcast to connected UIs. persistSessionMetadata stays uninjected — the
+  // service's store+broadcast fallback is the same path; the goal-loop arm
+  // that upstream adds here lands with the SegA #22 metadata rework.
+  dataDir: OPENCHAMBER_DATA_DIR,
+  broadcastGlobalUiEvent,
   resolvePromptBody: (body, target) => routingRuntime.resolvePromptBody(body, target),
   emitSessionCreatedEvent: (event) => {
     broadcastGlobalUiEvent({
@@ -1720,6 +1735,12 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   tunnelAuthController,
   scheduledTasksRuntime,
   getRemoteInstancesRuntime: () => remoteInstancesRuntimeRef,
+  // Guest/relay teardown (upstream ff8679be0, 8e75a1dc0): close guest-service
+  // admission before the drain and stop the child processes with the rest;
+  // the relay reconciler stops with its service.
+  beginGuestServiceShutdown,
+  stopAllGuestServices,
+  getRelayService: () => relayServiceInstance,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -1808,6 +1829,19 @@ async function main(options = {}) {
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
+  // Enterprise mode keeps the server on this machine unless the administrator
+  // allowed network access. The server is a package anyone can install, so
+  // this holds for the CLI and --host as much as for the desktop toggle
+  // (upstream segb 3792ec325). Same host resolution as the listen call.
+  const effectiveBindHost = typeof host === 'string' && host.trim().length > 0
+    ? host.trim()
+    : (typeof process.env.OPENCHAMBER_HOST === 'string' && process.env.OPENCHAMBER_HOST.trim().length > 0
+      ? process.env.OPENCHAMBER_HOST.trim()
+      : '127.0.0.1');
+  if (isNetworkExposedBindHost(effectiveBindHost) && isNetworkAccessBlocked()) {
+    throw new Error(NETWORK_ACCESS_BLOCKED_ERROR);
+  }
+
   const sayTTSCapability = await detectSayTtsCapability(process);
   const devServerScanner = createDevServerScanner({ spawn, platform: process.platform });
 
@@ -1833,6 +1867,13 @@ async function main(options = {}) {
   server = http.createServer(app);
   server.keepAliveTimeout = OPENCHAMBER_HTTP_KEEP_ALIVE_TIMEOUT_MS;
   server.headersTimeout = Math.max(server.headersTimeout || 0, OPENCHAMBER_HTTP_KEEP_ALIVE_TIMEOUT_MS + 5_000);
+  // A policy placed while the server runs cannot rebind it, so connections
+  // from other machines are dropped until the next start binds loopback.
+  if (isNetworkExposedBindHost(effectiveBindHost)) {
+    server.on('connection', (socket) => {
+      if (!isLoopbackBindHost(socket.remoteAddress ?? '') && isNetworkAccessBlocked()) socket.destroy();
+    });
+  }
 
   const uiPassword = typeof options.uiPassword === 'string' ? options.uiPassword : null;
   const bootstrapResult = bootstrapRuntime.setupBaseRoutes(app, {
@@ -1921,6 +1962,9 @@ async function main(options = {}) {
     getActivePort: () => tunnelRuntimeContext.getActivePort(),
     bindHost,
     fallbackPort: port,
+    // Enterprise mode without a pinned self-hosted relay: pairing goes through
+    // the pinned relay only, so the hosted relay candidate is not offered.
+    isRelayAvailable: () => !relayBlockedByEnterprise(),
   });
 
   const relayService = createRelayService({

@@ -30,9 +30,10 @@ const requestReachedLanAddress = (req) => {
  *   getActivePort: () => number,
  *   bindHost: string,
  *   fallbackPort: number,
+ *   isRelayAvailable?: () => boolean,
  * }} deps
  */
-export const createPairingLanHelpers = ({ os, getActivePort, bindHost, fallbackPort }) => {
+export const createPairingLanHelpers = ({ os, getActivePort, bindHost, fallbackPort, isRelayAvailable = () => true }) => {
   const resolvePairingTransports = (req) => {
     const activePort = getActivePort() || fallbackPort;
     const local = `http://127.0.0.1:${activePort}`;
@@ -59,7 +60,9 @@ export const createPairingLanHelpers = ({ os, getActivePort, bindHost, fallbackP
       if (h && h !== '127.0.0.1' && h !== 'localhost' && h !== '::1') lanHost = bindHost;
     }
     const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort}` : null;
-    return { local, lan, relayAvailable: true };
+    // Enterprise mode without a pinned relay keeps pairing off the hosted
+    // relay; direct transports are unaffected (upstream segb 3792ec325).
+    return { local, lan, relayAvailable: isRelayAvailable() };
   };
 
   const resolveDirectLanUrls = (req) => {

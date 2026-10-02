@@ -690,13 +690,13 @@ export const createNotificationTriggerRuntime = (deps) => {
 
       // The session (or an ancestor) answers permissions by itself. Skip the
       // notification when this request was answered automatically; one the
-      // safety net held for the user still notifies. The request id rides
-      // along inert until the getter is wired to the permission runtime's
-      // `isPermissionAutoAnswered` (deferred index.js wiring, upstream segb
-      // 1bc709ed0).
+      // safety net held for the user still notifies. The per-request getter
+      // (the permission runtime's `isPermissionAutoAnswered`, upstream segb
+      // 1bc709ed0) decides; the local ancestor walk only covers hosts that
+      // never wired the getter.
       if (
-        await isSessionAutoAccepting(sessionId, notificationDirectory)
-        || await getIsSessionAutoAccepting?.(sessionId, notificationDirectory, requestId)
+        await (getIsSessionAutoAccepting?.(sessionId, notificationDirectory, requestId)
+          ?? isSessionAutoAccepting(sessionId, notificationDirectory))
       ) {
         if (requestKey) notifiedPermissionRequests.add(requestKey);
         return;
@@ -711,8 +711,8 @@ export const createNotificationTriggerRuntime = (deps) => {
         pushPermissionDebounceTimers.delete(sessionId);
 
         if (
-          await isSessionAutoAccepting(sessionId, notificationDirectory)
-          || await getIsSessionAutoAccepting?.(sessionId, notificationDirectory, requestId)
+          await (getIsSessionAutoAccepting?.(sessionId, notificationDirectory, requestId)
+            ?? isSessionAutoAccepting(sessionId, notificationDirectory))
         ) {
           if (requestKey) notifiedPermissionRequests.add(requestKey);
           return;
