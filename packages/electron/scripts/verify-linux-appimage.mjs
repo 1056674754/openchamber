@@ -5,6 +5,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { normalizeTargetArchitecture } from './target-architecture.mjs';
+import embeddedOpenCode from './embedded-opencode.cjs';
+
+const { normalizeEmbeddedOpenCodeVersion } = embeddedOpenCode;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const electronRoot = path.resolve(__dirname, '..');
@@ -66,7 +69,9 @@ const readOpenCodeVersion = (binaryPath) => {
     timeout: 15_000,
   });
   if (result.status !== 0) throw new Error(`Failed to run packaged OpenCode: ${binaryPath}`);
-  return (result.stdout || '').trim().split(/\s+/)[0] || '';
+  // v1 prints a bare semver; v2 prints `opencode v2.0.2`. metadata.json holds
+  // the normalized semver for both layouts.
+  return normalizeEmbeddedOpenCodeVersion(result.stdout || '');
 };
 
 export const verifyExtractedPayload = ({
