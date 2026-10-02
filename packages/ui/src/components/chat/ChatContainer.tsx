@@ -72,7 +72,6 @@ import { CHAT_BOTTOM_SPACER_DESKTOP_PX, CHAT_BOTTOM_SPACER_MOBILE_PX } from './l
 import { resolvePromptReadOnly } from '@/lib/subagentPrompting';
 import { getEmbeddedSessionChatOriginSessionId } from '@/components/layout/contextPanelEmbeddedChat';
 import { serverRegistry } from '@/lib/opencode/server-registry';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { resolveSessionEntryScrollAction } from './lib/scroll/scrollIntent';
 import { compareMessagesChronologically } from '@/sync/message-ordering';
@@ -824,9 +823,8 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [currentSessionDirectory, currentSessionId, sessionMessages.length, sessionPrefetchInfo, sync]);
 
     const { isMobile } = useDeviceInfo();
-    const isVSCode = isVSCodeRuntime();
     const promptHistory = useCompletePromptHistory({
-        enabled: promptNavigatorEnabled && hasRenderableSessionSnapshot && !isMobile && !isVSCode,
+        enabled: promptNavigatorEnabled && hasRenderableSessionSnapshot && !isMobile,
         sessionID: currentSessionId,
         directory: sessionPrefetchDirectory,
     });
@@ -1000,7 +998,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
         void scrollToTurnId(turnId, { behavior: 'auto' });
     }, [scrollToTurnId]);
     const showPromptNavigator = !isMobile
-        && !isVSCode
         && !isDesktopExpandedInput
         && promptNavigatorEnabled
         && (timelineController.turnIds.length >= 2 || promptHistory.records.length >= 2);

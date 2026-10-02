@@ -615,7 +615,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
         || shouldShow('messageTransport')
         || (shouldShow('activityRenderMode') && chatRenderMode === 'sorted')
         || shouldShow('stickyUserHeader')
-        || (shouldShow('promptNavigatorEnabled') && !isVSCode)
+        || shouldShow('promptNavigatorEnabled')
         || shouldShow('wideChatLayout')
         || shouldShow('splitAssistantMessageActions')
         || shouldShow('draftStarters')
@@ -1915,7 +1915,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                 </div>
                             )}
 
-                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('draftStarters') || shouldShow('subagentPrompting') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
+                            {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('promptNavigatorEnabled') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || shouldShow('draftStarters') || shouldShow('subagentPrompting') || (shouldShow('mobileStatusBar') && isMobile) || shouldShow('dotfiles') || shouldShow('queueMode') || shouldShow('persistDraft') || shouldShow('showToolFileIcons') || (!isMobile && shouldShow('inputSpellcheck')) || shouldShow('reasoning') || shouldShow('multiRun') || (shouldShow('sessionGoal') && !isVSCode)) && (
                                 <section className="p-2 space-y-0.5">
                                     {shouldShow('reasoning') && (
                                         <h3 className="typography-ui-header py-1.5 font-medium text-foreground">
@@ -2011,7 +2011,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
-                                    {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || (shouldShow('promptNavigatorEnabled') && !isVSCode) || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile)) && (
+                                    {(shouldShow('collapsibleUserMessages') || shouldShow('stickyUserHeader') || shouldShow('promptNavigatorEnabled') || shouldShow('wideChatLayout') || shouldShow('splitAssistantMessageActions') || (shouldShow('mobileStatusBar') && isMobile)) && (
                                         <h3 className="typography-ui-header mt-3 py-1.5 font-medium text-foreground">
                                             {t('settings.openchamber.visual.section.messageAppearance')}
                                         </h3>
@@ -2062,7 +2062,7 @@ export const OpenChamberVisualSettings: React.FC<OpenChamberVisualSettingsProps>
                                         </div>
                                     )}
 
-                                    {shouldShow('promptNavigatorEnabled') && !isVSCode && (
+                                    {shouldShow('promptNavigatorEnabled') && (
                                         <div
                                             className="group flex cursor-pointer items-center gap-2 py-0.5"
                                             role="button"

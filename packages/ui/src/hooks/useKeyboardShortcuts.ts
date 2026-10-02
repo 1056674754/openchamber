@@ -182,7 +182,7 @@ export const useKeyboardShortcuts = () => {
           || isMultiRunLauncherOpen
           || isSessionSwitcherOpen
           || isSettingsDialogOpen;
-        if (!isVSCodeRuntime() && !isMobileViewport && promptNavigatorEnabled && activeMainTab === 'chat' && currentSessionId && !hasOverlay) {
+        if (!isMobileViewport && promptNavigatorEnabled && activeMainTab === 'chat' && currentSessionId && !hasOverlay) {
           e.preventDefault();
           togglePromptNavigatorPanel();
         }

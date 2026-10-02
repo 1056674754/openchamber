@@ -17,7 +17,6 @@ import {
   type ShortcutCombo,
 } from '@/lib/shortcuts';
 import { useI18n } from '@/lib/i18n';
-import { isVSCodeRuntime } from '@/lib/desktop';
 
 const MODIFIER_KEYS = new Set(['shift', 'control', 'alt', 'meta']);
 
@@ -57,13 +56,7 @@ export const KeyboardShortcutsSettings: React.FC = () => {
   const doubleClickRename = useUIStore((state) => state.doubleClickRenameSession);
   const setDoubleClickRename = useUIStore((state) => state.setDoubleClickRenameSession);
 
-  const actions = React.useMemo(() => {
-    const all = getCustomizableShortcutActions();
-    if (!isVSCodeRuntime()) {
-      return all;
-    }
-    return all.filter((action) => action.id !== 'toggle_prompt_navigator');
-  }, []);
+  const actions = React.useMemo(() => getCustomizableShortcutActions(), []);
   const actionLabel = React.useCallback((id: string, fallbackLabel: string): string => {
     const key = `settings.openchamber.keyboardShortcuts.action.${id}.label`;
     const translated = tUnsafe(key);
