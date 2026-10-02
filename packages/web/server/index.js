@@ -102,6 +102,11 @@ import { createPermissionAutoAcceptRuntime } from './lib/permission-auto-accept/
 import { createMessageQueueRuntime } from './lib/message-queue/runtime.js';
 import { createRoutingRuntime } from './lib/routing/runtime.js';
 import { createGracefulShutdownRuntime } from './lib/opencode/shutdown-runtime.js';
+import { createSpacesHost } from './lib/spaces/host.js';
+import { createSpaceArchive } from './lib/spaces/space-archive.js';
+import { readIdleStopSetting, startIdleStop } from './lib/spaces/idle-stop.js';
+import { SPACE_IDLE_EXIT_CODE } from './lib/spaces/layout.js';
+import { createSwitchController, registerSpaceRoutes } from './lib/spaces/routes.js';
 import { beginGuestServiceShutdown, stopAllGuestServices } from './lib/guests/service.js';
 import { isNetworkAccessBlocked, NETWORK_ACCESS_BLOCKED_ERROR } from './lib/enterprise-mode.js';
 import { isLoopbackBindHost, isNetworkExposedBindHost } from './lib/security/bind-host.js';
@@ -512,6 +517,9 @@ const projectDirectoryRuntime = createProjectDirectoryRuntime({
   normalizeDirectoryPath,
   getReadSettingsFromDiskMigrated: () => readSettingsFromDiskMigrated,
   sanitizeProjects,
+  // A space's directory never runs on the host, whatever route carries it
+  // (upstream f9d212f38). Null while the feature's switch is off.
+  refuseDirectory: (candidate) => spacesHost?.refuseDirectory(candidate) ?? null,
 });
 
 const resolveDirectoryCandidate = (...args) => projectDirectoryRuntime.resolveDirectoryCandidate(...args);
@@ -707,6 +715,9 @@ let openCodeNotReadySince = 0;
 let isExternalOpenCode = false;
 let exitOnShutdown = true;
 let uiAuthController = null;
+// The isolated-spaces host: the place, the manager and the dispatcher. Null while the feature's
+// switch is off, and then nothing of the feature runs, see docs/isolated-spaces/DESIGN.md.
+let spacesHost = null;
 let activeTunnelController = null;
 let globalWatcherStartPromise = null;
 const tunnelProviderRegistry = createTunnelProviderRegistry([
@@ -1241,6 +1252,10 @@ const serverUtilsRuntime = createServerUtilsRuntime({
     }
     return snapshot.PATH;
   },
+  // Isolated spaces: with the switch on, the session list carries every space's sessions and
+  // the global SSE stream their events. Called, not captured: the host is made in `main`.
+  getMergeSpaceSessionList: () => (spacesHost ? (payload) => spacesHost.mergeSessionList(payload) : null),
+  getSpaceEventHub: () => (spacesHost ? globalMessageStreamHub : null),
 });
 
 const setOpenCodePort = (...args) => serverUtilsRuntime.setOpenCodePort(...args);
@@ -1741,6 +1756,8 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   beginGuestServiceShutdown,
   stopAllGuestServices,
   getRelayService: () => relayServiceInstance,
+  // The isolated-spaces host, when the switch is on: its connections into spaces end here.
+  getSpacesHost: () => spacesHost,
 });
 
 const gracefulShutdown = (...args) => gracefulShutdownRuntime.gracefulShutdown(...args);
@@ -1845,6 +1862,71 @@ async function main(options = {}) {
   const sayTTSCapability = await detectSayTtsCapability(process);
   const devServerScanner = createDevServerScanner({ spawn, platform: process.platform });
 
+  // The chats of deleted spaces, imported into the host's OpenCode and kept read-only there
+  // (DESIGN.md, decision 9). It reads a folder of the data directory and runs nothing else, so
+  // it exists with the switch on or off: an archived chat must stay read-only either way. The
+  // host OpenCode is addressed with the same helpers the proxy uses; an import the host's
+  // OpenCode cannot take (no import route yet on the embedded build) fails per chat and counts
+  // as not saved, which the delete confirmation already carries.
+  const spaceArchive = createSpaceArchive({
+    dataDir: OPENCHAMBER_DATA_DIR,
+    hostOpenCode: {
+      importChat: async (chat) => {
+        const response = await fetch(buildOpenCodeUrl('/experimental/session/import', ''), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...getOpenCodeAuthHeaders() },
+          body: JSON.stringify(chat),
+        }).catch((error) => {
+          throw Object.assign(new Error(`import failed: ${error?.message ?? error}`), { status: 502 });
+        });
+        if (!response.ok) {
+          throw Object.assign(new Error(`import failed (status ${response.status})`), { status: response.status });
+        }
+      },
+      removeChat: async (sessionID) => {
+        const response = await fetch(buildOpenCodeUrl(`/session/${encodeURIComponent(sessionID)}`, ''), {
+          method: 'DELETE',
+          headers: { ...getOpenCodeAuthHeaders() },
+        }).catch((error) => {
+          throw Object.assign(new Error(`remove failed: ${error?.message ?? error}`), { status: 502 });
+        });
+        if (!response.ok && response.status !== 404) {
+          throw Object.assign(new Error(`remove failed (status ${response.status})`), { status: response.status });
+        }
+      },
+    },
+  });
+
+  // The isolated-spaces switch, read here at start and changed live through its route below.
+  // While it is off the feature has no place, no manager, no route and runs no `docker`.
+  const buildSpacesHost = () => createSpacesHost({
+    dataDir: OPENCHAMBER_DATA_DIR,
+    dockerPath: searchPathFor('docker', buildAugmentedPath()) ?? 'docker',
+    // Only for a clean-up of the spaces' disk on Colima, to give the freed space back; null without it.
+    colimaPath: searchPathFor('colima', buildAugmentedPath()),
+    gitPath: searchPathFor('git', buildAugmentedPath()) ?? 'git',
+    // git starts `docker exec` itself when code moves in or out, so its PATH must find docker.
+    hostEnvironment: { ...process.env, PATH: buildAugmentedPath() },
+    // So the session list can say which registered project each space was made for.
+    listProjectDirectories: async () => {
+      const settings = await readSettingsFromDiskMigrated();
+      return sanitizeProjects(settings?.projects || []).map((project) => project.path);
+    },
+    readIdleStop: async () => readIdleStopSetting((await readSettingsFromDiskMigrated())?.isolatedSpacesIdleStop),
+    saveIdleStop: (setting) => persistSettings({ isolatedSpacesIdleStop: setting }),
+    archive: spaceArchive,
+  });
+  const startupSettings = await readSettingsFromDiskMigrated().catch(() => null);
+  if (startupSettings?.isolatedSpacesEnabled === true) {
+    try {
+      spacesHost = buildSpacesHost();
+    } catch (error) {
+      // The feature is absent then, and the rest of the server starts as with the switch off.
+      console.error(`[spaces] isolated spaces are unavailable this start: ${error?.code ?? ''} ${error?.message ?? error}`.trim());
+      spacesHost = null;
+    }
+  }
+
   const app = express();
   const serverStartedAt = new Date().toISOString();
   app.set('trust proxy', true);
@@ -1948,8 +2030,40 @@ async function main(options = {}) {
     setAutoAcceptSession,
     unreadStore,
     markersStore,
+    // A request to a space keeps its body for the space; the dispatcher streams it (upstream f9d212f38).
+    skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
   uiAuthController = bootstrapResult.uiAuthController;
+
+  // After the API auth gate, before every route that reads a directory, before the OpenCode
+  // proxy. The slot is mounted once and reads the host at call time, so the switch can turn the
+  // feature on and off live: with no host it passes every request on and no upgrade is taken.
+  // An archived chat of a deleted space is read and deleted, never run or changed.
+  app.use(spaceArchive.guard);
+  app.use((req, res, next) => (spacesHost ? spacesHost.middleware(req, res, next) : next()));
+  server.on('upgrade', (...args) => { spacesHost?.upgradeHandler(...args); });
+  const startSpacesHost = (startedHost) => {
+    startedHost.prepareUpgrades({ uiAuthController, isRequestOriginAllowed });
+    // Every space's events join the host's hub, and the host asks each space for its live status.
+    void startedHost.startEvents(globalMessageStreamHub).catch((error) => {
+      console.warn(`[spaces] could not follow the spaces: ${error?.message ?? error}`);
+    });
+  };
+  if (spacesHost) startSpacesHost(spacesHost);
+  const spacesSwitch = createSwitchController({
+    getHost: () => spacesHost,
+    setHost: (value) => { spacesHost = value; },
+    buildHost: buildSpacesHost,
+    startHost: startSpacesHost,
+    persist: (enabled) => persistSettings({ isolatedSpacesEnabled: enabled }),
+  });
+  registerSpaceRoutes(app, {
+    getJourney: () => spacesHost?.journey ?? null,
+    getPlaces: () => (spacesHost ? spacesHost.places() : []),
+    readSwitch: spacesSwitch.readSwitch,
+    setSwitch: spacesSwitch.setSwitch,
+    getArchive: () => spaceArchive,
+  });
 
   const tunnelRuntimeContext = tunnelWiringRuntime.initialize(app, port);
   const { tunnelService, startTunnelWithNormalizedRequest } = tunnelRuntimeContext;
@@ -2193,6 +2307,22 @@ async function main(options = {}) {
     await scheduledTasksRuntime.start();
   } catch (error) {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
+  }
+
+  // The server inside an isolated space stops itself after the user's idle hours, and the
+  // space's container with it (DESIGN.md, decision 11). Only a space's environment names the
+  // setting's file, so this never runs anywhere else. The exit code tells the host why it stopped.
+  const spaceIdleStopFile = process.env.OPENCHAMBER_SPACE_IDLE_STOP_FILE;
+  if (spaceIdleStopFile) {
+    startIdleStop({
+      settingsPath: spaceIdleStopFile,
+      readSessionStates: () => sessionRuntime.getSessionStateSnapshot(),
+      readPendingRequests: () => sessionRuntime.getPendingBlockingRequestsSnapshot(),
+      stopSpace: async () => {
+        await gracefulShutdown({ exitProcess: false }).catch(() => {});
+        process.exit(SPACE_IDLE_EXIT_CODE);
+      },
+    });
   }
 
   return {

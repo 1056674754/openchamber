@@ -248,6 +248,11 @@ export const registerOpenCodeProxy = (app, deps) => {
     getSseUpstreamStallTimeoutMs = () => SSE_UPSTREAM_STALL_TIMEOUT_MS,
     readWorktreeBootstrapStatus = getWorktreeBootstrapStatus,
     WORKTREE_READY_TIMEOUT_MS = 5 * 60 * 1000,
+    // Isolated spaces, when the feature's switch is on: the merged session list, and the hub
+    // whose space events the global SSE stream carries beside the host's. Both absent means
+    // the host's own answers go out exactly as before spaces (upstream d67dcca2d).
+    mergeSpaceSessionList = null,
+    spaceEventHub = null,
   } = deps;
 
   if (app.get('opencodeProxyConfigured')) {
@@ -318,6 +323,7 @@ export const registerOpenCodeProxy = (app, deps) => {
     let heartbeatTimer = null;
     let upstreamStallTimer = null;
     let didUpstreamStall = false;
+    let unsubscribeSpaceEvents = null;
     let writeQueue = Promise.resolve(true);
     const sseBoundary = createSseBoundaryTracker();
 
@@ -416,6 +422,28 @@ export const registerOpenCodeProxy = (app, deps) => {
         return writeQueue;
       };
 
+      // The events of isolated spaces ride the global stream too, one block each, written
+      // only between the upstream's own blocks so a block of the host's is never cut
+      // (upstream d67dcca2d). A directory in the query or in the header scopes the stream to
+      // the host's one directory; the fork's per-directory subscriber lanes keep their
+      // space-free answers.
+      const isGlobalStream = !new URL(requestUrl, 'http://localhost').searchParams.get('directory') && !req.get('x-opencode-directory');
+      const pendingSpaceBlocks = [];
+      const flushSpaceBlocks = async () => {
+        while (pendingSpaceBlocks.length > 0 && sseBoundary.isAtBoundary() && !abortController.signal.aborted) {
+          const canContinue = await enqueueSseWrite(pendingSpaceBlocks.shift());
+          if (!canContinue) return false;
+        }
+        return true;
+      };
+      if (spaceEventHub && isGlobalStream) {
+        unsubscribeSpaceEvents = spaceEventHub.subscribeEvent((event) => {
+          if (event.spaceId === null) return;
+          pendingSpaceBlocks.push(`data: ${JSON.stringify(event.payload)}\n\n`);
+          void flushSpaceBlocks();
+        }, { spaces: true });
+      }
+
       scheduleHeartbeat();
       resetUpstreamStallTimer();
 
@@ -430,6 +458,9 @@ export const registerOpenCodeProxy = (app, deps) => {
           sseBoundary.observe(value);
           const canContinue = await enqueueSseWrite(value);
           if (!canContinue) {
+            break;
+          }
+          if (!await flushSpaceBlocks()) {
             break;
           }
         }
@@ -458,6 +489,10 @@ export const registerOpenCodeProxy = (app, deps) => {
       if (upstreamStallTimer) {
         clearTimeout(upstreamStallTimer);
         upstreamStallTimer = null;
+      }
+      if (unsubscribeSpaceEvents) {
+        unsubscribeSpaceEvents();
+        unsubscribeSpaceEvents = null;
       }
       req.off('close', closeUpstream);
       try {
@@ -508,6 +543,47 @@ export const registerOpenCodeProxy = (app, deps) => {
     }
 
     next();
+  });
+
+  // Isolated spaces: the first page of the global list carries every space's sessions after
+  // the host's (upstream d67dcca2d, refitted to the fork's list semantics). The fork reads
+  // the global list through its own multi-server lanes — a remote server's list arrives on
+  // its own lane and never passes here, so a host merge cannot leak into it. A later page
+  // (the fork pages by `cursor`), a list scoped to one directory by query or by the
+  // `x-opencode-directory` header, and every answer with the switch off fall through to the
+  // generic proxy unchanged; a host read that fails falls through too, so the error shape
+  // stays the proxy's own.
+  app.get('/api/session', async (req, res, next) => {
+    if (typeof mergeSpaceSessionList !== 'function') return next();
+    const rawUrl = req.originalUrl || req.url || '';
+    let listQuery;
+    try {
+      listQuery = new URL(rawUrl, 'http://localhost').searchParams;
+    } catch {
+      return next();
+    }
+    if (listQuery.get('directory') || listQuery.get('cursor') || req.get('x-opencode-directory')) {
+      return next();
+    }
+
+    try {
+      const fetchOpts = {
+        method: 'GET',
+        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(10000),
+      };
+      const globalRes = await fetch(buildOpenCodeUrl('/session', ''), fetchOpts);
+      if (!globalRes.ok) return next();
+      const hostPayload = await globalRes.json().catch(() => null);
+      const hostRecords = Array.isArray(hostPayload)
+        ? hostPayload
+        : (hostPayload && typeof hostPayload === 'object' && Array.isArray(hostPayload.data) ? hostPayload.data : null);
+      if (hostRecords === null) return next();
+      res.json(await mergeSpaceSessionList(hostPayload));
+    } catch (error) {
+      console.log(`[spaces] merged session list failed: ${error?.message ?? error}, falling through`);
+      next();
+    }
   });
 
   // Windows: session merge for cross-directory session listing
