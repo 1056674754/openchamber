@@ -159,6 +159,13 @@ WebSocket protocol utilities for terminal input handling including message norma
 
 - Module docs: `packages/web/server/lib/terminal/DOCUMENTATION.md`
 
+##### spaces
+
+Isolated Spaces: Docker places, space manager, gatekeeper, code in/out, dispatcher, journey routes, grants, idle stop, chat archive. Ported unwired (v2.1.0 merge round B8); `server/index.js` wiring, the dispatcher prefix in `runtime-fetch.ts`, and the sidebar/composer entry points are deferred to the post-S6 wiring batch.
+
+- Module docs: `packages/web/server/lib/spaces/DOCUMENTATION.md`
+- Design: `docs/isolated-spaces/DESIGN.md` (read before any boundary-touching change; boundary skill: `.agents/skills/isolated-space-boundary`)
+
 ##### tts
 
 Server-side text-to-speech services and summarization helpers for `/api/tts/*` endpoints.
