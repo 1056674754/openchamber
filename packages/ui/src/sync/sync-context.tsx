@@ -3050,6 +3050,31 @@ export const collectComposerForms = (
   return own.length > 0 ? [...own, ...locationScoped] : locationScoped
 }
 
+/**
+ * Permission requests for the composer's session subtree: the session's own,
+ * then its children's (subagents). Permissions, unlike forms, have no
+ * location-scoped sentinel — every request is owned by a session.
+ */
+export const collectScopedBlockingPermissions = (
+  sessions: Session[],
+  permissionsBySession: Record<string, PermissionRequest[] | undefined>,
+  sessionID: string | null,
+  empty: PermissionRequest[],
+): PermissionRequest[] => {
+  if (!sessionID) return empty
+  const scopedIds = collectVisibleSessionIdsForBlockingRequests(sessions, sessionID)
+  const collected: PermissionRequest[] = []
+  const seen = new Set<string>()
+  for (const scopedId of scopedIds) {
+    for (const request of permissionsBySession[scopedId] ?? []) {
+      if (!request?.id || seen.has(request.id)) continue
+      seen.add(request.id)
+      collected.push(request)
+    }
+  }
+  return collected.length > 0 ? collected : empty
+}
+
 type ScopedBlockingFormsCache = {
   sessionID: string | null
   sessions: Session[] | null
@@ -3090,6 +3115,55 @@ export function useScopedBlockingForms(sessionID: string | null, directory?: str
         sessionID,
         sessions: state.session,
         formsBySession,
+        result,
+      }
+      return result
+    }, [sessionID]),
+    directory,
+    serverId,
+    sessionID ?? undefined,
+  )
+}
+
+type ScopedBlockingPermissionsCache = {
+  sessionID: string | null
+  sessions: Session[] | null
+  permissionsBySession: Record<string, PermissionRequest[] | undefined> | null
+  result: PermissionRequest[]
+}
+
+/**
+ * Pending permission requests for the composer's session subtree, from the
+ * `permission` channel the event reducer feeds. Mirrors the form dock's
+ * scoping: the session's own requests first, then its children's.
+ */
+export function useScopedBlockingPermissions(sessionID: string | null, directory?: string): PermissionRequest[] {
+  const serverId = useServerIdForSession(sessionID ?? undefined)
+  const cacheRef = useRef<ScopedBlockingPermissionsCache>({
+    sessionID: null,
+    sessions: null,
+    permissionsBySession: null,
+    result: EMPTY_PERMISSION_REQUESTS,
+  })
+
+  return useDirectorySync(
+    useCallback((state: State) => {
+      const permissionsBySession = state.permission
+      const cache = cacheRef.current
+      if (
+        cache.sessionID === sessionID
+        && cache.sessions === state.session
+        && cache.permissionsBySession === permissionsBySession
+      ) {
+        return cache.result
+      }
+
+      const next = collectScopedBlockingPermissions(state.session, permissionsBySession, sessionID, EMPTY_PERMISSION_REQUESTS)
+      const result = areRequestArraysReferentiallyEqual(cache.result, next) ? cache.result : next
+      cacheRef.current = {
+        sessionID,
+        sessions: state.session,
+        permissionsBySession,
         result,
       }
       return result

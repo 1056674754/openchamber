@@ -8,8 +8,6 @@ import ChatEmptyState from './ChatEmptyState';
 import { DraftPresetChips } from './DraftPresetChips';
 import type { ResolvedStarter } from './useDraftStarters';
 import MessageList, { type MessageListHandle } from './MessageList';
-import { PermissionCard } from './PermissionCard';
-import { LegacyFormCard } from './LegacyFormCard';
 import { hasActiveFormToolInCurrentTurn, recoverPendingFormWithRetry } from '@/sync/form-recovery';
 import { SessionRecapNote } from './SessionRecapNote';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
@@ -32,7 +30,6 @@ import { useDeviceInfo } from '@/lib/device';
 import { Button } from '@/components/ui/button';
 import { OverlayScrollbar } from '@/components/ui/OverlayScrollbar';
 import { Icon } from "@/components/icon/Icon";
-import type { PermissionRequest } from '@/types/permission';
 import type { FormRequest } from '@/types/form';
 import { cn } from '@/lib/utils';
 import {
@@ -192,7 +189,6 @@ type ChatViewportProps = {
     scrollToBottom: () => void;
     notifyViewportStabilize: () => void;
     sessionForms: FormRequest[];
-    sessionPermissions: PermissionRequest[];
     inlineBlockingRequestsByTool: ReturnType<typeof splitBlockingRequestsByVisibleTool>['inlineByTool'];
     isProgrammaticFollowActive: boolean;
     promptHistoryRecords: readonly SessionMessageRecord[];
@@ -247,7 +243,6 @@ const ChatViewport = React.memo(({
     syncPendingPrependAnchorToViewport,
     scrollToBottom,
     sessionForms,
-    sessionPermissions,
     inlineBlockingRequestsByTool,
     isProgrammaticFollowActive,
     promptHistoryRecords,
@@ -422,16 +417,11 @@ const ChatViewport = React.memo(({
                                 onInitialBottomReady={onInitialScrollReady}
                             />
                         </InlineBlockingRequestsContext.Provider>
-                        {(sessionForms.length > 0 || sessionPermissions.length > 0) && (
-                            <div>
-                                {sessionForms.map((form) => (
-                                    <LegacyFormCard key={form.id} form={form} />
-                                ))}
-                                {sessionPermissions.map((permission) => (
-                                    <PermissionCard key={permission.id} permission={permission} />
-                                ))}
-                            </div>
-                        )}
+                        {/* Pending forms and permissions for the session subtree no
+                            longer render as a card stack at the tail of the
+                            transcript: the FormDock and PermissionDock mounted above
+                            the composer (ChatInput) own them. The scoped data below
+                            still feeds inline tool anchoring. */}
 
                         {currentSessionId && (
                             <SessionErrorNotice sessionId={currentSessionId} directory={sessionDirectory ?? undefined} />
@@ -506,7 +496,6 @@ const ChatViewport = React.memo(({
         && prev.handleLoadOlder === next.handleLoadOlder
         && prev.scrollToBottom === next.scrollToBottom
         && prev.sessionForms === next.sessionForms
-        && prev.sessionPermissions === next.sessionPermissions
         && prev.inlineBlockingRequestsByTool === next.inlineBlockingRequestsByTool
         && prev.isProgrammaticFollowActive === next.isProgrammaticFollowActive
         && prev.promptHistoryRecords === next.promptHistoryRecords
@@ -943,7 +932,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     const {
         inlineByTool: inlineBlockingRequestsByTool,
         trailingForms,
-        trailingPermissions,
     } = React.useMemo(
         () => splitBlockingRequestsByVisibleTool(sessionForms, sessionPermissions, visibleToolRequestKeys),
         [sessionPermissions, sessionForms, visibleToolRequestKeys],
@@ -1321,7 +1309,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                 scrollToBottom={resumeToLatestInstant}
                 notifyViewportStabilize={notifyViewportStabilize}
                 sessionForms={trailingForms}
-                sessionPermissions={trailingPermissions}
                 inlineBlockingRequestsByTool={inlineBlockingRequestsByTool}
                 isProgrammaticFollowActive={isFollowingProgrammatically}
                 promptHistoryRecords={promptHistory.records}

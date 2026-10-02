@@ -1,17 +1,18 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import type { PermissionRequest, PermissionResponse } from '@/types/permission';
-import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useRoutingStore } from '@/stores/useRoutingStore';
-import { useSessions } from '@/sync/sync-context';
-import * as sessionActions from '@/sync/session-actions';
+import { Button } from '@/components/ui/button';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { generateSyntaxTheme } from '@/lib/theme/syntaxThemeGenerator';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { formatShortcutForDisplay } from '@/lib/shortcuts';
 import { getVisiblePermissionPatterns } from './permissionCardPatterns';
+import { getPermissionToolPresentation } from './permissionToolPresentation';
+import { usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
 
 // DiffPreview/WritePreview import react-syntax-highlighter + diff parsing, and
 // are only conditionally rendered (when a permission request carries file
@@ -56,51 +57,9 @@ const PERMISSION_JSON_CUSTOM_STYLE: React.CSSProperties = {
 
 interface PermissionCardProps {
   permission: PermissionRequest;
-  onResponse?: (response: 'once' | 'always' | 'reject') => void;
+  onResponse?: (response: PermissionResponse) => void;
   inline?: boolean;
 }
-
-const getToolIcon = (toolName: string) => {
-  const iconClass = "h-3 w-3";
-  const tool = toolName.toLowerCase();
-
-  if (tool === 'edit' || tool === 'multiedit' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-    return <Icon name="pencil-ai" className={iconClass} />;
-  }
-
-  if (tool === 'write' || tool === 'create' || tool === 'file_write') {
-    return <Icon name="file-edit" className={iconClass} />;
-  }
-
-  if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal' || tool === 'shell_command') {
-    return <Icon name="terminal-box" className={iconClass} />;
-  }
-
-  if (tool === 'webfetch' || tool === 'fetch' || tool === 'curl' || tool === 'wget') {
-    return <Icon name="global" className={iconClass} />;
-  }
-
-  return <Icon name="tools" className={iconClass} />;
-};
-
-const getToolDisplayName = (toolName: string): string => {
-  const tool = toolName.toLowerCase();
-
-  if (tool === 'edit' || tool === 'multiedit' || tool === 'str_replace' || tool === 'str_replace_based_edit_tool') {
-    return 'edit';
-  }
-  if (tool === 'write' || tool === 'create' || tool === 'file_write') {
-    return 'write';
-  }
-  if (tool === 'bash' || tool === 'shell' || tool === 'cmd' || tool === 'terminal' || tool === 'shell_command') {
-    return 'bash';
-  }
-  if (tool === 'webfetch' || tool === 'fetch' || tool === 'curl' || tool === 'wget') {
-    return 'webfetch';
-  }
-
-  return toolName;
-};
 
 const SAFETY_KIND_LABEL_KEYS = new Map<string, I18nKey>([
   ['read_only', 'routing.safetyKind.readOnly'],
@@ -114,62 +73,31 @@ const SAFETY_KIND_LABEL_KEYS = new Map<string, I18nKey>([
 
 const safetyKindLabelKey = (kind: string): I18nKey => SAFETY_KIND_LABEL_KEYS.get(kind) ?? 'routing.safetyKind.unknown';
 
-export const PermissionCard: React.FC<PermissionCardProps> = ({
-  permission,
-  onResponse,
-  inline = false,
-}) => {
+/** The safety-net hold notice and what the request wants to do. */
+export const PermissionRequestContent: React.FC<{ permission: PermissionRequest }> = ({ permission }) => {
   const { t } = useI18n();
-  const [isResponding, setIsResponding] = React.useState(false);
-  const [hasResponded, setHasResponded] = React.useState(false);
-  const respondToPermission = sessionActions.respondToPermission;
-  const sessions = useSessions();
-  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
-  // Set while the routing safety net stopped auto-accept for this request.
-  const held = useRoutingStore((state) => state.held[permission.id] ?? null);
-  const isFromSubagent = React.useMemo(() => {
-    if (!currentSessionId || permission.sessionID === currentSessionId) return false;
-    const sourceSession = sessions.find((session) => session.id === permission.sessionID);
-    return Boolean(sourceSession?.parentID && sourceSession.parentID === currentSessionId);
-  }, [permission.sessionID, currentSessionId, sessions]);
   const { currentTheme } = useThemeSystem();
   const syntaxTheme = React.useMemo(() => generateSyntaxTheme(currentTheme), [currentTheme]);
-
-  const handleResponse = async (response: PermissionResponse) => {
-    setIsResponding(true);
-
-    try {
-      await respondToPermission(permission.sessionID, permission.id, response);
-      setHasResponded(true);
-      onResponse?.(response);
-    } catch (error) {
-      console.error('[PermissionCard] Failed to respond to permission:', error);
-    } finally {
-      setIsResponding(false);
-    }
-  };
-
-  if (hasResponded) {
-    return null;
-  }
+  // Set while the routing safety net stopped auto-accept for this request.
+  const held = useRoutingStore((state) => state.held[permission.id] ?? null);
 
   const toolName = permission.permission || 'unknown';
   const tool = toolName.toLowerCase();
   const isBashTool = tool === 'bash' || tool === 'shell' || tool === 'shell_command';
 
+  const metadata = permission.metadata ?? {};
   const getMeta = (key: string, fallback: string = ''): string => {
-    const val = permission.metadata[key];
+    const val = metadata[key];
     return typeof val === 'string' ? val : (typeof val === 'number' ? String(val) : fallback);
   };
   const getMetaNum = (key: string): number | undefined => {
-    const val = permission.metadata[key];
+    const val = metadata[key];
     return typeof val === 'number' ? val : undefined;
   };
   const getMetaBool = (key: string): boolean => {
-    const val = permission.metadata[key];
+    const val = metadata[key];
     return Boolean(val);
   };
-  const displayToolName = getToolDisplayName(toolName);
   const bashCommand = isBashTool
     ? getMeta('command') || getMeta('cmd') || getMeta('script')
     : '';
@@ -181,7 +109,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
       const description = getMeta('description');
       const workingDir = getMeta('cwd') || getMeta('working_directory') || getMeta('directory') || getMeta('path');
       const timeout = getMetaNum('timeout');
- 
+
       return (
         <>
           {description && (
@@ -225,7 +153,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
         <>
           {replaceAll && (
             <div className="typography-meta text-muted-foreground mb-2">
-              <span className="font-semibold">⚠️ Replace All Occurrences</span>
+              <span className="font-semibold">{t('chat.permissionCard.replaceAll')}</span>
             </div>
           )}
           {changes && (
@@ -259,7 +187,7 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
     if (tool === 'webfetch' || tool === 'fetch' || tool === 'curl' || tool === 'wget') {
       const url = getMeta('url') || getMeta('uri') || getMeta('endpoint');
       const method = getMeta('method') || 'GET';
-      const headers = permission.metadata.headers && typeof permission.metadata.headers === 'object' ? (permission.metadata.headers as Record<string, unknown>) : undefined;
+      const headers = metadata.headers && typeof metadata.headers === 'object' ? (metadata.headers as Record<string, unknown>) : undefined;
       const body = getMeta('body') || getMeta('data') || getMeta('payload');
       const timeout = getMetaNum('timeout');
       const format = getMeta('format') || getMeta('responseType');
@@ -339,12 +267,12 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
           </div>
         )}
         {}
-        {Object.keys(permission.metadata).length > 0 && !genericContent && !description && (
+        {Object.keys(metadata).length > 0 && !genericContent && !description && (
           <div>
             <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.details')}</div>
             <ScrollableOverlay outerClassName="max-h-32" className="p-0">
               <pre className="typography-meta font-mono px-2 py-1 bg-muted/30 rounded whitespace-pre-wrap break-all">
-                {JSON.stringify(permission.metadata, null, 2)}
+                {JSON.stringify(metadata, null, 2)}
               </pre>
             </ScrollableOverlay>
           </div>
@@ -353,162 +281,170 @@ export const PermissionCard: React.FC<PermissionCardProps> = ({
     );
   };
 
+  return (
+    <>
+      {held ? (
+        <div className="flex items-start gap-2 px-2 py-1.5 border-b border-border/20 typography-meta text-[var(--status-warning)]">
+          <Icon name="shield-keyhole" className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+          <span>
+            {t('chat.permissionCard.heldBySafetyNet')}
+            {held.kind ? ` · ${t(safetyKindLabelKey(held.kind))}` : ''}
+          </span>
+        </div>
+      ) : null}
+
+      <div className="px-2 py-2">
+        {visiblePatterns.length > 0 && (
+          <div className="mb-2">
+            <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.patterns')}</div>
+            <code className="typography-meta px-2 py-1 bg-muted/30 rounded block break-all">
+              {visiblePatterns.join(", ")}
+            </code>
+          </div>
+        )}
+
+        {renderToolContent()}
+      </div>
+    </>
+  );
+};
+
+const alwaysLabel = (permission: PermissionRequest, t: ReturnType<typeof useI18n>['t']): string => {
+  const always = permission.always ?? [];
+  if (always.length === 0) return t('chat.permissionCard.alwaysAllow');
+  const shown = always.slice(0, 2).join(', ');
+  return t('chat.permissionCard.alwaysAllowPatterns', { patterns: always.length > 2 ? `${shown}...` : shown });
+};
+
+/** Allow once / always / deny. The dock uses the shared buttons; the inline card keeps its status-coloured row. */
+export const PermissionActions: React.FC<{
+  permission: PermissionRequest;
+  isResponding: boolean;
+  onRespond: (response: PermissionResponse) => void;
+  variant: 'inline' | 'dock';
+}> = ({ permission, isResponding, onRespond, variant }) => {
+  const { t } = useI18n();
+  const hasSave = (permission.always?.length ?? 0) > 0;
+
+  if (variant === 'dock') {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2 pt-1">
+        <Button variant="ghost" size="xs" disabled={isResponding} onClick={() => onRespond('reject')} className="text-[var(--status-error)]">
+          <Icon name="close" className="size-3.5" />
+          {t('chat.permissionCard.deny')}
+          <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
+        </Button>
+        <div className="min-w-0 flex-1" />
+        <Button variant="outline" size="xs" disabled={isResponding} onClick={() => onRespond('always')} title={hasSave ? alwaysLabel(permission, t) : undefined}>
+          <Icon name="time" className="size-3.5" />
+          <span className="max-w-[180px] truncate">{alwaysLabel(permission, t)}</span>
+          {!hasSave ? <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
+        </Button>
+        <Button size="xs" disabled={isResponding} onClick={() => onRespond('once')}>
+          {isResponding ? <Icon name="loader-4" className="size-3.5 animate-spin" /> : <Icon name="check" className="size-3.5" />}
+          {t('chat.permissionCard.allowOnce')}
+          <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+enter')}</kbd>
+        </Button>
+      </div>
+    );
+  }
+
+  const rowClass = cn(
+    "flex items-center gap-1.5 sm:gap-1 px-3 sm:px-2 py-1.5 sm:py-1 typography-meta font-medium rounded transition-all min-h-[32px] sm:min-h-0 w-full sm:w-auto",
+    "disabled:opacity-50 disabled:cursor-not-allowed",
+  );
+  const hover = (idle: string, active: string) => ({
+    onMouseEnter: (event: React.MouseEvent<HTMLButtonElement>) => { event.currentTarget.style.backgroundColor = active; },
+    onMouseLeave: (event: React.MouseEvent<HTMLButtonElement>) => { event.currentTarget.style.backgroundColor = idle; },
+  });
+
+  return (
+    <div className="px-2 pb-2 sm:pb-1.5 pt-1.5 sm:pt-1 flex flex-col sm:flex-row sm:items-center sm:flex-wrap gap-1.5 border-t border-border/20">
+      <button
+        onClick={() => onRespond('once')}
+        disabled={isResponding}
+        className={rowClass}
+        style={{ backgroundColor: 'rgb(var(--status-success) / 0.1)', color: 'var(--status-success)' }}
+        {...hover('rgb(var(--status-success) / 0.1)', 'rgb(var(--status-success) / 0.2)')}
+      >
+        <Icon name="check" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+        {t('chat.permissionCard.allowOnce')}
+        <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+enter')}</kbd>
+      </button>
+
+      <button
+        onClick={() => onRespond('always')}
+        disabled={isResponding}
+        className={rowClass}
+        style={{ backgroundColor: 'rgb(var(--muted) / 0.5)', color: 'var(--muted-foreground)' }}
+        {...hover('rgb(var(--muted) / 0.5)', 'rgb(var(--muted) / 0.7)')}
+      >
+        <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+        <span className="truncate max-w-[180px]">{alwaysLabel(permission, t)}</span>
+        {!hasSave ? <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
+      </button>
+
+      <button
+        onClick={() => onRespond('reject')}
+        disabled={isResponding}
+        className={rowClass}
+        style={{ backgroundColor: 'rgb(var(--status-error) / 0.1)', color: 'var(--status-error)' }}
+        {...hover('rgb(var(--status-error) / 0.1)', 'rgb(var(--status-error) / 0.2)')}
+      >
+        <Icon name="close" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
+        {t('chat.permissionCard.deny')}
+        <kbd className="ml-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+backspace')}</kbd>
+      </button>
+
+      {isResponding && (
+        <div className="flex justify-center w-full sm:w-auto sm:ml-auto py-1 sm:py-0 typography-meta text-muted-foreground">
+          <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** The inline card the BTW sheet and tool anchoring show for their session's requests. */
+export const PermissionCard: React.FC<PermissionCardProps> = ({
+  permission,
+  onResponse,
+  inline = false,
+}) => {
+  const { t } = useI18n();
+  const { isResponding, hasResponded, respond } = usePermissionResponse(permission, onResponse);
+  const isFromSubagent = usePermissionFromSubagent(permission);
+  const tool = getPermissionToolPresentation(permission);
+
+  if (hasResponded) {
+    return null;
+  }
+
   const card = (
     <div className="-mt-1 border border-border/30 rounded-xl bg-muted/10">
-          {}
           <div className="px-2 py-1.5 border-b border-border/20 bg-muted/5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Icon name="question" className="h-3.5 w-3.5 text-[var(--status-warning)]" />
                 <span className="typography-meta font-medium text-muted-foreground">
-                  Permission Required
+                  {t('chat.permissionCard.title')}
                 </span>
                 {isFromSubagent ? (
                   <span className="typography-micro text-muted-foreground px-1.5 py-0.5 rounded bg-foreground/5">
-                    From subagent
+                    {t('chat.questionCard.fromSubagent')}
                   </span>
                 ) : null}
               </div>
               <div className="flex items-center gap-1.5">
-                {getToolIcon(toolName)}
-                <span className="typography-meta text-muted-foreground font-medium">{displayToolName}</span>
+                {tool.icon}
+                <span className="typography-meta text-muted-foreground font-medium">{tool.name}</span>
               </div>
             </div>
           </div>
 
-          {held ? (
-            <div className="flex items-start gap-2 px-2 py-1.5 border-b border-border/20 typography-meta text-[var(--status-warning)]">
-              <Icon name="shield-keyhole" className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-              <span>
-                {t('chat.permissionCard.heldBySafetyNet')}
-                {held.kind ? ` · ${t(safetyKindLabelKey(held.kind))}` : ''}
-              </span>
-            </div>
-          ) : null}
+          <PermissionRequestContent permission={permission} />
 
-          {}
-          <div className="px-2 py-2">
-            {visiblePatterns.length > 0 && (
-              <div className="mb-2">
-                <div className="typography-meta text-muted-foreground mb-1">{t('chat.permissionCard.patterns')}</div>
-                <code className="typography-meta px-2 py-1 bg-muted/30 rounded block break-all">
-                  {visiblePatterns.join(", ")}
-                </code>
-              </div>
-            )}
-
-            {renderToolContent()}
-          </div>
-
-          {}
-          <div className="px-2 pb-2 sm:pb-1.5 pt-1.5 sm:pt-1 flex flex-col sm:flex-row sm:items-center sm:flex-wrap gap-1.5 border-t border-border/20">
-            <button
-              onClick={() => handleResponse('once')}
-              disabled={isResponding}
-              className={cn(
-                "flex items-center gap-1.5 sm:gap-1 px-3 sm:px-2 py-1.5 sm:py-1 typography-meta font-medium rounded transition-all min-h-[32px] sm:min-h-0 w-full sm:w-auto",
-                "disabled:opacity-50 disabled:cursor-not-allowed"
-              )}
-              style={{
-                backgroundColor: 'rgb(var(--status-success) / 0.1)',
-                color: 'var(--status-success)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgb(var(--status-success) / 0.2)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgb(var(--status-success) / 0.1)';
-              }}
-            >
-              <Icon name="check" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
-              Allow Once
-            </button>
-
-            {permission.always.length > 0 ? (
-              <button
-                onClick={() => handleResponse('always')}
-                disabled={isResponding}
-                className={cn(
-                  "flex items-center gap-1.5 sm:gap-1 px-3 sm:px-2 py-1.5 sm:py-1 typography-meta font-medium rounded transition-all min-h-[32px] sm:min-h-0 w-full sm:w-auto",
-                  "disabled:opacity-50 disabled:cursor-not-allowed"
-                )}
-                style={{
-                  backgroundColor: 'rgb(var(--muted) / 0.5)',
-                  color: 'var(--muted-foreground)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgb(var(--muted) / 0.7)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgb(var(--muted) / 0.5)';
-                }}
-              >
-                <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
-                {(() => {
-                  const always = (permission.always as string[]) || (permission.metadata.always as string[]) || [];
-                  if (always.length === 0) return "Always Allow";
-                  const displayPatterns = always.slice(0, 2);
-                  const text = displayPatterns.join(", ");
-                  const hasMore = always.length > 2;
-                  return (
-                    <span className="truncate max-w-[180px]">
-                      {hasMore ? `Always: ${text}...` : `Always: ${text}`}
-                    </span>
-                  );
-                })()}
-              </button>
-            ) : (
-              <button
-                onClick={() => handleResponse('always')}
-                disabled={isResponding}
-                className={cn(
-                  "flex items-center gap-1.5 sm:gap-1 px-3 sm:px-2 py-1.5 sm:py-1 typography-meta font-medium rounded transition-all min-h-[32px] sm:min-h-0 w-full sm:w-auto",
-                  "disabled:opacity-50 disabled:cursor-not-allowed"
-                )}
-                style={{
-                  backgroundColor: 'rgb(var(--muted) / 0.5)',
-                  color: 'var(--muted-foreground)'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgb(var(--muted) / 0.7)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgb(var(--muted) / 0.5)';
-                }}
-              >
-                <Icon name="time" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
-                Always Allow
-              </button>
-            )}
-
-            <button
-              onClick={() => handleResponse('reject')}
-              disabled={isResponding}
-              className={cn(
-                "flex items-center gap-1.5 sm:gap-1 px-3 sm:px-2 py-1.5 sm:py-1 typography-meta font-medium rounded transition-all min-h-[32px] sm:min-h-0 w-full sm:w-auto",
-                "disabled:opacity-50 disabled:cursor-not-allowed"
-              )}
-              style={{
-                backgroundColor: 'rgb(var(--status-error) / 0.1)',
-                color: 'var(--status-error)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgb(var(--status-error) / 0.2)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgb(var(--status-error) / 0.1)';
-              }}
-            >
-              <Icon name="close" className="h-3.5 w-3.5 sm:h-3 sm:w-3 flex-shrink-0" />
-              Deny
-            </button>
-
-            {isResponding && (
-              <div className="flex justify-center w-full sm:w-auto sm:ml-auto py-1 sm:py-0 typography-meta text-muted-foreground">
-                <div className="animate-spin h-3 w-3 border border-primary border-t-transparent rounded-full" />
-              </div>
-            )}
-          </div>
+          <PermissionActions permission={permission} isResponding={isResponding} onRespond={(response) => void respond(response)} variant="inline" />
     </div>
   );
 

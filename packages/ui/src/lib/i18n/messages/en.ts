@@ -2163,6 +2163,16 @@ export const dict = {
   'chat.formDock.progress': '{current} of {total}',
   'chat.formDock.stepAria': 'Question {index}: {title}',
   'chat.formDock.waiting': '{count} more waiting',
+  // v2 permission dock surfaces (spine S8, upstream 654705f7d).
+  'chat.permissionCard.title': 'Permission required',
+  'chat.permissionCard.allowOnce': 'Allow once',
+  'chat.permissionCard.alwaysAllow': 'Always allow',
+  'chat.permissionCard.alwaysAllowPatterns': 'Always: {patterns}',
+  'chat.permissionCard.deny': 'Deny',
+  'chat.permissionCard.replaceAll': 'Replaces every occurrence',
+  'chat.permissionDock.expandAria': 'Expand the permission request',
+  'chat.permissionDock.collapseAria': 'Collapse the permission request',
+  'chat.permissionDock.stepAria': 'Request {index}: {tool}',
 
   'chat.textSelection.toast.noProject': 'No project found for this session',
   'chat.textSelection.toast.addToNotesFailed': 'Failed to add to notes',

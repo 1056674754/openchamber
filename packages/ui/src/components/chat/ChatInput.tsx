@@ -1,6 +1,8 @@
 import React from 'react';
 import { BrowserVoiceButton, ComposerDictation } from '@/components/voice';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
+import { FormDock } from '@/components/chat/FormDock';
+import { PermissionDock } from '@/components/chat/PermissionDock';
 import { useBrowserVoice } from '@/hooks/useBrowserVoice';
 // sessionStore removed — currentSessionId comes from useSessionUIStore
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -34,7 +36,7 @@ import { isGuestActive } from '@/lib/guests/capabilities';
 import { routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import type { SendDeliveryMode } from '@/sync/session-actions';
-import { useDirectorySync, useSessionMessages, useSessionMessagesResolved, useSessionRevertMessageID, useUserMessageHistory } from '@/sync/sync-context';
+import { useDirectorySync, useScopedBlockingForms, useScopedBlockingPermissions, useSessionMessages, useSessionMessagesResolved, useSessionRevertMessageID, useUserMessageHistory } from '@/sync/sync-context';
 import { parseSlashInvocation } from '@/sync/slash-routing';
 import { useInlineCommentDraftStore, type InlineCommentDraft } from '@/stores/useInlineCommentDraftStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -1277,6 +1279,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // The btw panel owns the floating slot whenever a sheet (expanded or
     // collapsed) or a creation frame is on screen, hiding queue and suggestion.
     const isBtwPanelVisible = btwSessionRef !== null || btwPanel.creating;
+    // The agent's blocking requests outrank the queue: a pending permission
+    // hides the form dock, and either one hides the queue chips and the
+    // suggestion (the composer is not for sending then).
+    const pendingForms = useScopedBlockingForms(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
+    const pendingPermissions = useScopedBlockingPermissions(currentSessionId, currentSessionDirectoryForSync ?? currentDirectory ?? undefined);
+    const hasPendingPermission = pendingPermissions.length > 0;
+    const hasPendingForm = pendingForms.length > 0 || hasPendingPermission;
     React.useEffect(() => {
         setUnsyncedSkillError(null);
     }, [composerDirectoryContext, currentSessionId]);
@@ -5235,16 +5244,27 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             </div>
             {/* Floating panels share one absolute `bottom-full` dock above the
                 composer form, outside the editor and the collapsed mobile pill.
-                Visibility priority: btw, then a nonempty queue, then suggestion;
-                hiding the queue does not pause its delivery. */}
+                Visibility priority: btw, then the agent's permission, then the
+                form, then a nonempty queue, then suggestion; hiding the queue
+                does not pause its delivery. */}
+            <PermissionDock
+                sessionId={currentSessionId}
+                directory={currentSessionDirectoryForSync ?? currentDirectory ?? undefined}
+                hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible}
+            />
+            <FormDock
+                sessionId={currentSessionId}
+                directory={currentSessionDirectoryForSync ?? currentDirectory ?? undefined}
+                hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasPendingPermission}
+            />
             <SessionSuggestionChip
                 sessionId={currentSessionId}
                 directory={currentSessionDirectoryForSync}
-                hidden={hasContent || newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasQueuedMessages}
+                hidden={hasContent || newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasQueuedMessages || hasPendingForm}
                 onApply={applyAssistSuggestion}
             />
             <QueuedMessageChips
-                hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible}
+                hidden={newSessionDraftOpen || isBtwActive || isBtwPanelVisible || hasPendingForm}
                 onEditMessage={handleQueuedMessageEdit}
                 onSendMessage={handleQueuedMessageSend}
             />
