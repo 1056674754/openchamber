@@ -257,6 +257,9 @@ export const SETTINGS_REGISTRY: { readonly [K in keyof DesktopSettings]-?: Setti
   browserProvider: field({ scope: 'instance', parse: parseNonEmptyString, ui: uiStore('browserProvider', (v) => useUIStore.getState().setBrowserProvider(v)) }),
   agentNotifyToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentNotifyToolEnabled', (v) => useUIStore.getState().setAgentNotifyToolEnabled(v)) }),
   agentMemoryToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentMemoryToolEnabled', (v) => useUIStore.getState().setAgentMemoryToolEnabled(v)) }),
+  // The isolated-spaces switch. The server reads it once at start; a change takes effect at the
+  // next start. No live copy in the UI yet: the settings screen for it is a later stage.
+  isolatedSpacesEnabled: field({ scope: 'instance', parse: parseBoolean }),
   // Emitted by the server for this build (OPENCHAMBER_ROUTING_ENABLE); never
   // accepted on a write, never persisted.
   routingFeatureAvailable: field({

@@ -19,12 +19,13 @@ const makeRequest = ({ headerDirectory, queryDirectory, bodyDirectory } = {}) =>
   body: bodyDirectory === undefined ? {} : { directory: bodyDirectory },
 });
 
-const createRuntime = (settings = {}) => createProjectDirectoryRuntime({
+const createRuntime = (settings = {}, overrides = {}) => createProjectDirectoryRuntime({
   fsPromises: fs,
   path,
   normalizeDirectoryPath: (value) => value,
   getReadSettingsFromDiskMigrated: () => async () => settings,
   sanitizeProjects: (projects) => Array.isArray(projects) ? projects : [],
+  ...overrides,
 });
 
 afterEach(async () => {
@@ -32,6 +33,19 @@ afterEach(async () => {
 });
 
 describe('project directory runtime', () => {
+  it('refuses a directory the host says no to, before it looks at the disk', async () => {
+    let statCalls = 0;
+    const runtime = createRuntime({}, {
+      fsPromises: { stat: async () => { statCalls += 1; return { isDirectory: () => true }; }, realpath: async (p) => p },
+      refuseDirectory: (candidate) => (candidate.startsWith('/spaces/') ? 'A directory under /spaces/ belongs to an isolated space' : null),
+    });
+
+    expect(await runtime.validateDirectoryPath('/spaces/a1b2c3d4e5f6/repo')).toEqual({ ok: false, error: 'A directory under /spaces/ belongs to an isolated space' });
+    expect(statCalls).toBe(0);
+    expect(await runtime.validateDirectoryPath('/home/user/project')).toMatchObject({ ok: true });
+    expect(statCalls).toBe(1);
+  });
+
   it('requires an explicit directory for explicit-only resolution', async () => {
     const fallbackDirectory = await makeTempDir();
     const runtime = createRuntime({

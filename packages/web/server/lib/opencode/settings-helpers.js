@@ -631,6 +631,9 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.agentNotifyToolEnabled === 'boolean') {
       result.agentNotifyToolEnabled = candidate.agentNotifyToolEnabled;
     }
+    if (typeof candidate.isolatedSpacesEnabled === 'boolean') {
+      result.isolatedSpacesEnabled = candidate.isolatedSpacesEnabled;
+    }
     if (typeof candidate.optimizeSystemPrompt === 'boolean') {
       result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;
     }

@@ -55,6 +55,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getCachedZenModels,
       agentToolRuntime = null,
       pluginNotificationEmitter = null,
+      skipBodyParsing,
     } = options;
 
     // Raises a notification for a managed plugin or the agent. The plugin
@@ -79,7 +80,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getServerId: options.getServerId,
     });
 
-    registerCommonRequestMiddleware(app, { express, verboseRequestLogs });
+    registerCommonRequestMiddleware(app, { express, verboseRequestLogs, skipBodyParsing });
 
     const uiAuthController = createUiAuth({
       password: uiPassword,

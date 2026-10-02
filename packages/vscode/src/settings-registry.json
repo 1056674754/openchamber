@@ -63,6 +63,9 @@
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },
+    "isolatedSpacesEnabled": {
+      "scope": "instance"
+    },
     "routingFeatureAvailable": {
       "scope": "instance",
       "computed": true
