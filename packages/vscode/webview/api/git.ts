@@ -22,6 +22,8 @@ import type {
   GitWorktreeValidationResult,
   GitWorktreeCreateResult,
   RemoveGitWorktreePayload,
+  GitWorktreeSnapshotPayload,
+  GitWorktreeSnapshotResult,
   GitCommitResult,
   CreateGitCommitOptions,
   GitPushResult,
@@ -445,6 +447,9 @@ export const createVSCodeGitAPI = (): GitAPI => ({
           deleteLocalBranch: payload.deleteLocalBranch === true,
         },
       });
+    },
+    snapshot: async (directory: string, payload: GitWorktreeSnapshotPayload): Promise<GitWorktreeSnapshotResult> => {
+      return sendBridgeMessage<GitWorktreeSnapshotResult>('api:git/worktrees/snapshot', { directory, ref: payload.ref });
     },
   },
 });
