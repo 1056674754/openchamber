@@ -133,6 +133,28 @@ describe('agent tool runtime', () => {
     ]);
   });
 
+  it('injects the notify tool only when explicitly enabled', async () => {
+    const { dataDir, runtime } = await createRuntime();
+
+    await runtime.prepareManagedOpenCodeEnv({
+      includeControl: false,
+      includeWeb: false,
+      includeNotify: true,
+    });
+    const pluginPath = path.join(dataDir, 'agent-tool', 'openchamber-plugin.js');
+    const pluginModule = await import(`${pathToFileURL(pluginPath).href}?notify=${Date.now()}`);
+    const plugin = await pluginModule.OpenChamberPlugin();
+
+    expect(plugin.tool.openchamber).toBeUndefined();
+    expect(plugin.tool.openchamber_web).toBeUndefined();
+    expect(plugin.tool.openchamber_notify).toBeDefined();
+    expect(Object.keys(plugin.tool.openchamber_notify.args.parameters.properties).sort()).toEqual([
+      'body',
+      'showWhenFocused',
+      'title',
+    ]);
+  });
+
   it('scopes bare memory actions to the memory tool and rejects browser actions', async () => {
     const { dataDir, executeAction, runtime } = await createRuntime();
     vi.stubGlobal('fetch', vi.fn(async (_url, init) => {
@@ -171,6 +193,24 @@ describe('agent tool runtime', () => {
       ok: false,
       error: { kind: 'usage' },
     });
+  });
+
+  it('threads the caller Session id through to the control service options', async () => {
+    const { executeAction, runtime } = await createRuntime();
+
+    await runtime.execute({
+      input: { action: 'memory.read', title: 'Uses bun' },
+      contextDirectory: '/work/project',
+      contextSessionId: 'ses_1',
+      tool: 'openchamber_memory',
+    });
+
+    expect(executeAction).toHaveBeenCalledWith(
+      'memory.read',
+      expect.objectContaining({ action: 'memory.read', title: 'Uses bun' }),
+      '/work/project',
+      { contextSessionId: 'ses_1' },
+    );
   });
 
   it('passes a runtime fallback request to the approval service with the current directory', async () => {

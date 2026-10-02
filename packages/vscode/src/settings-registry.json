@@ -54,6 +54,12 @@
     "agentControlToolEnabled": {
       "scope": "instance"
     },
+    "browserProvider": {
+      "scope": "instance"
+    },
+    "agentNotifyToolEnabled": {
+      "scope": "instance"
+    },
     "agentMemoryToolEnabled": {
       "scope": "instance"
     },

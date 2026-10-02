@@ -79,6 +79,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       resolveGitBinaryForSpawn,
       createFsSearchRuntime,
       openchamberDataDir,
+      onGuestDeactivated,
       openchamberVersion,
       builtInExtensionsDir,
       openchamberUserConfigRoot,
@@ -376,7 +377,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
     registerGitHubRoutes(app);
     registerLinearRoutes(app);
     await registerBuiltInGuests({ persistPath: extensionsPersistPath(openchamberDataDir), root: builtInExtensionsDir });
-    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService });
+    registerGuestRoutes(app, { openchamberDataDir, openchamberVersion, resolveGitBinaryForSpawn, resolveOptionalProjectDirectory, getSmallModelService, onGuestDeactivated });
     registerGitRoutes(app, {
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,

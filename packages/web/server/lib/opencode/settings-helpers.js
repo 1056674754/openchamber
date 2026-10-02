@@ -619,11 +619,17 @@ export const createSettingsHelpers = (dependencies) => {
     ) {
       result.desktopWindowControlsStyle = candidate.desktopWindowControlsStyle;
     }
+    if (typeof candidate.browserProvider === 'string' && candidate.browserProvider.trim()) {
+      result.browserProvider = candidate.browserProvider.trim();
+    }
     if (typeof candidate.agentControlToolEnabled === 'boolean') {
       result.agentControlToolEnabled = candidate.agentControlToolEnabled;
     }
     if (typeof candidate.agentMemoryToolEnabled === 'boolean') {
       result.agentMemoryToolEnabled = candidate.agentMemoryToolEnabled;
+    }
+    if (typeof candidate.agentNotifyToolEnabled === 'boolean') {
+      result.agentNotifyToolEnabled = candidate.agentNotifyToolEnabled;
     }
     if (typeof candidate.optimizeSystemPrompt === 'boolean') {
       result.optimizeSystemPrompt = candidate.optimizeSystemPrompt;

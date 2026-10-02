@@ -44,6 +44,23 @@ describe('OpenChamber control authority', () => {
     });
   });
 
+  test('tells the browser which project and chat the action came from', async () => {
+    const requests = [];
+    const request = async (action, parameters, options) => {
+      requests.push(options?.context ?? null);
+      return { action, parameters, title: 'Page' };
+    };
+    const service = createService({ browserControl: { request } });
+
+    await service.execute('browser.open', { serverId: 'default', url: 'https://example.com/path' }, '/repo', { contextSessionId: 'ses_1' });
+    await service.execute('browser.open', { serverId: 'default', url: 'https://example.com/path' });
+
+    expect(requests).toEqual([
+      { directory: '/repo', sessionId: 'ses_1' },
+      { directory: null, sessionId: null },
+    ]);
+  });
+
   test('rejects session actions without an explicit serverId', async () => {
     const service = createService();
 
@@ -129,5 +146,34 @@ describe('file.open', () => {
   test('answers 503 when this server has no file viewer wired', async () => {
     const service = createService({});
     await expect(service.execute('file.open', { serverId: 'default', path: 'out.csv' }, '/repo')).rejects.toMatchObject({ statusCode: 503 });
+  });
+});
+
+describe('notify.send', () => {
+  test('sends the notice for the calling session and returns what was delivered', async () => {
+    const notifyCalls = [];
+    const notifyUser = async (payload) => {
+      notifyCalls.push(payload);
+      return { status: 200, body: { delivered: true } };
+    };
+    const service = createService({ notifyUser });
+
+    const result = await service.execute('notify.send', { serverId: 'default', title: 'Done', body: 'All green', showWhenFocused: true }, '/repo', { contextSessionId: 'ses_1' });
+
+    expect(notifyCalls).toEqual([{ title: 'Done', body: 'All green', showWhenFocused: true, sessionId: 'ses_1', directory: '/repo' }]);
+    expect(result).toEqual({ delivered: true });
+  });
+
+  test('turns a refused notice into an error the agent can read', async () => {
+    const notifyUser = async () => ({ status: 429, retryAfter: 4, body: { error: 'too many notifications' } });
+    const service = createService({ notifyUser });
+
+    await expect(service.execute('notify.send', { serverId: 'default', title: 'Done' }, '/repo'))
+      .rejects.toMatchObject({ statusCode: 429, message: 'too many notifications' });
+  });
+
+  test('answers 503 when this server has no notifier wired', async () => {
+    const service = createService({});
+    await expect(service.execute('notify.send', { serverId: 'default', title: 'Done' }, '/repo')).rejects.toMatchObject({ statusCode: 503 });
   });
 });

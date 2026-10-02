@@ -35,6 +35,11 @@ const ALLOWED_WS_PATHS = new Set([
   '/api/dictation/ws',
 ]);
 
+// Extension surfaces carry the extension id in the path, so they are matched
+// by shape rather than listed.
+const GUEST_SURFACE_WS_PATH = /^\/api\/guests\/[a-z][a-z0-9-]*\/surface\/ws$/;
+export const isAllowedRelayWebSocketPath = (pathname) => ALLOWED_WS_PATHS.has(pathname) || GUEST_SURFACE_WS_PATH.test(pathname);
+
 // Hop-by-hop headers stripped from tunneled requests; `host` is set by fetch
 // to the loopback origin. content-length is dropped too because the body is
 // re-chunked through the tunnel and undici computes framing itself.
@@ -394,7 +399,7 @@ export const createTunnelHost = ({
       void sendAbort(streamId, error?.message ?? 'malformed ws open');
       return;
     }
-    if (!ALLOWED_WS_PATHS.has(open.path)) {
+    if (!isAllowedRelayWebSocketPath(open.path)) {
       void sendAbort(streamId, 'Path is not allowed through the relay');
       return;
     }

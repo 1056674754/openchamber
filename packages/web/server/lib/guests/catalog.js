@@ -199,6 +199,12 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (panel.entry) {
     guest.entry = panel.entry;
   }
+  if (panel.dock !== undefined) {
+    guest.entryDock = panel.dock;
+  }
+  if (panel.size !== undefined) {
+    guest.entrySize = panel.size;
+  }
   const backgroundEntry = parsed.manifest.contributes.background?.entry;
   if (backgroundEntry) {
     if (!await resolveGuestAssetPath(packageRoot, backgroundEntry)) {
@@ -252,6 +258,9 @@ export const inspectGuestPackage = async (packageRoot, { openchamberVersion, ski
   if (parsed.manifest.contributes.filesystem?.length) {
     guest.filesystem = [...parsed.manifest.contributes.filesystem];
   }
+  if (parsed.manifest.contributes.origins?.length) {
+    guest.origins = [...parsed.manifest.contributes.origins];
+  }
   if (parsed.manifest.contributes.actions?.length) {
     guest.actions = parsed.manifest.contributes.actions.map((action) => ({ ...action }));
   }
@@ -295,6 +304,12 @@ export const toPublicGuest = (guest) => {
   if (guest.entry) {
     row.entry = guest.entry;
   }
+  if (guest.entryDock) {
+    row.entryDock = guest.entryDock;
+  }
+  if (typeof guest.entrySize === 'number') {
+    row.entrySize = guest.entrySize;
+  }
   if (guest.backgroundEntry) {
     row.backgroundEntry = guest.backgroundEntry;
   }
@@ -328,6 +343,10 @@ export const toPublicGuest = (guest) => {
   }
   if (Array.isArray(guest.filesystem) && guest.filesystem.length > 0) {
     row.filesystem = [...guest.filesystem];
+  }
+  // Shown on the approval card: the frame may exchange data with these.
+  if (Array.isArray(guest.origins) && guest.origins.length > 0) {
+    row.origins = [...guest.origins];
   }
   // Actions, commands, and tools are the parsed manifest entries as they
   // are: the UI decides which ones to apply from the grant and the enabled flag.

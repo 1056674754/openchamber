@@ -1,3 +1,5 @@
+import { registerNotificationEmitRoutes } from '../notifications/emit-route.js';
+
 export const createBootstrapRuntime = (dependencies) => {
   const {
     createUiAuth,
@@ -51,7 +53,20 @@ export const createBootstrapRuntime = (dependencies) => {
       modelsMetadataCacheTtl,
       fetchFreeZenModels,
       getCachedZenModels,
+      agentToolRuntime = null,
+      pluginNotificationEmitter = null,
     } = options;
+
+    // Raises a notification for a managed plugin or the agent. The plugin
+    // route is registered before API auth (the plugin carries no UI session);
+    // the API route below runs after it. (upstream c0fb97ac1; index.js wiring
+    // of agentToolRuntime/pluginNotificationEmitter lands after S6.)
+    const notificationEmitRoutes = registerNotificationEmitRoutes(app, {
+      express,
+      isAgentToolRequestAuthorized: (req) => agentToolRuntime?.authorizeRequest?.(req) === true,
+      emitter: pluginNotificationEmitter,
+    });
+    notificationEmitRoutes.registerPluginRoute();
 
     registerServerStatusRoutes(app, {
       express,
@@ -82,6 +97,8 @@ export const createBootstrapRuntime = (dependencies) => {
       readSettingsFromDiskMigrated,
       normalizeTunnelSessionTtlMs,
     });
+
+    notificationEmitRoutes.registerApiRoute();
 
     registerTtsRoutes(app, { sayTTSCapability });
 

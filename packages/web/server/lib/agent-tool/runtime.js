@@ -6,16 +6,27 @@ import {
   OPENCHAMBER_AGENT_TOOL_ACTIONS,
   OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
   OPENCHAMBER_MEMORY_ACTIONS,
+  OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
+  OPENCHAMBER_NOTIFY_ACTIONS,
   resolveAgentToolAction,
   OPENCHAMBER_WEB_ACTION_DEFINITIONS,
   OPENCHAMBER_WEB_ACTIONS,
 } from '../openchamber-control/actions.js';
 
 const TOOL_SCHEMA_VERSION = 1;
-const ACTIONS = new Set([...OPENCHAMBER_AGENT_TOOL_ACTIONS, ...OPENCHAMBER_WEB_ACTIONS, ...OPENCHAMBER_MEMORY_ACTIONS]);
+const ACTIONS = new Set([
+  ...OPENCHAMBER_AGENT_TOOL_ACTIONS,
+  ...OPENCHAMBER_WEB_ACTIONS,
+  ...OPENCHAMBER_MEMORY_ACTIONS,
+  ...OPENCHAMBER_NOTIFY_ACTIONS,
+]);
 const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
-  [...OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, ...OPENCHAMBER_WEB_ACTION_DEFINITIONS, ...OPENCHAMBER_MEMORY_ACTION_DEFINITIONS]
-    .map(({ action, title }) => [action, title]),
+  [
+    ...OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_WEB_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
+  ].map(({ action, title }) => [action, title]),
 );
 
 const PLUGIN_PARAMETER_PROPERTIES = {
@@ -73,6 +84,14 @@ const MEMORY_PLUGIN_PARAMETER_PROPERTIES = {
   type: { type: 'string', enum: ['fact', 'preference', 'reference'] },
 };
 
+// Its own names, not the shared map: `title` and `body` mean something else in
+// the control and memory tools.
+const NOTIFY_PLUGIN_PARAMETER_PROPERTIES = {
+  title: { type: 'string', description: 'Short headline the user reads first, up to 120 characters' },
+  body: { type: 'string', description: 'One or two sentences of detail, up to 500 characters' },
+  showWhenFocused: { type: 'boolean', description: 'Show it even while the user is looking at OpenChamber. Only for something that cannot wait' },
+};
+
 const asNonEmptyString = (value) => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -110,7 +129,7 @@ const createWebToolEntry = () => String.raw`
         const failure = (payload) => ({ title, output: JSON.stringify(payload), metadata: { openchamber_web: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } } })
         if (!endpoint || !token) return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
         try {
-          const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ input: args, contextDirectory: context.directory }), signal: context.abort })
+          const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID }), signal: context.abort })
           const output = await response.text()
           let result = null
           try { result = JSON.parse(output) } catch {}
@@ -143,7 +162,7 @@ const createMemoryToolEntry = () => String.raw`
         const failure = (payload) => ({ title, output: JSON.stringify(payload), metadata: { openchamber_memory: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } } })
         if (!endpoint || !token) return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
         try {
-          const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ input: args, contextDirectory: context.directory, tool: "openchamber_memory" }), signal: context.abort })
+          const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID, tool: "openchamber_memory" }), signal: context.abort })
           const output = await response.text()
           let result = null
           try { result = JSON.parse(output) } catch {}
@@ -159,7 +178,40 @@ const createMemoryToolEntry = () => String.raw`
     },
 `;
 
-const createPluginSource = ({ includeControl = true, includeWeb = true, includeMemory = false } = {}) => String.raw`
+const createNotifyToolEntry = () => String.raw`
+    openchamber_notify: {
+      description: "Send the user a notification through OpenChamber, so they learn about something without watching the session. Use it when you finish work that took long enough for the user to step away, when you are blocked on something only the user can resolve, or when the user asked to be told about something. Do not use it for routine progress, for every finished step, or to repeat what your reply already says to a user who is present. Keep the title short and put detail in the body.",
+      args: {
+        action: { type: "string", oneOf: ${JSON.stringify(OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS.map(({ action, description }) => ({ const: action, description })))}, description: "Notification action" },
+        parameters: { type: "object", properties: ${JSON.stringify(NOTIFY_PLUGIN_PARAMETER_PROPERTIES)}, additionalProperties: false, description: "Inputs for the notification" },
+      },
+      async execute(input, context) {
+        const { action, parameters, ...flattened } = input ?? {}
+        const args = { ...flattened, ...(parameters ?? {}), action }
+        const title = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}[args.action] ?? args.action
+        context.metadata({ title, metadata: { openchamber_notify: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title } } })
+        const endpoint = process.env.OPENCHAMBER_AGENT_TOOL_URL
+        const token = process.env.OPENCHAMBER_AGENT_TOOL_TOKEN
+        const failure = (payload) => ({ title, output: JSON.stringify(payload), metadata: { openchamber_notify: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: false } } })
+        if (!endpoint || !token) return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber managed tool connection is unavailable" } })
+        try {
+          const response = await fetch(endpoint, { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID, tool: "openchamber_notify" }), signal: context.abort })
+          const output = await response.text()
+          let result = null
+          try { result = JSON.parse(output) } catch {}
+          const valid = result?.schemaVersion === ${TOOL_SCHEMA_VERSION} && typeof result?.ok === "boolean" && typeof result?.action === "string"
+          context.metadata({ title, metadata: { openchamber_notify: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: valid && result.ok === true } } })
+          if (valid) return { title, output, metadata: { openchamber_notify: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: result.ok === true } } }
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: "OpenChamber returned an invalid response", kind: "runtime", status: response.status } })
+        } catch (error) {
+          if (context.abort.aborted) throw error
+          return failure({ schemaVersion: ${TOOL_SCHEMA_VERSION}, ok: false, action: args.action, error: { message: error instanceof Error ? error.message : String(error), kind: "runtime" } })
+        }
+      },
+    },
+`;
+
+const createPluginSource = ({ includeControl = true, includeWeb = true, includeMemory = false, includeNotify = false } = {}) => String.raw`
 export const OpenChamberPlugin = async () => ({
   tool: {
 ${includeControl ? String.raw`
@@ -201,7 +253,7 @@ ${includeControl ? String.raw`
               authorization: "Bearer " + token,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ input: args, contextDirectory: context.directory }),
+            body: JSON.stringify({ input: args, contextDirectory: context.directory, contextSessionId: context.sessionID }),
             signal: context.abort,
           })
           const output = await response.text()
@@ -245,6 +297,7 @@ ${includeControl ? String.raw`
 ` : ''}
 ${includeWeb ? createWebToolEntry() : ''}
 ${includeMemory ? createMemoryToolEntry() : ''}
+${includeNotify ? createNotifyToolEntry() : ''}
   },
 })
 `;
@@ -284,13 +337,13 @@ export const createAgentToolRuntime = (dependencies) => {
   const pluginPath = path.join(pluginDirectory, 'openchamber-plugin.js');
   let activeToken = null;
 
-  const prepareManagedOpenCodeEnv = async ({ includeControl = true, includeWeb = true, includeMemory = false } = {}) => {
+  const prepareManagedOpenCodeEnv = async ({ includeControl = true, includeWeb = true, includeMemory = false, includeNotify = false } = {}) => {
     const port = getActivePort();
     if (!Number.isInteger(port) || port <= 0) {
       throw new Error('OpenChamber listener port is unavailable for managed tool injection');
     }
     await fsPromises.mkdir(pluginDirectory, { recursive: true });
-    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeWeb, includeMemory }), { mode: 0o600 });
+    await fsPromises.writeFile(pluginPath, createPluginSource({ includeControl, includeWeb, includeMemory, includeNotify }), { mode: 0o600 });
     activeToken = crypto.randomBytes(32).toString('base64url');
     const pluginUrl = pathToFileURL(pluginPath).href;
     return {
@@ -332,6 +385,7 @@ export const createAgentToolRuntime = (dependencies) => {
       });
     }
     const contextDirectory = asNonEmptyString(payload.contextDirectory);
+    const contextSessionId = asNonEmptyString(payload.contextSessionId);
     const explicitDirectory = asNonEmptyString(payload.input?.directory);
     const explicitProject = asNonEmptyString(payload.input?.projectId);
     const input = {
@@ -344,7 +398,9 @@ export const createAgentToolRuntime = (dependencies) => {
       return createResult({
         ok: true,
         action,
-        data: await executeAction(action, input, contextDirectory, options),
+        data: await executeAction(action, input, contextDirectory, contextSessionId
+          ? { ...options, contextSessionId }
+          : options),
       });
     } catch (error) {
       return createResult({
@@ -441,5 +497,5 @@ export const createAgentToolRuntime = (dependencies) => {
     });
   };
 
-  return { prepareManagedOpenCodeEnv, registerRoutes, execute, requestFallbackApproval };
+  return { prepareManagedOpenCodeEnv, registerRoutes, execute, requestFallbackApproval, authorizeRequest: authorize };
 };

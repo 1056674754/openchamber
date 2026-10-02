@@ -145,6 +145,7 @@ export const createOpenChamberControlService = (dependencies) => {
     scheduledTaskService,
     browserControl = null,
     fileOpen = null,
+    notifyUser = null,
     agentMemoryActions = null,
     createClient = createOpencodeClient,
     sleep = (duration) => new Promise((resolve) => setTimeout(resolve, duration)),
@@ -370,7 +371,7 @@ export const createOpenChamberControlService = (dependencies) => {
     return { task: await scheduledTaskService.setEnabled(projectID, taskID, enabled), enabled };
   };
 
-  const executeBrowserAction = async (action, input, contextDirectory, signal) => {
+  const executeBrowserAction = async (action, input, contextDirectory, signal, contextSessionId) => {
     if (!browserControl) throw new OpenChamberControlError('The in-app browser is not available on this server', 503);
     const parameters = {};
     const viewport = asNonEmptyString(input.viewport);
@@ -424,9 +425,16 @@ export const createOpenChamberControlService = (dependencies) => {
     }
     if (action === 'browser.capture' && asNonEmptyString(input.label)) parameters.label = input.label.trim();
 
+    // Where the call came from, for a provider that keeps one browser per
+    // project or chat. Filled by the tool plugin, never by the model.
+    const context = {
+      directory: asNonEmptyString(contextDirectory),
+      sessionId: asNonEmptyString(contextSessionId),
+    };
     const result = await browserControl.request(action, parameters, {
       signal,
       timeoutMs: action === 'browser.open' ? 45_000 : 20_000,
+      context,
     });
     if (action !== 'browser.capture') return result;
     const directory = asNonEmptyString(input.directory) || asNonEmptyString(contextDirectory);
@@ -474,7 +482,23 @@ export const createOpenChamberControlService = (dependencies) => {
         }
         return agentMemoryActions.execute(action, input, contextDirectory || input.directory);
       }
-      if (action.startsWith('browser.')) return executeBrowserAction(action, input, contextDirectory, options.signal);
+      if (action.startsWith('browser.')) return executeBrowserAction(action, input, contextDirectory, options.signal, options.contextSessionId);
+      if (action === 'notify.send') {
+        if (!notifyUser) {
+          throw new OpenChamberControlError('Notifications are not available on this server', 503);
+        }
+        const result = await notifyUser({
+          title: input.title,
+          body: input.body,
+          showWhenFocused: input.showWhenFocused,
+          sessionId: asNonEmptyString(options.contextSessionId) || undefined,
+          directory: asNonEmptyString(contextDirectory) || undefined,
+        });
+        if (result.status !== 200) {
+          throw new OpenChamberControlError(result.body.error, result.status);
+        }
+        return result.body;
+      }
       if (action === 'file.open') {
         if (!fileOpen) {
           throw new OpenChamberControlError('The file viewer is not available on this server', 503);
