@@ -19,9 +19,11 @@ describe('Electron build version', () => {
     expect(version.includes('.012323')).toBe(false);
   });
 
-  it('rejects a source version that could misrepresent the merge baseline', () => {
-    expect(() => createBuildVersion('1.13.4-sscity', new Date(), 'UTC')).toThrow(
-      'OpenChamber build version must start with 1.20.0-sscity',
+  it('rejects a source version without the -sscity suffix', () => {
+    // 7ec204219 relaxed the gate to any -sscity version; a bare upstream
+    // version must still never reach a signed build.
+    expect(() => createBuildVersion('1.13.4', new Date(), 'UTC')).toThrow(
+      'OpenChamber build version must end with -sscity',
     );
   });
 });

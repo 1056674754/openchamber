@@ -1376,6 +1376,7 @@ const loadShellEnv = createShellEnvironmentLoader({
 import { pathLooksUserConfigured, mergePathValues } from '@openchamber/web/server/lib/opencode/path-utils.js';
 import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
 import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
+import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
 
 // import/start the server in-process. The server and its children (opencode
 // CLI, git, etc.) inherit process.env directly now — there is no sidecar
@@ -2094,6 +2095,32 @@ const createBrowserWindow = ({ label, restoreGeometry, url }) => {
     if (!isLocalRuntimeUrl(url)) {
       void shell.openExternal(url).catch(() => {});
     }
+  });
+
+  // An extension frame navigating itself would carry data out in the URL;
+  // refused before the request (see guest-frame-navigation.mjs).
+  browserWindow.webContents.on('will-frame-navigate', (details) => {
+    let frameOrigin;
+    try {
+      frameOrigin = details.frame?.origin;
+    } catch {
+      frameOrigin = undefined;
+    }
+    if (!shouldBlockGuestFrameNavigation({
+      isMainFrame: details.isMainFrame,
+      frameOrigin,
+      url: details.url,
+      isAppOrigin: isAllowedNavigationUrl,
+    })) return;
+    details.preventDefault();
+    let host = '';
+    try {
+      host = new URL(details.url).host;
+    } catch {
+      host = '';
+    }
+    // Only the host: the URL itself may be the data being carried out.
+    log.warn(`[guests] refused an extension frame navigating to ${host || 'an invalid URL'}`);
   });
 
   browserWindow.webContents.setZoomFactor(1);
