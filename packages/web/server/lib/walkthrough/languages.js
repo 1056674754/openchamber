@@ -24,6 +24,9 @@ const LANGUAGE_NAMES = {
   ja: 'Japanese',
   de: 'German',
   tr: 'Turkish',
+  // The interface's 12th locale (the server list must track the UI's
+  // LOCALES array — the drift test below exists for exactly this).
+  nl: 'Dutch',
 };
 
 export function normalizeLanguage(value) {
