@@ -72,6 +72,10 @@ export type DesktopSettings = {
   browserProvider?: string;
   agentMemoryToolEnabled?: boolean;
   agentNotifyToolEnabled?: boolean;
+  /** The isolated-spaces feature switch (upstream d67dcca2d): the server reads it once at start. */
+  isolatedSpacesEnabled?: boolean;
+  /** Isolated-spaces idle stop (upstream 167883d45): `{ enabled, hours }`, read through the spaces route. */
+  isolatedSpacesIdleStop?: { enabled: boolean; hours: number };
   /** Server-computed: this build has Jev routing (`OPENCHAMBER_ROUTING_ENABLE`). */
   routingFeatureAvailable?: boolean;
   optimizeSystemPrompt?: boolean;

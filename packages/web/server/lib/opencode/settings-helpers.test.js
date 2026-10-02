@@ -586,7 +586,7 @@ describe('settings registry gate', () => {
     desktopKeepManagedOpenCodeAliveOnQuit: true, desktopRemoteOnly: true,
     skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global',
-    agentControlToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentNotifyToolEnabled: true, isolatedSpacesEnabled: true,
+    agentControlToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentNotifyToolEnabled: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 },
     autoDeleteEnabled: true, autoDeleteAfterDays: 30, sessionRetentionAction: 'archive', sessionRetentionOnlyArchived: false, autoSaveEnabled: true,
     openInAppId: 'vscode',
     sttProvider: 'server', sttServerUrl: 'http://localhost:8001/v1', sttModel: 'm', wasmSttModel: 'm', sttLanguage: 'en',

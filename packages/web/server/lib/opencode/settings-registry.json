@@ -66,6 +66,9 @@
     "isolatedSpacesEnabled": {
       "scope": "instance"
     },
+    "isolatedSpacesIdleStop": {
+      "scope": "instance"
+    },
     "routingFeatureAvailable": {
       "scope": "instance",
       "computed": true

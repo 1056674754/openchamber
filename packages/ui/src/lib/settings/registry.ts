@@ -260,6 +260,12 @@ export const SETTINGS_REGISTRY: { readonly [K in keyof DesktopSettings]-?: Setti
   // The isolated-spaces switch. The server reads it once at start; a change takes effect at the
   // next start. No live copy in the UI yet: the settings screen for it is a later stage.
   isolatedSpacesEnabled: field({ scope: 'instance', parse: parseBoolean }),
+  // The idle stop of isolated spaces (decision 11). Written and read through the spaces route,
+  // which also tells the running spaces, so no store keeps a copy.
+  isolatedSpacesIdleStop: field({
+    scope: 'instance',
+    parse: fromSchema(z.object({ enabled: z.boolean(), hours: z.number().int().min(1).max(168) }).strict()),
+  }),
   // Emitted by the server for this build (OPENCHAMBER_ROUTING_ENABLE); never
   // accepted on a write, never persisted.
   routingFeatureAvailable: field({
