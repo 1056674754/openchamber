@@ -3586,3 +3586,20 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 主轮延后的扩展系统本轮回补：16 commits（E1 server guests 40 文件 +7933 行/23 端点、E2 sdk 100 文件 + extensions registry + build 脚本 + Docker、E3 ui 集成 154 文件 +13417：Extensions 页/GuestHosts 家族/guest 渲染/guestCommands 接 ChatInput（B5 后结构）/plugins 对齐/i18n 3 模块 × 11 locale）。**SDK 升级**：`@opencode-ai/sdk` ^1.18.4 → 精确 1.18.31（对照实验排除回归，D13 落地）。计划与契约：[`docs/COMMUNITY_1_24_EXTENSIONS_ROUND.md`](COMMUNITY_1_24_EXTENSIONS_ROUND.md)。
 
 验证：三绿（type-check 0 错 / web vitest / build）；E1 guests 149 测试、E3 触及域 268 测试全绿。**有意分叉**：ssh-install.test 满载加固 timeout（E1）、bun-test-shim 保留 mock.restore（fork routes.test.js 使用）。待人工回归：Extensions 设置页、guest 安装/审批流、guest 面板 iframe、集成的 OAuth 流。
+
+## OC2 迁移脊柱 S8 收官批：最终接线 + 联调（2026-10-02，7 commits）
+
+上游 SegA `654705f7d`（OpenCode 2.x 迁移）+ SegB 依赖项的 OpenChamber 侧移植收官。脊柱批次 S1-S7 于 2026-10-01/02 落地（e7232d293 / 1b333c5a2 / e89cd32e8 / afa9f4f52 / a1811aaaf / bee3dcd69+S6b / cf334f00c，各批证据随 commit message 与 [`docs/COMMUNITY_2_1_MANUAL_MERGE_PLAN.md`](COMMUNITY_2_1_MANUAL_MERGE_PLAN.md) 执行挂账节）；本批把全部挂起接口接完，v2 全链路打通。计划：[`docs/merge-v2.1/oc2-spine-plan.md`](merge-v2.1/oc2-spine-plan.md)（§6 对接点 J1-J10、S8 定义）。
+
+**Commits**：
+- `44445e21b` index.js 最终接线：B1 shutdown/guests 3 行（guests 停机闸+子进程停+relay 随停）；B3 四处（`resolveLegacyEnabledMode` 经 legacySafetyNetEnabled 一次性转换并持久化、通知 getter 换 `isPermissionAutoAnswered` 且 notifications runtime 改 getter 优先——safety-held 请求恢复通知、relayAvailable 走 `relayBlockedByEnterprise`、断网门=enterprise 拒绝网络地址启动+运行中策略出现时销毁非 loopback 连接，新增 `lib/security/bind-host.js`）；S4 注入 dataDir+broadcastGlobalUiEvent（persistSessionMetadata 留 #22 goal 臂）；S2 四订阅者 translated intake 核对（S6a 已落地）。
+- `cf9d56642` S3 挂账：agents/commands v2-only 形状+`GET /api/config/agents/:name/permissions` 与 `commands/:name/config`（v1 404）、providers mode 门双写形状（spelling 归一/aisdk:/providers section）、SegB 50766fa0f 服务端半；v1 不变由 agents-v2/commands-v2/providers-v2 套件钉死。
+- `e150ccb0a` S7 挂载：PermissionDock + usePermissionResponse + permissionToolPresentation 新建，PermissionCard 拆 Content/Actions（dock variant，硬编码英文入 i18n），ChatInput 上游互斥挂载（Permission→Form→queue/suggestion），ChatContainer 内联卡片栈移除，`useScopedBlockingPermissions` 入 sync-context，9 键 × 12 locale。
+- `f71ef172f` S6 缺口补译 + v2 发送分支：wire-bridge 增 `message.record`/`message.record.delta`（plumbing/shell/compaction → `State.nativeRecords` 侧通道，id upsert + shellID 回退；**渲染面仍是登记差距**）；sendShell→session.shell（v2 直发，无 optimistic user message 搁浅）、abort→session.interrupt、revert/unrevert→stage/clear+读回、fork→before；#48 服务端 retireStored（v2 门控，v1 只覆写，两轨测试）。R7 差距清单相应关闭（session.viewed 与 revert.committed 本地裁剪维持登记，随激活对账）。
+- `9cae396d2` embedded 双布局：v1 单二进制 / v2 包目录（packages/opencode|packages/cli → dist/<target>/bin）/ npm tarball（相对路径解包）；v2 source-only（JS stub）响亮失败（runbook：离线兜底必须真可执行）；版本归一容 `opencode v2.0.21-sscity`；签名/after-pack 不动（J9 前置就绪）。
+- `eed4cfe52` VS Code OC2 对位：`opencode-server-probe`（/api/info 优先、global/health 回退、不 throw、调用点错误文案不变）；bridge-system / upgrade / waitForReady / 诊断接线；proxy/sse/spawn 不动（J2/J8 前置就绪）。
+- `1f971e271` 联调冒烟 `scripts/oc2-v2-smoke.mjs`：真 web server 对 scripted OC2 mock，9/9 腿（boot → /api/info 记 v2 → 事件流 hub+客户端 SSE（raw wire 含 permission.asked/form.created）→ prompt/permission decision/form reply 经代理到 mock → 干净停机）。
+
+**验证**：type-check 8 包 0 错；触及文件 eslint 0 新增（全仓 lint 债逐文件与 HEAD 比对确认为既有）；web vitest 全量 3882 过 / 8 失败全部归因既有（5 spaces/code-out=HEAD 基线隔离同败、config-file-watcher=S4 预declared 环境、guests/background=HEAD 基线同败、network-defaults=并行负载 spawn 超时且隔离绿）；ui bun 全量失败集与 HEAD 基线差集为空（354 vs 355 并行 flake）；sync 全目录失败集差集为空。v1 零变化红线：全部 v2 路径 handle.mode/protocol 门控，v1 套件（sync/opencode lib/event-stream 等）与基线差集为空。
+
+**激活门状态**：J2（/api/info 探测）、J3（事件词汇翻译覆盖）、J4（directory header）、J5/J6（credential/generation，R5 版本门在 mode 判定内）、J9（双布局打包）侧代码就绪；J1/J7/J8/J10 待 `../opencode` 2.x 可部署版本后按 spine-plan §6 执行激活联调。**有意挂账**：nativeRecords 渲染面（S6a 差距清单延续）、#22 session-metadata 2.0.15 大改、useSmallModelStore（fork smallModel.ts 已双轨服务）。
