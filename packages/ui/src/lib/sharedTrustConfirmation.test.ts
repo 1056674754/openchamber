@@ -14,6 +14,11 @@ mock.module('./openchamberConfig', () => ({
     patches.push(patch);
     return saveOk;
   }),
+  // bun's mock.module is process-global and outlives this file: the spaces suites (which load
+  // after this one alphabetically and run in the same `bun test` process) import the real
+  // openchamberConfig through this mock, so its full export surface stays reachable here.
+  getWorktreeSetupWaitEnabled: mock(async () => false),
+  saveWorktreeSetupWaitEnabled: mock(async () => true),
 }));
 
 const {

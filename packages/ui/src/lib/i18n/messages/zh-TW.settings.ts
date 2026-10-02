@@ -2205,4 +2205,17 @@ export const settingsDict = {
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
   ...extensionsSettingsI18n['zh-TW'],
   ...guestIntegrationsI18n['zh-TW'],
+  'settings.openchamber.spaces.title': '隔離空間',
+  'settings.openchamber.spaces.field.enabled': '允許代理在隔離空間中工作',
+  'settings.openchamber.spaces.field.enabledAria': '允許代理在隔離空間中工作',
+  'settings.openchamber.spaces.field.enabledInfo': '代理在 Docker 容器中處理您的專案。它無法存取您的檔案、其他專案或金鑰。您可以套用或捨棄它的變更。首次啟動會下載約 1.6 GB。',
+  'settings.openchamber.spaces.idleStop.enabled': '停止閒置的空間',
+  'settings.openchamber.spaces.idleStop.enabledAria': '停止閒置的空間',
+  'settings.openchamber.spaces.idleStop.enabledInfo': '停止沒有活動的空間。檔案會保留。即使 OpenChamber 已關閉也會生效。',
+  'settings.openchamber.spaces.idleStop.after': '停止前等待',
+  'settings.openchamber.spaces.idleStop.afterAria': '空間停止前沒有工作的小時數',
+  'settings.openchamber.spaces.idleStop.hours': '小時',
+  'settings.openchamber.spaces.idleStop.resetAria': '恢復為 4 小時',
+  'settings.openchamber.spaces.idleStop.loadFailed': '無法載入此設定。',
+
 } as const;

@@ -2196,4 +2196,17 @@ export const settingsDict = {
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
   ...extensionsSettingsI18n.ja,
   ...guestIntegrationsI18n.ja,
+  'settings.openchamber.spaces.title': '隔離スペース',
+  'settings.openchamber.spaces.field.enabled': 'エージェントに隔離スペースで作業させる',
+  'settings.openchamber.spaces.field.enabledAria': 'エージェントに隔離スペースで作業させる',
+  'settings.openchamber.spaces.field.enabledInfo': 'エージェントは Docker コンテナー内でプロジェクトを扱います。あなたのファイル、他のプロジェクト、キーには触れられません。変更は適用することも破棄することもできます。初回の起動では約 1.6 GB をダウンロードします。',
+  'settings.openchamber.spaces.idleStop.enabled': 'アイドル状態のスペースを停止する',
+  'settings.openchamber.spaces.idleStop.enabledAria': 'アイドル状態のスペースを停止する',
+  'settings.openchamber.spaces.idleStop.enabledInfo': '動きのないスペースを停止します。ファイルは保持されます。OpenChamber を閉じていても動作します。',
+  'settings.openchamber.spaces.idleStop.after': '停止までの時間',
+  'settings.openchamber.spaces.idleStop.afterAria': 'スペースが停止するまでの作業のない時間',
+  'settings.openchamber.spaces.idleStop.hours': '時間',
+  'settings.openchamber.spaces.idleStop.resetAria': '4 時間に戻す',
+  'settings.openchamber.spaces.idleStop.loadFailed': 'この設定を読み込めませんでした。',
+
 } as const;

@@ -17,6 +17,8 @@ import { useSessionMarkersStore, normalizeSessionMarkers } from "@/stores/useSes
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { syncDebug } from "./debug"
 import { applyBoundedRetryJitter } from "./retry"
+import { z } from "zod"
+import { spaceCreationStepSchema } from "@/lib/spaces/spaces-api"
 
 export type QueuedEvent = {
   directory: string
@@ -43,6 +45,18 @@ const RETRY_BACKOFF_CAP_HIDDEN_OR_OFFLINE_MS = 60_000
 const RETRY_BACKOFF_MAX_EXPONENT = 8
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
 
+// A step of an isolated space's creation, announced on the host's hub the same way.
+const openchamberSpaceProgressSchema = z.object({
+  type: z.literal("openchamber:space-progress"),
+  properties: z.object({
+    spaceId: z.string().regex(/^[0-9a-f]{12}$/),
+    step: z.union([spaceCreationStepSchema, z.literal("failed")]),
+    failure: z.object({ code: z.string(), message: z.string() }).nullable(),
+  }),
+})
+
+export type SpaceProgress = z.infer<typeof openchamberSpaceProgressSchema>["properties"]
+
 export type EventPipelineInput = {
   sdk: OpencodeClient
   baseUrl?: string
@@ -52,6 +66,11 @@ export type EventPipelineInput = {
   onReconnect?: (metadata: EventPipelineReconnectMetadata) => void
   /** Called when the stream disconnects (heartbeat timeout, network error, or transport failure). */
   onDisconnect?: (reason: string) => void
+  /**
+   * Called when the host announces a step of an isolated space's creation, `failed` with the
+   * failure of the step that stopped it. (upstream 211a5e713)
+   */
+  onSpaceProgress?: (details: SpaceProgress) => void
   transport?: "auto" | "ws" | "sse"
   heartbeatTimeoutMs?: number
   reconnectDelayMs?: number
@@ -309,6 +328,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onEvent,
     onReconnect,
     onDisconnect,
+    onSpaceProgress,
     routeDirectory,
     transport = "auto",
     heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_MS,
@@ -559,6 +579,11 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const enqueueEvent = (directory: string, payload: Event, serverId?: string) => {
+    const spaceProgress = openchamberSpaceProgressSchema.safeParse(payload)
+    if (spaceProgress.success) {
+      onSpaceProgress?.(spaceProgress.data.properties)
+      return
+    }
     const normalizedPayload = normalizeEventType(payload)
     const routedDirectory = serverId ? directory : (routeDirectory?.(directory, normalizedPayload) || directory)
     const d = getOrCreateDir(routedDirectory)

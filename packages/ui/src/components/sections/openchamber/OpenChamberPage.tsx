@@ -8,6 +8,7 @@ import { GitSettings } from './GitSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { VoiceSettings } from './VoiceSettings';
 import { TunnelSettings } from './TunnelSettings';
+import { IsolatedSpacesSettings } from './IsolatedSpacesSettings';
 import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { DesktopOpenCodeSettings } from './DesktopOpenCodeSettings';
@@ -17,6 +18,7 @@ import { AppLinkSecuritySettings } from './AppLinkSecuritySettings';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { useDeviceInfo } from '@/lib/device';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { ISOLATED_SPACES_RELEASED } from '@/lib/spaces/release';
 import type { OpenChamberSection } from './types';
 
 interface OpenChamberPageProps {
@@ -95,6 +97,8 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 return <VoiceSectionContent />;
             case 'tunnel':
                 return <TunnelSectionContent />;
+            case 'spaces':
+                return <SpacesSectionContent />;
             default:
                 return null;
         }
@@ -212,4 +216,13 @@ const TunnelSectionContent: React.FC = () => {
         return null;
     }
     return <TunnelSettings />;
+};
+
+// Isolated spaces: the switch, the idle stop, the places with their disk, and the spaces without a
+// project. Never in VS Code (decision 16), and nowhere until the feature is released.
+const SpacesSectionContent: React.FC = () => {
+    if (isVSCodeRuntime() || !ISOLATED_SPACES_RELEASED) {
+        return null;
+    }
+    return <IsolatedSpacesSettings />;
 };

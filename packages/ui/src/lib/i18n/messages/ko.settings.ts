@@ -2205,4 +2205,17 @@ export const settingsDict = {
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
   ...extensionsSettingsI18n.ko,
   ...guestIntegrationsI18n.ko,
+  'settings.openchamber.spaces.title': '격리 공간',
+  'settings.openchamber.spaces.field.enabled': '에이전트가 격리 공간에서 작업하도록 허용',
+  'settings.openchamber.spaces.field.enabledAria': '에이전트가 격리 공간에서 작업하도록 허용',
+  'settings.openchamber.spaces.field.enabledInfo': '에이전트는 Docker 컨테이너 안에서 프로젝트를 작업합니다. 내 파일, 다른 프로젝트, 키에는 접근할 수 없습니다. 변경 사항은 적용하거나 버릴 수 있습니다. 처음 시작할 때 약 1.6GB를 내려받습니다.',
+  'settings.openchamber.spaces.idleStop.enabled': '유휴 공간 중지',
+  'settings.openchamber.spaces.idleStop.enabledAria': '유휴 공간 중지',
+  'settings.openchamber.spaces.idleStop.enabledInfo': '활동이 없는 공간을 중지합니다. 파일은 유지됩니다. OpenChamber를 닫아도 작동합니다.',
+  'settings.openchamber.spaces.idleStop.after': '중지까지',
+  'settings.openchamber.spaces.idleStop.afterAria': '공간이 중지되기 전까지 작업이 없는 시간',
+  'settings.openchamber.spaces.idleStop.hours': '시간',
+  'settings.openchamber.spaces.idleStop.resetAria': '4시간으로 되돌리기',
+  'settings.openchamber.spaces.idleStop.loadFailed': '이 설정을 불러오지 못했습니다.',
+
 } as const;

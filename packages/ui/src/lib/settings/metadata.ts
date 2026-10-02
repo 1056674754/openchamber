@@ -1,4 +1,5 @@
 import type { SidebarSection } from '@/constants/sidebar';
+import { ISOLATED_SPACES_RELEASED } from '@/lib/spaces/release';
 
 export type SettingsPageSlug =
   | 'home'
@@ -33,7 +34,8 @@ export type SettingsPageSlug =
   | 'integrations'
   | 'extensions'
   | 'tunnel'
-  | 'pairing';
+  | 'pairing'
+  | 'isolated-spaces';
 
 export type SettingsPageGroup =
   | 'appearance'
@@ -351,6 +353,16 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   { slug: 'notifications', title: 'Notifications', group: 'general', kind: 'single', showOn: 'default', keywords: ['alerts', 'native', 'summary', 'summarization'], },
   { slug: 'voice', title: 'Voice', group: 'advanced', kind: 'single', showOn: 'default', keywords: ['tts', 'speech', 'voice'], isAvailable: (ctx) => !ctx.isVSCode },
   { slug: 'tunnel', title: 'Remote Tunnel', group: 'advanced', kind: 'single', showOn: 'default', keywords: ['tunnel', 'cloudflare', 'ngrok', 'remote', 'share'], isAvailable: (ctx) => !ctx.isVSCode },
+  {
+    slug: 'isolated-spaces',
+    title: 'Isolated spaces',
+    group: 'projects',
+    kind: 'single',
+    showOn: 'default',
+    keywords: ['isolated', 'space', 'spaces', 'container', 'docker', 'colima', 'sandbox', 'disk', 'clean up', 'image'],
+    // Never in VS Code (decision 16 of the design), and hidden from everyone until the feature's first release.
+    isAvailable: (ctx) => !ctx.isVSCode && ISOLATED_SPACES_RELEASED,
+  },
   {
     slug: 'pairing',
     title: 'Private Relay',

@@ -16,6 +16,8 @@ export interface NumberInputProps
   fallbackValue?: number
   onClear?: () => void
   emptyLabel?: string
+  /** While the user is focused, an external value change does not repaint the draft (upstream 167883d45). */
+  deferExternalValueWhileFocused?: boolean
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -54,12 +56,14 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
       fallbackValue,
       onClear,
       emptyLabel = '—',
+      deferExternalValueWhileFocused = false,
       ...props
     },
     ref
   ) => {
     const { t } = useI18n()
     const [draft, setDraft] = React.useState(() => (value === undefined ? '' : String(value)))
+    const isFocusedRef = React.useRef(false)
     const { isMobile } = useDeviceInfo()
     const ignoreNextClickRef = React.useRef(false)
     const swallowNextClickCleanupRef = React.useRef<(() => void) | null>(null)
@@ -100,8 +104,11 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     }, [])
 
     React.useEffect(() => {
+      if (deferExternalValueWhileFocused && isFocusedRef.current) {
+        return
+      }
       setDraft(value === undefined ? '' : String(value))
-    }, [value])
+    }, [deferExternalValueWhileFocused, value])
 
     const baseValue = React.useMemo(() => {
       if (value !== undefined) return value
@@ -283,7 +290,14 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
           inputMode={props.inputMode ?? 'numeric'}
           value={draft}
           onChange={handleChange}
-          onBlur={handleBlur}
+          onFocus={(event) => {
+            isFocusedRef.current = true
+            props.onFocus?.(event)
+          }}
+          onBlur={(event) => {
+            isFocusedRef.current = false
+            handleBlur(event)
+          }}
           disabled={disabled}
           spellCheck={false}
           autoComplete="off"

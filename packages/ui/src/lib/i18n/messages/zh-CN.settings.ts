@@ -2204,4 +2204,17 @@ export const settingsDict = {
   'settings.providers.page.actions.tryAgain': 'Try again',
   ...extensionsSettingsI18n['zh-CN'],
   ...guestIntegrationsI18n['zh-CN'],
+  'settings.openchamber.spaces.title': '隔离空间',
+  'settings.openchamber.spaces.field.enabled': '允许代理在隔离空间中工作',
+  'settings.openchamber.spaces.field.enabledAria': '允许代理在隔离空间中工作',
+  'settings.openchamber.spaces.field.enabledInfo': '代理在 Docker 容器中处理您的项目。它无法访问您的文件、其他项目或密钥。您可以应用或丢弃它的更改。首次启动会下载约 1.6 GB。',
+  'settings.openchamber.spaces.idleStop.enabled': '停止空闲的空间',
+  'settings.openchamber.spaces.idleStop.enabledAria': '停止空闲的空间',
+  'settings.openchamber.spaces.idleStop.enabledInfo': '停止没有活动的空间。文件会保留。即使 OpenChamber 已关闭也会生效。',
+  'settings.openchamber.spaces.idleStop.after': '停止前等待',
+  'settings.openchamber.spaces.idleStop.afterAria': '空间停止前无工作的小时数',
+  'settings.openchamber.spaces.idleStop.hours': '小时',
+  'settings.openchamber.spaces.idleStop.resetAria': '恢复为 4 小时',
+  'settings.openchamber.spaces.idleStop.loadFailed': '无法加载此设置。',
+
 } as const;

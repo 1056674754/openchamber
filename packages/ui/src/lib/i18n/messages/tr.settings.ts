@@ -2196,4 +2196,17 @@ export const settingsDict = {
   "settings.openchamber.visual.field.sessionSuggestionAria": "Agent işini bitirdikten sonra sonraki kullanıcı mesajı için öneri oluşturur",
   ...extensionsSettingsI18n.tr,
   ...guestIntegrationsI18n.tr,
+  'settings.openchamber.spaces.title': 'Yalıtılmış alanlar',
+  'settings.openchamber.spaces.field.enabled': 'Ajanların yalıtılmış alanlarda çalışmasına izin ver',
+  'settings.openchamber.spaces.field.enabledAria': 'Ajanların yalıtılmış alanlarda çalışmasına izin ver',
+  'settings.openchamber.spaces.field.enabledInfo': 'Ajan projeniz üzerinde bir Docker kapsayıcısında çalışır. Dosyalarınıza, diğer projelerinize veya anahtarlarınıza erişemez. Değişikliklerini uygulayabilir veya atabilirsiniz. İlk başlatma yaklaşık 1,6 GB indirir.',
+  'settings.openchamber.spaces.idleStop.enabled': 'Boşta kalan alanları durdur',
+  'settings.openchamber.spaces.idleStop.enabledAria': 'Boşta kalan alanları durdur',
+  'settings.openchamber.spaces.idleStop.enabledInfo': 'Etkinlik olmayan bir alanı durdurur. Dosyalar korunur. OpenChamber kapalıyken de çalışır.',
+  'settings.openchamber.spaces.idleStop.after': 'Durdurma süresi',
+  'settings.openchamber.spaces.idleStop.afterAria': 'Bir alan durmadan önce çalışma olmadan geçen saat',
+  'settings.openchamber.spaces.idleStop.hours': 'saat',
+  'settings.openchamber.spaces.idleStop.resetAria': '4 saate sıfırla',
+  'settings.openchamber.spaces.idleStop.loadFailed': 'Bu ayar yüklenemedi.',
+
 } as const;

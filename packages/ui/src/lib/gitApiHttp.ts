@@ -142,11 +142,17 @@ export async function checkIsGitRepository(directory: string, baseUrl?: string):
   }
 }
 
-export async function getGitStatus(directory: string, options?: { mode?: 'light' }, baseUrl?: string): Promise<GitStatus> {
+export async function getGitStatus(directory: string, options?: { mode?: 'light'; fresh?: boolean }, baseUrl?: string): Promise<GitStatus> {
   const mode = options?.mode;
   const resolvedBaseUrl = baseUrl || resolveServerBaseForDirectory(directory);
   const baseKey = resolvedBaseUrl ? `${normalizeDirectoryKey(directory)}::${resolvedBaseUrl}` : normalizeDirectoryKey(directory);
   const key = mode === 'light' ? `${baseKey}::light` : baseKey;
+  if (options?.fresh) {
+    // A forced read must cross the transport cache boundary too (upstream d67dcca2d slices);
+    // dropping the in-flight entry keeps an older response from repopulating it.
+    gitStatusCache.delete(key);
+    gitStatusInFlight.delete(key);
+  }
   const now = Date.now();
   const cached = gitStatusCache.get(key);
   if (cached && cached.expiresAt > now) {

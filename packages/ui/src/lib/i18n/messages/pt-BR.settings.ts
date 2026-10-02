@@ -2205,4 +2205,17 @@ export const settingsDict = {
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
   ...extensionsSettingsI18n['pt-BR'],
   ...guestIntegrationsI18n['pt-BR'],
+  "settings.openchamber.spaces.title": "Espaços isolados",
+  "settings.openchamber.spaces.field.enabled": "Permitir que agentes trabalhem em espaços isolados",
+  "settings.openchamber.spaces.field.enabledAria": "Permitir que agentes trabalhem em espaços isolados",
+  "settings.openchamber.spaces.field.enabledInfo": "O agente trabalha no seu projeto dentro de um contêiner Docker. Ele não alcança seus arquivos, outros projetos nem chaves. Você pode aplicar ou descartar as alterações dele. O primeiro início baixa cerca de 1,6 GB.",
+  "settings.openchamber.spaces.idleStop.enabled": "Parar espaços ociosos",
+  "settings.openchamber.spaces.idleStop.enabledAria": "Parar espaços ociosos",
+  "settings.openchamber.spaces.idleStop.enabledInfo": "Para um espaço sem atividade. Os arquivos são mantidos. Funciona mesmo com o OpenChamber fechado.",
+  "settings.openchamber.spaces.idleStop.after": "Parar após",
+  "settings.openchamber.spaces.idleStop.afterAria": "Horas sem trabalho até um espaço parar",
+  "settings.openchamber.spaces.idleStop.hours": "horas",
+  "settings.openchamber.spaces.idleStop.resetAria": "Voltar para 4 horas",
+  "settings.openchamber.spaces.idleStop.loadFailed": "Não foi possível carregar esta configuração.",
+
 } as const;

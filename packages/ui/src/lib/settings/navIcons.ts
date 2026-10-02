@@ -64,6 +64,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'mic';
     case 'tunnel':
       return 'global';
+    case 'isolated-spaces':
+      return 'box-3';
     case 'pairing':
       return 'smartphone';
     case 'home':

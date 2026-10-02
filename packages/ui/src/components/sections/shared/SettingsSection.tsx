@@ -96,6 +96,29 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
 export const SETTINGS_FIELD_LABEL_CLASS =
   'typography-settings-field-label text-foreground';
 
+/**
+ * Number input inside a settings field row (upstream d67dcca2d slices).
+ * `typography-ui-label` pins `ch` to the same scaled font the inner numeric
+ * field renders in, since the wrapper would otherwise inherit an unscaled one.
+ */
+export const SETTINGS_NUMBER_INPUT_CLASS = 'typography-ui-label w-[16ch]';
+
+/** Optional inset block under a section (spacing only; section dividers own borders). */
+export const SettingsInset: React.FC<{
+  children: React.ReactNode;
+  className?: string;
+  settingsItem?: string;
+}> = ({ children, className, settingsItem }) => {
+  return (
+    <div
+      data-settings-item={settingsItem}
+      className={cn('pt-4', className)}
+    >
+      {children}
+    </div>
+  );
+};
+
 /** Compact reset / icon action next to a settings control (matches h-8 controls). (upstream 5181bcd33) */
 export const SETTINGS_ICON_BUTTON_CLASS =
   'h-8 w-8 px-0 text-muted-foreground hover:text-foreground';

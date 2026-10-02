@@ -2196,4 +2196,17 @@ export const settingsDict = {
   'settings.providers.page.actions.tryAgain': 'Try again',
   ...extensionsSettingsI18n.de,
   ...guestIntegrationsI18n.de,
+  'settings.openchamber.spaces.title': 'Isolierte Bereiche',
+  'settings.openchamber.spaces.field.enabled': 'Agenten in isolierten Bereichen arbeiten lassen',
+  'settings.openchamber.spaces.field.enabledAria': 'Agenten in isolierten Bereichen arbeiten lassen',
+  'settings.openchamber.spaces.field.enabledInfo': 'Der Agent arbeitet in einem Docker-Container an Ihrem Projekt. Er kommt nicht an Ihre Dateien, andere Projekte oder Schlüssel. Sie können seine Änderungen übernehmen oder verwerfen. Der erste Start lädt etwa 1,6 GB herunter.',
+  'settings.openchamber.spaces.idleStop.enabled': 'Untätige Bereiche anhalten',
+  'settings.openchamber.spaces.idleStop.enabledAria': 'Untätige Bereiche anhalten',
+  'settings.openchamber.spaces.idleStop.enabledInfo': 'Hält einen Bereich ohne Aktivität an. Dateien bleiben erhalten. Funktioniert auch, wenn OpenChamber geschlossen ist.',
+  'settings.openchamber.spaces.idleStop.after': 'Anhalten nach',
+  'settings.openchamber.spaces.idleStop.afterAria': 'Stunden ohne Arbeit, bevor ein Bereich anhält',
+  'settings.openchamber.spaces.idleStop.hours': 'Stunden',
+  'settings.openchamber.spaces.idleStop.resetAria': 'Auf 4 Stunden zurücksetzen',
+  'settings.openchamber.spaces.idleStop.loadFailed': 'Diese Einstellung konnte nicht geladen werden.',
+
 } as const;

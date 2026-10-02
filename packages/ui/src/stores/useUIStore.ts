@@ -704,6 +704,8 @@ interface UIStore {
   isScheduledTasksDialogOpen: boolean;
   isArchivePageOpen: boolean;
   worktreesPageProjectId: string | null;
+  /** The project whose isolated spaces fill the main area, opened from its menu in the sidebar. */
+  spacesPageProjectId: string | null;
   /** Open full-page guest (extension) in the main content area; mutual-exclusive with the other main surfaces. */
   openGuestPageId: string | null;
   isNewWorktreeDialogOpen: boolean;
@@ -811,6 +813,8 @@ interface UIStore {
   browserProvider: string;
   agentMemoryToolEnabled: boolean;
   agentNotifyToolEnabled: boolean;
+  /** The isolated-spaces switch as saved; the server applies it at its next start. */
+  isolatedSpacesEnabled: boolean;
   /**
    * Whether this build has Jev model routing. Server-owned and not persisted,
    * same as the other feature-availability flags.
@@ -911,6 +915,7 @@ interface UIStore {
   setScheduledTasksDialogOpen: (open: boolean) => void;
   setArchivePageOpen: (open: boolean) => void;
   setWorktreesPageProjectId: (projectId: string | null) => void;
+  setSpacesPageProjectId: (projectId: string | null) => void;
   setOpenGuestPage: (id: string | null) => void;
   closeMainSurfaces: () => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
@@ -1010,6 +1015,7 @@ interface UIStore {
   setBrowserProvider: (value: string) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
   setAgentNotifyToolEnabled: (value: boolean) => void;
+  setIsolatedSpacesEnabled: (value: boolean) => void;
   setRoutingFeatureAvailable: (value: boolean) => void;
   setSettingsProvidersClassificationRequested: (requested: boolean) => void;
   setPermissionDefaultMode: (value: PermissionMode) => void;
@@ -1090,6 +1096,7 @@ export const useUIStore = create<UIStore>()(
         isScheduledTasksDialogOpen: false,
         isArchivePageOpen: false,
         worktreesPageProjectId: null,
+        spacesPageProjectId: null,
         openGuestPageId: null,
         isNewWorktreeDialogOpen: false,
         isSettingsDialogOpen: false,
@@ -1182,6 +1189,7 @@ export const useUIStore = create<UIStore>()(
         browserProvider: 'builtin',
         agentMemoryToolEnabled: false,
         agentNotifyToolEnabled: false,
+        isolatedSpacesEnabled: false,
         routingFeatureAvailable: false,
         settingsProvidersClassificationRequested: false,
         permissionDefaultMode: 'ask',
@@ -1728,6 +1736,7 @@ export const useUIStore = create<UIStore>()(
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
+            spacesPageProjectId: null,
             isMultiRunLauncherOpen: false,
             runOverviewKey: null,
             openGuestPageId: null,
@@ -1839,6 +1848,7 @@ export const useUIStore = create<UIStore>()(
                 isScheduledTasksDialogOpen: true,
                 isArchivePageOpen: false,
                 worktreesPageProjectId: null,
+                spacesPageProjectId: null,
                 isMultiRunLauncherOpen: false,
             runOverviewKey: null,
                 openGuestPageId: null,
@@ -1852,6 +1862,7 @@ export const useUIStore = create<UIStore>()(
                 isArchivePageOpen: true,
                 isScheduledTasksDialogOpen: false,
                 worktreesPageProjectId: null,
+                spacesPageProjectId: null,
                 isMultiRunLauncherOpen: false,
             runOverviewKey: null,
                 openGuestPageId: null,
@@ -1863,6 +1874,7 @@ export const useUIStore = create<UIStore>()(
           set(projectId
             ? {
                 worktreesPageProjectId: projectId,
+                spacesPageProjectId: null,
                 isScheduledTasksDialogOpen: false,
                 isArchivePageOpen: false,
                 isMultiRunLauncherOpen: false,
@@ -1872,6 +1884,20 @@ export const useUIStore = create<UIStore>()(
             : { worktreesPageProjectId: null });
         },
 
+        setSpacesPageProjectId: (projectId) => {
+          set(projectId
+            ? {
+                spacesPageProjectId: projectId,
+                worktreesPageProjectId: null,
+                isScheduledTasksDialogOpen: false,
+                isArchivePageOpen: false,
+                isMultiRunLauncherOpen: false,
+                runOverviewKey: null,
+                openGuestPageId: null,
+              }
+            : { spacesPageProjectId: null });
+        },
+
         setOpenGuestPage: (id) => {
           set(id
             ? {
@@ -1879,6 +1905,7 @@ export const useUIStore = create<UIStore>()(
                 isScheduledTasksDialogOpen: false,
                 isArchivePageOpen: false,
                 worktreesPageProjectId: null,
+                spacesPageProjectId: null,
                 isMultiRunLauncherOpen: false,
             runOverviewKey: null,
               }
@@ -1891,6 +1918,7 @@ export const useUIStore = create<UIStore>()(
             !state.isScheduledTasksDialogOpen
             && !state.isArchivePageOpen
             && !state.worktreesPageProjectId
+            && !state.spacesPageProjectId
             && !state.isMultiRunLauncherOpen
             && !state.runOverviewKey
             && !state.openGuestPageId
@@ -1901,6 +1929,7 @@ export const useUIStore = create<UIStore>()(
             isScheduledTasksDialogOpen: false,
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
+            spacesPageProjectId: null,
             isMultiRunLauncherOpen: false,
             runOverviewKey: null,
             multiRunLauncherPrefillPrompt: '',
@@ -2549,6 +2578,9 @@ export const useUIStore = create<UIStore>()(
         },
         setAgentMemoryToolEnabled: (value) => {
           set({ agentMemoryToolEnabled: value });
+        },
+        setIsolatedSpacesEnabled: (value) => {
+          set({ isolatedSpacesEnabled: value });
         },
         setAgentNotifyToolEnabled: (value) => {
           set({ agentNotifyToolEnabled: value });

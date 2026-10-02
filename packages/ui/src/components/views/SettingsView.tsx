@@ -158,6 +158,7 @@ const pageOrder: SettingsPageSlug[] = [
   'voice',
   'tunnel',
   'pairing',
+  'isolated-spaces',
 ];
 
 function buildRuntimeContext(isDesktop: boolean, routingAvailable: boolean, jevBlockedByEnterprise: boolean): SettingsRuntimeContext {
@@ -628,6 +629,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     notifications: 'notifications',
     voice: 'voice',
     tunnel: 'tunnel',
+    'isolated-spaces': 'spaces',
   }), []);
 
   const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
@@ -682,6 +684,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.voice.title');
       case 'tunnel':
         return t('settings.page.tunnel.title');
+      case 'isolated-spaces':
+        return t('settings.openchamber.spaces.title');
       case 'pairing':
         return t('settings.page.pairing.title');
       case 'remote-connection':
@@ -816,7 +820,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       case 'sessions':
       case 'notifications':
       case 'voice':
-      case 'tunnel': {
+      case 'tunnel':
+      case 'isolated-spaces': {
         const section = openChamberSectionBySlug[slug] ?? 'visual';
         return <OpenChamberPage section={section} />;
       }

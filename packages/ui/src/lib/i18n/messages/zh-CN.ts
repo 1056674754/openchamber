@@ -8,6 +8,7 @@ import { thirdPartyIntegrationI18n } from './third-party-integrations.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
+import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
@@ -29,6 +30,7 @@ export const dict: Record<I18nKey, string> = {
   ...projectKnowledgeI18n['zh-CN'],
   ...btwI18n['zh-CN'],
   ...chatsI18n['zh-CN'],
+  ...isolatedSpacesI18n["zh-CN"],
   ...routingI18n['zh-CN'],
   ...pluginPanelI18n['zh-CN'],
   ...surfacePanelI18n['zh-CN'],

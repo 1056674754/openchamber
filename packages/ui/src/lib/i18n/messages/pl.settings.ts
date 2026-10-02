@@ -2206,4 +2206,17 @@ export const settingsDict = {
   ...extensionsSettingsI18n.pl,
   ...guestIntegrationsI18n.pl,
 
+  'settings.openchamber.spaces.title': 'Izolowane przestrzenie',
+  'settings.openchamber.spaces.field.enabled': 'Pozwól agentom pracować w izolowanych przestrzeniach',
+  'settings.openchamber.spaces.field.enabledAria': 'Pozwól agentom pracować w izolowanych przestrzeniach',
+  'settings.openchamber.spaces.field.enabledInfo': 'Agent pracuje nad Twoim projektem w kontenerze Docker. Nie ma dostępu do Twoich plików, innych projektów ani kluczy. Jego zmiany możesz zastosować albo odrzucić. Pierwsze uruchomienie pobiera około 1,6 GB.',
+  'settings.openchamber.spaces.idleStop.enabled': 'Zatrzymuj bezczynne przestrzenie',
+  'settings.openchamber.spaces.idleStop.enabledAria': 'Zatrzymuj bezczynne przestrzenie',
+  'settings.openchamber.spaces.idleStop.enabledInfo': 'Zatrzymuje przestrzeń bez aktywności. Pliki są zachowane. Działa nawet przy zamkniętym OpenChamber.',
+  'settings.openchamber.spaces.idleStop.after': 'Zatrzymaj po',
+  'settings.openchamber.spaces.idleStop.afterAria': 'Liczba godzin bez pracy do zatrzymania przestrzeni',
+  'settings.openchamber.spaces.idleStop.hours': 'godz.',
+  'settings.openchamber.spaces.idleStop.resetAria': 'Przywróć 4 godziny',
+  'settings.openchamber.spaces.idleStop.loadFailed': 'Nie udało się wczytać tego ustawienia.',
+
 };

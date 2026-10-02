@@ -4,6 +4,7 @@ import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
+import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 import { routingI18n } from './routing.i18n';
 
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -27,6 +28,7 @@ export const dict = {
   ...projectKnowledgeI18n.en,
   ...btwI18n.en,
   ...chatsI18n.en,
+  ...isolatedSpacesI18n.en,
   ...routingI18n.en,
   ...pluginPanelI18n.en,
   ...surfacePanelI18n.en,

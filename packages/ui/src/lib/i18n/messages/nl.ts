@@ -1,5 +1,6 @@
 import type { I18nKey } from './en';
 import { surfacePanelI18n } from './surface-panel.i18n';
+import { isolatedSpacesI18n } from './isolated-spaces.i18n';
 
 /**
  * Dutch (nl) — spine S7 seed (upstream added the locale in `de319de21`).
@@ -10,6 +11,7 @@ import { surfacePanelI18n } from './surface-panel.i18n';
  */
 export const dict: Partial<Record<I18nKey, string>> = {
   ...surfacePanelI18n.nl,
+  ...isolatedSpacesI18n.nl,
   'common.language.dutch': 'Nederlands',
   'filesView.excalidraw.installHint': 'Installeer de Excalidraw-extensie om in dit bestand te tekenen.',
   'filesView.excalidraw.installAction': 'Installeren',
@@ -134,4 +136,17 @@ export const dict: Partial<Record<I18nKey, string>> = {
   'multirun.overview.bar.waiting': 'Runs die op u wachten: {count}. De runs kunnen niet klaar zijn voordat u antwoord geeft.',
   'multirun.overview.prompt.expand': 'Alles tonen',
   'multirun.overview.prompt.collapse': 'Minder tonen',
+  'settings.openchamber.spaces.title': 'Geïsoleerde ruimtes',
+  'settings.openchamber.spaces.idleStop.enabled': 'Inactieve ruimtes stoppen',
+  'settings.openchamber.spaces.idleStop.enabledAria': 'Ruimtes stoppen die inactief blijven',
+  'settings.openchamber.spaces.idleStop.enabledInfo': 'Stopt een ruimte zonder activiteit. Bestanden blijven bewaard. Werkt ook als OpenChamber gesloten is.',
+  'settings.openchamber.spaces.idleStop.after': 'Stoppen na',
+  'settings.openchamber.spaces.idleStop.afterAria': 'Aantal uren zonder werk voordat een ruimte stopt',
+  'settings.openchamber.spaces.idleStop.hours': 'uur',
+  'settings.openchamber.spaces.idleStop.resetAria': 'Terugzetten naar 4 uur',
+  'settings.openchamber.spaces.idleStop.loadFailed': 'Kan deze instelling niet laden.',
+  'settings.openchamber.spaces.field.enabled': 'Agents in geïsoleerde ruimtes laten werken',
+  'settings.openchamber.spaces.field.enabledAria': 'Agents in geïsoleerde ruimtes laten werken',
+  'settings.openchamber.spaces.field.enabledInfo': 'De agent werkt aan uw project in een Docker-container. Hij kan niet bij uw bestanden, andere projecten of sleutels. U kunt zijn wijzigingen toepassen of weggooien. De eerste start downloadt ongeveer 1,6 GB.',
+
 };

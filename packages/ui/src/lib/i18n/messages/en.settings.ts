@@ -2205,4 +2205,17 @@ export const settingsDict = {
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
   ...extensionsSettingsI18n.en,
   ...guestIntegrationsI18n.en,
+  'settings.openchamber.spaces.title': 'Isolated spaces',
+  'settings.openchamber.spaces.field.enabled': 'Let agents work in isolated spaces',
+  'settings.openchamber.spaces.field.enabledAria': 'Let agents work in isolated spaces',
+  'settings.openchamber.spaces.field.enabledInfo': 'The agent works on your project in a Docker container. It cannot reach your files, other projects or keys. You can apply or discard its changes. The first start downloads about 1.6 GB.',
+  'settings.openchamber.spaces.idleStop.enabled': 'Stop idle spaces',
+  'settings.openchamber.spaces.idleStop.enabledAria': 'Stop spaces that sit idle',
+  'settings.openchamber.spaces.idleStop.enabledInfo': 'Stops a space with no activity. Files are kept. Works even when OpenChamber is closed.',
+  'settings.openchamber.spaces.idleStop.after': 'Stop after',
+  'settings.openchamber.spaces.idleStop.afterAria': 'Hours without work before a space stops',
+  'settings.openchamber.spaces.idleStop.hours': 'hours',
+  'settings.openchamber.spaces.idleStop.resetAria': 'Reset to 4 hours',
+  'settings.openchamber.spaces.idleStop.loadFailed': 'Could not load this setting.',
+
 } as const;

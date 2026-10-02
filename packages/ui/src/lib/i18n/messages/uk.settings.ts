@@ -2205,4 +2205,17 @@ export const settingsDict = {
   'settings.openchamber.visual.field.sessionSuggestionAria': 'Generate a suggested next user message after the agent finishes',
   ...extensionsSettingsI18n.uk,
   ...guestIntegrationsI18n.uk,
+  "settings.openchamber.spaces.title": "Ізольовані простори",
+  "settings.openchamber.spaces.field.enabled": "Дозволити агентам працювати в ізольованих просторах",
+  "settings.openchamber.spaces.field.enabledAria": "Дозволити агентам працювати в ізольованих просторах",
+  "settings.openchamber.spaces.field.enabledInfo": "Агент працює з вашим проєктом у контейнері Docker. Він не має доступу до ваших файлів, інших проєктів і ключів. Його зміни можна застосувати або відкинути. Перший запуск завантажує близько 1,6 ГБ.",
+  "settings.openchamber.spaces.idleStop.enabled": "Зупиняти простори, що простоюють",
+  "settings.openchamber.spaces.idleStop.enabledAria": "Зупиняти простори, що простоюють",
+  "settings.openchamber.spaces.idleStop.enabledInfo": "Зупиняє простір без активності. Файли збережено. Працює, навіть коли OpenChamber закритий.",
+  "settings.openchamber.spaces.idleStop.after": "Зупиняти через",
+  "settings.openchamber.spaces.idleStop.afterAria": "Скільки годин без роботи до зупинки простору",
+  "settings.openchamber.spaces.idleStop.hours": "год",
+  "settings.openchamber.spaces.idleStop.resetAria": "Повернути 4 години",
+  "settings.openchamber.spaces.idleStop.loadFailed": "Не вдалося завантажити це налаштування.",
+
 } as const;
