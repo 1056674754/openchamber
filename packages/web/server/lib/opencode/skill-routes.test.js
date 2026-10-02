@@ -12,7 +12,7 @@ const listen = (app) => new Promise((resolve) => {
 
 // Harness for the OpenCode-discovered skills list route only; every other
 // route's dependencies stay unused in these tests.
-const createSkillsApp = ({ stubPort }) => {
+const createSkillsApp = ({ stubPort, discoverSkills: discoverSkillsOverride }) => {
   const app = express();
   registerSkillRoutes(app, {
     fs,
@@ -29,7 +29,7 @@ const createSkillsApp = ({ stubPort }) => {
     parseSkillRepoSource: () => ({ ok: false }),
     fetchGitHubRepoMetas: async () => ({}),
     getSkillSources: () => [],
-    discoverSkills: () => [],
+    discoverSkills: discoverSkillsOverride ?? (() => []),
     mergeDiscoveredSkills: (remote, local) => [...(remote ?? []), ...(local ?? [])],
     isManagedSkillPath: () => false,
     SKILL_SCOPE: { USER: 'user', PROJECT: 'project' },
@@ -39,6 +39,55 @@ const createSkillsApp = ({ stubPort }) => {
   });
   return app;
 };
+
+describe('skills list partial flag (upstream 90267ff3f)', () => {
+  const servers2 = [];
+  let projectRoot2;
+
+  afterEach(async () => {
+    await Promise.all(servers2.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
+    if (projectRoot2) {
+      fs.rmSync(projectRoot2, { recursive: true, force: true });
+      projectRoot2 = null;
+    }
+  });
+
+  it('flags the list as partial when the OpenCode skill list fails, and not when it succeeds', async () => {
+    projectRoot2 = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-skills-partial-'));
+    fs.mkdirSync(path.join(projectRoot2, '.agents', 'skills', 'disk-skill'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectRoot2, '.agents', 'skills', 'disk-skill', 'SKILL.md'),
+      '---\nname: disk-skill\ndescription: On disk\n---\nBody\n',
+    );
+    const diskSkill = { name: 'disk-skill', path: path.join(projectRoot2, '.agents', 'skills', 'disk-skill'), description: 'On disk' };
+    let failing = true;
+    const stub = express();
+    stub.get('/skill', (_req, res) => {
+      if (failing) {
+        res.status(500).json({ error: 'boom' });
+        return;
+      }
+      res.json([]);
+    });
+    const stubServer = await listen(stub);
+    servers2.push(stubServer);
+    const stubPort = stubServer.address().port;
+
+    const appServer = await listen(createSkillsApp({ stubPort, discoverSkills: () => [diskSkill] }));
+    servers2.push(appServer);
+    const appPort = appServer.address().port;
+    const url = `http://127.0.0.1:${appPort}/api/config/skills?directory=${encodeURIComponent(projectRoot2)}`;
+
+    const failed = await (await fetch(url)).json();
+    expect(failed.openCodeSkillsUnavailable).toBe(true);
+    expect(failed.skills.map((skill) => skill.name)).toContain('disk-skill');
+
+    failing = false;
+    const complete = await (await fetch(url)).json();
+    expect(complete.openCodeSkillsUnavailable).toBeUndefined();
+    expect(complete.skills.map((skill) => skill.name)).toContain('disk-skill');
+  });
+});
 
 describe('skills list route upstream payload mapping', () => {
   let projectRoot;

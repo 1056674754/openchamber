@@ -472,7 +472,10 @@ export async function handleConfigBridgeMessage(
       const normalizedMethod = typeof method === 'string' && method.trim() ? method.trim().toUpperCase() : 'GET';
 
       if (!name && normalizedMethod === 'GET') {
-        const skills = await resolveDiscoveredSkills(deps, ctx, workingDirectory);
+        // A failed OpenCode list is flagged so the store treats the disk scan as
+        // partial instead of caching it as the complete list (upstream #3921).
+        const openCodeSkills = await deps.fetchOpenCodeSkillsFromApi(ctx, workingDirectory);
+        const skills = mergeDiscoveredSkills(openCodeSkills ?? [], discoverSkills(workingDirectory));
         return {
           id,
           type,
@@ -486,6 +489,7 @@ export async function handleConfigBridgeMessage(
                 && isManagedSkillPath(skill.path, workingDirectory)
               ),
             })),
+            ...(openCodeSkills === null ? { openCodeSkillsUnavailable: true } : {}),
           },
         };
       }

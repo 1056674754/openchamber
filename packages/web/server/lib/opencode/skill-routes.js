@@ -249,7 +249,10 @@ export const registerSkillRoutes = (app, dependencies) => {
       if (error) {
         return res.status(400).json({ error });
       }
-      const skills = await resolveDiscoveredSkills(directory);
+      // OpenCode's own list failing leaves only the disk scan: the response is
+      // flagged so clients do not cache it as the complete list (upstream #3921).
+      const openCodeSkills = await fetchOpenCodeDiscoveredSkills(directory);
+      const skills = mergeDiscoveredSkills(openCodeSkills ?? [], discoverSkills(directory));
 
       const enrichedSkills = skills.map((skill) => {
         const sources = getSkillSources(skill.name, directory, skill);
@@ -265,7 +268,11 @@ export const registerSkillRoutes = (app, dependencies) => {
         };
       });
 
-      res.json({ skills: enrichedSkills });
+      const body = { skills: enrichedSkills };
+      if (openCodeSkills === null) {
+        body.openCodeSkillsUnavailable = true;
+      }
+      res.json(body);
     } catch (error) {
       console.error('Failed to list skills:', error);
       res.status(500).json({ error: 'Failed to list skills' });

@@ -180,6 +180,22 @@ declare global {
   }
 }
 
+/**
+ * Merge a partial list (OpenCode's own skill list failed, only the disk scan
+ * came back) with what was known before. Previously known skills the disk scan
+ * cannot vouch for — built-ins and anything OpenCode found through its config —
+ * are kept instead of vanishing on one failed fetch. Managed-root skills
+ * (`renamable`) are covered by the disk scan, so their absence is real.
+ */
+export const mergePartialSkills = (
+  partial: DiscoveredSkill[],
+  previous: DiscoveredSkill[],
+): DiscoveredSkill[] => {
+  const partialNames = new Set(partial.map((skill) => skill.name));
+  const carried = previous.filter((skill) => !partialNames.has(skill.name) && skill.renamable !== true);
+  return carried.length > 0 ? [...partial, ...carried] : partial;
+};
+
 const CONFIG_EVENT_SOURCE = "useSkillsStore";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const SKILLS_LOAD_CACHE_TTL_MS = 5000;
@@ -267,12 +283,24 @@ export const useSkillsStore = create<SkillsStore>()(
                   renamable: s.renamable === true,
                 }));
 
+                // The server answers with only its disk scan when OpenCode's
+                // own list could not be read. That is not a complete list:
+                // keep what was known and retry on the next load.
+                const isPartial = data.openCodeSkillsUnavailable === true;
+                const visibleSkills = isPartial
+                  ? mergePartialSkills(configSkills, previousSkills)
+                  : configSkills;
+
                 set((state) => ({
-                  skills: configSkills,
-                  skillsByTarget: { ...state.skillsByTarget, [cacheKey]: configSkills },
+                  skills: visibleSkills,
+                  skillsByTarget: { ...state.skillsByTarget, [cacheKey]: visibleSkills },
                   isLoading: false,
                 }));
-                skillsLastLoadedAt.set(cacheKey, Date.now());
+                if (isPartial) {
+                  skillsLastLoadedAt.delete(cacheKey);
+                } else {
+                  skillsLastLoadedAt.set(cacheKey, Date.now());
+                }
                 return true;
               } catch (error) {
                 lastError = error;
