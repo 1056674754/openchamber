@@ -1375,6 +1375,7 @@ const loadShellEnv = createShellEnvironmentLoader({
 // Merge the user's login-shell env (PATH, etc.) into this process before we
 import { pathLooksUserConfigured, mergePathValues } from '@openchamber/web/server/lib/opencode/path-utils.js';
 import { clearAppImageArgv0FromProcessEnv } from '@openchamber/web/server/lib/inherited-env.js';
+import { isNetworkAccessBlocked } from '@openchamber/web/server/lib/enterprise-mode.js';
 
 // import/start the server in-process. The server and its children (opencode
 // CLI, git, etc.) inherit process.env directly now — there is no sidecar
@@ -1414,7 +1415,13 @@ const spawnLocalServer = async () => {
   // warning and persists the flag via /api/config/settings.
   const lanAccessEnabled = settings.desktopLanAccessEnabled === true;
   setDesktopKeepAwakeActive(settings.desktopKeepAwakeEnabled === true);
-  const bindHost = lanAccessEnabled ? '0.0.0.0' : '127.0.0.1';
+  // Enterprise mode keeps the app on this machine unless the administrator
+  // allowed network access (the server refuses a network bind as well).
+  const lanAccessBlockedByEnterprise = lanAccessEnabled && isNetworkAccessBlocked();
+  if (lanAccessBlockedByEnterprise) {
+    log.warn('[desktop] LAN access is turned off by enterprise mode; starting on loopback only.');
+  }
+  const bindHost = lanAccessEnabled && !lanAccessBlockedByEnterprise ? '0.0.0.0' : '127.0.0.1';
 
   // Probe before starting the server — main() in the server module sets up a
   // lot of global state before binding, and calling it twice after a listen
