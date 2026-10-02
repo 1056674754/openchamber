@@ -2,6 +2,14 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  'settings.openchamber.tools.field.agentNotifyTool': 'Agent bildirim aracı',
+  'settings.openchamber.tools.field.agentNotifyToolAria': 'Agent bildirim aracı',
+  'settings.openchamber.tools.field.agentNotifyToolInfo': 'Agent\'ların uzun bir işi bitirdiğinde, yalnızca sizin çözebileceğiniz bir şeye takıldığında ya da siz istediğinizde size bildirim göndermesine izin verin. Bildirimler, Bildirimler ayarlarınıza uyar. Varsayılan olarak kapalıdır. OpenCode yeniden başlatıldıktan sonra uygulanır.',
+  'settings.openchamber.tools.browserProvider.label': 'Tarayıcı sağlayıcısı',
+  'settings.openchamber.tools.browserProvider.aria': 'Ajanın tarayıcı eylemlerini kimin yanıtlayacağını seçin',
+  'settings.openchamber.tools.browserProvider.info': 'Ajanın tarayıcı eylemlerini hangi tarayıcının yanıtlayacağı. OpenChamber Web, bağlı bir masaüstü uygulamasının tarayıcı panelidir. Tarayıcı sağlayan yüklü bir uzantı onu sunucuda çalıştırır; böylece ajan, açık bir masaüstü istemcisi olmadan gezinebilir. Bir sonraki tarayıcı eyleminden itibaren geçerlidir.',
+  'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.browserProvider.toast.reset': '{name} artık tarayıcı sağlayamıyor. Ajanlar yeniden OpenChamber Web kullanıyor.',
   'settings.themeImport.selectAll': 'Tümünü seç',
   'settings.themeImport.deselectAll': 'Tümünün seçimini kaldır',
   'settings.themeImport.complete': 'İçe aktarma tamamlandı',

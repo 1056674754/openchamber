@@ -2,9 +2,13 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
 import { canUseDesktopNativeApi, isDesktopShell, requestFileAccess } from '@/lib/desktop';
+import { BUILTIN_BROWSER_PROVIDER, browserProviderGuests } from '@/lib/guests/browser-providers';
+import { loadGuestCatalog } from '@/lib/guests/load-catalog';
+import { useGuestsStore } from '@/lib/guests/store';
 import { flushPendingSettingsUpdates, updateDesktopSettings } from '@/lib/persistence';
 import { refreshAfterOpenCodeRestart, reloadOpenCodeConfiguration } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -23,8 +27,13 @@ export const OpenCodeCliSettings: React.FC = () => {
   const setShowOpenCodeUpdateNotifications = useUIStore((state) => state.setShowOpenCodeUpdateNotifications);
   const agentControlToolEnabled = useUIStore((state) => state.agentControlToolEnabled);
   const setAgentControlToolEnabled = useUIStore((state) => state.setAgentControlToolEnabled);
+  const browserProvider = useUIStore((state) => state.browserProvider);
+  const setBrowserProvider = useUIStore((state) => state.setBrowserProvider);
+  const guests = useGuestsStore((state) => state.guests);
   const agentMemoryToolEnabled = useUIStore((state) => state.agentMemoryToolEnabled);
   const setAgentMemoryToolEnabled = useUIStore((state) => state.setAgentMemoryToolEnabled);
+  const agentNotifyToolEnabled = useUIStore((state) => state.agentNotifyToolEnabled);
+  const setAgentNotifyToolEnabled = useUIStore((state) => state.setAgentNotifyToolEnabled);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -103,6 +112,29 @@ export const OpenCodeCliSettings: React.FC = () => {
     setAgentControlToolEnabled(enabled);
     void updateDesktopSettings({ agentControlToolEnabled: enabled });
   }, [setAgentControlToolEnabled]);
+
+  // The dropdown lists installed extensions, so the catalog has to be loaded
+  // here too: this page can be the first thing opened after a fresh start.
+  React.useEffect(() => {
+    void loadGuestCatalog();
+  }, []);
+  const providerGuests = React.useMemo(() => browserProviderGuests(guests), [guests]);
+  // A selection whose extension is gone shows as the built-in: the server
+  // already routes to it and resets the setting on the next action.
+  const providerValue = providerGuests.some((guest) => guest.id === browserProvider)
+    ? browserProvider
+    : BUILTIN_BROWSER_PROVIDER;
+
+  // Read by the server on the next browser action; no OpenCode restart involved.
+  const handleBrowserProviderChange = React.useCallback((selected: string) => {
+    setBrowserProvider(selected);
+    void updateDesktopSettings({ browserProvider: selected });
+  }, [setBrowserProvider]);
+
+  const handleAgentNotifyToolChange = React.useCallback((enabled: boolean) => {
+    setAgentNotifyToolEnabled(enabled);
+    void updateDesktopSettings({ agentNotifyToolEnabled: enabled });
+  }, [setAgentNotifyToolEnabled]);
 
   const handleAgentMemoryToolChange = React.useCallback(async (enabled: boolean) => {
     const previous = agentMemoryToolEnabled;
@@ -224,6 +256,59 @@ export const OpenCodeCliSettings: React.FC = () => {
             </span>
             <span className="typography-micro block text-muted-foreground/70">
               {t('settings.openchamber.opencodeCli.field.agentControlToolInfo')}
+            </span>
+          </span>
+        </label>
+
+        <div className="flex flex-col gap-2 py-1.5 sm:flex-row sm:items-center sm:gap-3">
+          <div className="flex min-w-0 flex-col shrink-0">
+            <span className="typography-ui-label text-foreground">{t('settings.openchamber.tools.browserProvider.label')}</span>
+            <span className="typography-micro block text-muted-foreground/70">
+              {t('settings.openchamber.tools.browserProvider.info')}
+            </span>
+          </div>
+          <div className="flex min-w-0 items-center sm:w-[20rem]">
+            <Select<string>
+              value={providerValue}
+              onValueChange={handleBrowserProviderChange}
+              disabled={providerGuests.length === 0}
+            >
+              <SelectTrigger
+                className="h-7 min-w-0 flex-1"
+                aria-label={t('settings.openchamber.tools.browserProvider.aria')}
+              >
+                <SelectValue>
+                  {(selected) => (
+                    selected === BUILTIN_BROWSER_PROVIDER
+                      ? t('settings.openchamber.tools.browserProvider.option.builtin')
+                      : providerGuests.find((guest) => guest.id === selected)?.name ?? null
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={BUILTIN_BROWSER_PROVIDER}>
+                  {t('settings.openchamber.tools.browserProvider.option.builtin')}
+                </SelectItem>
+                {providerGuests.map((guest) => (
+                  <SelectItem key={guest.id} value={guest.id}>{guest.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <label className="flex cursor-pointer items-start gap-2 py-1.5">
+          <Checkbox
+            checked={agentNotifyToolEnabled}
+            onChange={handleAgentNotifyToolChange}
+            ariaLabel={t('settings.openchamber.tools.field.agentNotifyToolAria')}
+          />
+          <span className="min-w-0">
+            <span className="typography-ui-label block text-foreground">
+              {t('settings.openchamber.tools.field.agentNotifyTool')}
+            </span>
+            <span className="typography-micro block text-muted-foreground/70">
+              {t('settings.openchamber.tools.field.agentNotifyToolInfo')}
             </span>
           </span>
         </label>

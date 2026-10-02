@@ -1,4 +1,5 @@
 import type { I18nKey } from './en';
+import { surfacePanelI18n } from './surface-panel.i18n';
 
 /**
  * Dutch (nl) — spine S7 seed (upstream added the locale in `de319de21`).
@@ -8,7 +9,22 @@ import type { I18nKey } from './en';
  * `formatMessage`; the full dictionary lands with the B10 i18n batch.
  */
 export const dict: Partial<Record<I18nKey, string>> = {
+  ...surfacePanelI18n.nl,
   'common.language.dutch': 'Nederlands',
+  'filesView.excalidraw.installHint': 'Installeer de Excalidraw-extensie om in dit bestand te tekenen.',
+  'filesView.excalidraw.installAction': 'Installeren',
+  'filesView.fileEditor.save': 'Opslaan',
+  'filesView.fileEditor.snapshotFailed': 'Kan je wijzigingen niet ophalen bij {editor}. Probeer het opnieuw.',
+  'filesView.fileEditor.unsupported': '{editor} kan dit bestand niet openen. In plaats daarvan wordt de bron getoond.',
+  'filesView.fileEditor.tooLarge': 'Dit bestand is te groot voor {editor}. Bewerk in plaats daarvan de bron.',
+  'settings.openchamber.tools.browserProvider.label': 'Browserprovider',
+  'settings.openchamber.tools.browserProvider.aria': 'Bepaal wie de browseractions van de agent uitvoert',
+  'settings.openchamber.tools.browserProvider.info': 'OpenChamber Web is het browserpaneel van de desktop-app. Een browserextensie draait op de server, zodat agents kunnen browsen zonder geopende desktop-app.',
+  'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.browserProvider.toast.reset': '{name} kan de browser niet meer leveren. Agents gebruiken weer OpenChamber Web.',
+  'settings.openchamber.tools.field.agentNotifyTool': 'Meldtool voor agents',
+  'settings.openchamber.tools.field.agentNotifyToolAria': 'Meldtool voor agents',
+  'settings.openchamber.tools.field.agentNotifyToolInfo': 'Agents laten het weten als het werk klaar is of ze vastlopen. Volgt uw meldingsinstellingen. Standaard uit.',
   'chat.formCard.inputNeeded': 'Invoer nodig',
   'chat.formCard.fromSubagent': 'van een subagent',
   'chat.formCard.required': 'Verplicht',

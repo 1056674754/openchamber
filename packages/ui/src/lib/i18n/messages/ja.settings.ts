@@ -2,6 +2,14 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  'settings.openchamber.tools.field.agentNotifyTool': 'エージェント通知ツール',
+  'settings.openchamber.tools.field.agentNotifyToolAria': 'エージェント通知ツール',
+  'settings.openchamber.tools.field.agentNotifyToolInfo': 'エージェントが長い作業を終えたとき、あなたにしか解決できない問題で止まったとき、または依頼されたときに通知を送れるようにします。通知は通知設定に従います。既定ではオフです。OpenCode の再起動後に反映されます。',
+  'settings.openchamber.tools.browserProvider.label': 'ブラウザープロバイダー',
+  'settings.openchamber.tools.browserProvider.aria': 'エージェントのブラウザー操作に応答する側を選択',
+  'settings.openchamber.tools.browserProvider.info': 'エージェントのブラウザー操作にどのブラウザーが応答するかを選びます。OpenChamber Web は接続中のデスクトップアプリのブラウザーパネルです。ブラウザーを提供する拡張機能をインストールすると、サーバー上でブラウザーが動作し、デスクトップクライアントを開かなくてもエージェントがブラウズできます。次のブラウザー操作から適用されます。',
+  'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.browserProvider.toast.reset': '{name} はブラウザーを提供できなくなりました。エージェントは再び OpenChamber Web を使用します。',
   'settings.themeImport.selectAll': 'すべて選択',
   'settings.themeImport.deselectAll': 'すべて選択解除',
   'settings.themeImport.complete': 'インポート完了',

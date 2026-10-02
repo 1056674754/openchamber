@@ -31,6 +31,7 @@ const toNotificationPayload = (value: unknown): NotificationPayload | null => {
     title: typeof properties.title === 'string' ? properties.title : undefined,
     body: typeof properties.body === 'string' ? properties.body : undefined,
     tag: typeof properties.tag === 'string' ? properties.tag : undefined,
+    requireHidden: properties.requireHidden !== false,
   };
 };
 
@@ -45,10 +46,12 @@ export const useWebNotificationStream = (options?: { enabled?: boolean }) => {
     return subscribeOpenchamberEventEnvelopes((data) => {
       const settings = useUIStore.getState();
       if (!settings.nativeNotificationsEnabled) return;
-      if (settings.notificationMode !== 'always' && isFocused()) return;
 
       const payload = toNotificationPayload(data);
       if (!payload) return;
+      // `requireHidden: false` is the server's explicit opt-out (the always
+      // mode, or a plugin notice sent with showWhenFocused).
+      if (settings.notificationMode !== 'always' && payload.requireHidden !== false && isFocused()) return;
 
       const properties = (data as { properties?: Record<string, unknown> }).properties;
       const deliveredNatively =

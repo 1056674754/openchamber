@@ -2,6 +2,14 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  "settings.openchamber.tools.field.agentNotifyTool": "Herramienta de notificaciones del agente",
+  "settings.openchamber.tools.field.agentNotifyToolAria": "Herramienta de notificaciones del agente",
+  "settings.openchamber.tools.field.agentNotifyToolInfo": "Permite que los agentes te envíen una notificación cuando terminan un trabajo largo, se bloquean en algo que solo tú puedes resolver o cuando lo pediste. Las notificaciones siguen tu configuración de Notificaciones. Desactivada por defecto. Se aplica tras reiniciar OpenCode.",
+  "settings.openchamber.tools.browserProvider.label": "Proveedor del navegador",
+  "settings.openchamber.tools.browserProvider.aria": "Elegir quién responde a las acciones de navegador del agente",
+  "settings.openchamber.tools.browserProvider.info": "Qué navegador responde a las acciones de navegador del agente. OpenChamber Web es el panel de navegador de una app de escritorio conectada. Una extensión instalada que proporciona un navegador lo ejecuta en el servidor, así el agente puede navegar sin ningún cliente de escritorio abierto. Se aplica a la siguiente acción de navegador.",
+  "settings.openchamber.tools.browserProvider.option.builtin": "OpenChamber Web",
+  "settings.openchamber.tools.browserProvider.toast.reset": "{name} ya no puede proporcionar el navegador. Los agentes vuelven a usar OpenChamber Web.",
   'settings.themeImport.selectAll': 'Seleccionar todo',
   'settings.themeImport.deselectAll': 'Deseleccionar todo',
   'settings.themeImport.complete': 'Importación completada',

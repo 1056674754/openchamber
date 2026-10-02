@@ -2,6 +2,14 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  "settings.openchamber.tools.field.agentNotifyTool": "Інструмент сповіщень агента",
+  "settings.openchamber.tools.field.agentNotifyToolAria": "Інструмент сповіщень агента",
+  "settings.openchamber.tools.field.agentNotifyToolInfo": "Дозволяє агентам надсилати вам сповіщення, коли вони завершили довгу роботу, застрягли на чомусь, що можете вирішити лише ви, або коли ви про це попросили. Сповіщення підкоряються налаштуванням сповіщень. Вимкнено за замовчуванням. Діє після перезапуску OpenCode.",
+  "settings.openchamber.tools.browserProvider.label": "Провайдер браузера",
+  "settings.openchamber.tools.browserProvider.aria": "Обрати, хто відповідає на браузерні дії агента",
+  "settings.openchamber.tools.browserProvider.info": "Який браузер відповідає на браузерні дії агента. OpenChamber Web — це панель браузера підключеного десктопного застосунку. Встановлене розширення, що надає браузер, запускає його на сервері, тож агент може працювати з вебом без відкритого десктопного клієнта. Застосовується з наступної браузерної дії.",
+  "settings.openchamber.tools.browserProvider.option.builtin": "OpenChamber Web",
+  "settings.openchamber.tools.browserProvider.toast.reset": "{name} більше не може надавати браузер. Агенти знову використовують OpenChamber Web.",
   'settings.themeImport.selectAll': 'Вибрати всі',
   'settings.themeImport.deselectAll': 'Зняти вибір',
   'settings.themeImport.complete': 'Імпорт завершено',

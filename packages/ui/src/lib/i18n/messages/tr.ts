@@ -10,8 +10,16 @@ import { btwI18n } from "./btw.i18n";
 import { chatsI18n } from "./chats.i18n";
 import { routingI18n } from "./routing.i18n";
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'filesView.excalidraw.installHint': 'Bu dosyada çizmek için Excalidraw uzantısını kurun.',
+  'filesView.excalidraw.installAction': 'Kur',
+  'filesView.fileEditor.save': 'Kaydet',
+  'filesView.fileEditor.snapshotFailed': 'Değişiklikleriniz {editor} üzerinden alınamadı. Yeniden deneyin.',
+  'filesView.fileEditor.unsupported': '{editor} bu dosyayı açamıyor. Bunun yerine kaynak gösteriliyor.',
+  'filesView.fileEditor.tooLarge': 'Bu dosya {editor} için çok büyük. Bunun yerine kaynağı düzenleyin.',
   ...linearIssuePickerI18n.tr,
   ...linearIntegrationI18n.tr,
   ...linearPanelI18n.tr,
@@ -22,6 +30,8 @@ export const dict: Record<I18nKey, string> = {
   ...chatsI18n.tr,
   ...routingI18n.tr,
   ...pluginPanelI18n.tr,
+  ...surfacePanelI18n.tr,
+  ...extensionCatalogI18n.tr,
   ...fileArtifactsI18n['tr'],
   "planView.error.loadFailed": "Bu plan yüklenemedi",
   "common.loading": "Yükleniyor...",

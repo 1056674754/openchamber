@@ -2,6 +2,14 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  'settings.openchamber.tools.field.agentNotifyTool': '에이전트 알림 도구',
+  'settings.openchamber.tools.field.agentNotifyToolAria': '에이전트 알림 도구',
+  'settings.openchamber.tools.field.agentNotifyToolInfo': '에이전트가 긴 작업을 마쳤을 때, 사용자만 해결할 수 있는 문제로 막혔을 때, 또는 요청받았을 때 알림을 보낼 수 있게 합니다. 알림은 알림 설정을 따릅니다. 기본값은 꺼짐입니다. OpenCode를 다시 시작한 뒤 적용됩니다.',
+  'settings.openchamber.tools.browserProvider.label': '브라우저 제공자',
+  'settings.openchamber.tools.browserProvider.aria': '에이전트의 브라우저 동작에 응답할 대상 선택',
+  'settings.openchamber.tools.browserProvider.info': '에이전트의 브라우저 동작에 어떤 브라우저가 응답할지 정합니다. OpenChamber Web은 연결된 데스크톱 앱의 브라우저 패널입니다. 브라우저를 제공하는 확장을 설치하면 서버에서 브라우저가 실행되어 데스크톱 클라이언트를 열지 않아도 에이전트가 탐색할 수 있습니다. 다음 브라우저 동작부터 적용됩니다.',
+  'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.browserProvider.toast.reset': '{name}이(가) 더 이상 브라우저를 제공할 수 없습니다. 에이전트는 다시 OpenChamber Web을 사용합니다.',
   'settings.themeImport.selectAll': '모두 선택',
   'settings.themeImport.deselectAll': '모두 선택 해제',
   'settings.themeImport.complete': '가져오기 완료',

@@ -14,6 +14,7 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { GitHubIntegration } from './GitHubIntegration';
 import { LinearSettings } from './LinearSettings';
 import { ThirdPartyIntegrationsSection } from './ThirdPartyIntegrationsSection';
+import { CatalogExtensionsSection } from './CatalogExtensionsSection';
 
 type IntegrationsPageProps = {
   onOpenProviderSetup: (providerId: string) => Promise<boolean>;
@@ -71,6 +72,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
         </SettingsSection>
       ) : null}
       <GuestIntegrationsSection divider={hasBuiltIn} />
+      <CatalogExtensionsSection />
       <ThirdPartyIntegrationsSection
         onOpenProviderSetup={onOpenProviderSetup}
         onOpenPluginManager={onOpenPluginManager}

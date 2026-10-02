@@ -811,6 +811,8 @@ export interface NotificationPayload {
   body?: string;
 
   tag?: string;
+  /** Server's explicit opt-out from focus suppression (always mode, or a plugin notice sent with showWhenFocused). */
+  requireHidden?: boolean;
 }
 
 export interface NotificationsAPI {

@@ -68,7 +68,10 @@ export type DesktopSettings = {
   // Optional absolute path to `opencode` binary.
   opencodeBinary?: string;
   agentControlToolEnabled?: boolean;
+  /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
+  browserProvider?: string;
   agentMemoryToolEnabled?: boolean;
+  agentNotifyToolEnabled?: boolean;
   /** Server-computed: this build has Jev routing (`OPENCHAMBER_ROUTING_ENABLE`). */
   routingFeatureAvailable?: boolean;
   optimizeSystemPrompt?: boolean;

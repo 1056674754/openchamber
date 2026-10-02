@@ -10,8 +10,16 @@ import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'filesView.excalidraw.installHint': 'Zainstaluj rozszerzenie Excalidraw, aby rysować w tym pliku.',
+  'filesView.excalidraw.installAction': 'Zainstaluj',
+  'filesView.fileEditor.save': 'Zapisz',
+  'filesView.fileEditor.snapshotFailed': 'Nie udało się pobrać zmian z {editor}. Spróbuj ponownie.',
+  'filesView.fileEditor.unsupported': '{editor} nie może otworzyć tego pliku. Zamiast tego wyświetlane jest źródło.',
+  'filesView.fileEditor.tooLarge': 'Ten plik jest za duży dla {editor}. Edytuj źródło.',
   ...linearIssuePickerI18n.pl,
   ...linearIntegrationI18n.pl,
   ...linearPanelI18n.pl,
@@ -22,6 +30,8 @@ export const dict: Record<I18nKey, string> = {
   ...chatsI18n.pl,
   ...routingI18n.pl,
   ...pluginPanelI18n.pl,
+  ...surfacePanelI18n.pl,
+  ...extensionCatalogI18n.pl,
   ...fileArtifactsI18n['pl'],
   'planView.error.loadFailed': 'Nie udało się wczytać tego planu',
 

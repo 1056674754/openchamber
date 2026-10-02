@@ -807,7 +807,10 @@ interface UIStore {
   persistChatDraft: boolean;
   showOpenCodeUpdateNotifications: boolean;
   agentControlToolEnabled: boolean;
+  /** Who answers the agent's browser actions: `builtin` (the in-app view) or an extension id. */
+  browserProvider: string;
   agentMemoryToolEnabled: boolean;
+  agentNotifyToolEnabled: boolean;
   /**
    * Whether this build has Jev model routing. Server-owned and not persisted,
    * same as the other feature-availability flags.
@@ -1004,7 +1007,9 @@ interface UIStore {
   setPersistChatDraft: (value: boolean) => void;
   setShowOpenCodeUpdateNotifications: (value: boolean) => void;
   setAgentControlToolEnabled: (value: boolean) => void;
+  setBrowserProvider: (value: string) => void;
   setAgentMemoryToolEnabled: (value: boolean) => void;
+  setAgentNotifyToolEnabled: (value: boolean) => void;
   setRoutingFeatureAvailable: (value: boolean) => void;
   setSettingsProvidersClassificationRequested: (requested: boolean) => void;
   setPermissionDefaultMode: (value: PermissionMode) => void;
@@ -1174,7 +1179,9 @@ export const useUIStore = create<UIStore>()(
         persistChatDraft: true,
         showOpenCodeUpdateNotifications: true,
         agentControlToolEnabled: true,
+        browserProvider: 'builtin',
         agentMemoryToolEnabled: false,
+        agentNotifyToolEnabled: false,
         routingFeatureAvailable: false,
         settingsProvidersClassificationRequested: false,
         permissionDefaultMode: 'ask',
@@ -2537,8 +2544,14 @@ export const useUIStore = create<UIStore>()(
         setAgentControlToolEnabled: (value) => {
           set({ agentControlToolEnabled: value });
         },
+        setBrowserProvider: (value) => {
+          set({ browserProvider: value });
+        },
         setAgentMemoryToolEnabled: (value) => {
           set({ agentMemoryToolEnabled: value });
+        },
+        setAgentNotifyToolEnabled: (value) => {
+          set({ agentNotifyToolEnabled: value });
         },
         setRoutingFeatureAvailable: (value) => {
           set({ routingFeatureAvailable: value });
@@ -2909,7 +2922,9 @@ export const useUIStore = create<UIStore>()(
           persistChatDraft: state.persistChatDraft,
           showOpenCodeUpdateNotifications: state.showOpenCodeUpdateNotifications,
           agentControlToolEnabled: state.agentControlToolEnabled,
+          browserProvider: state.browserProvider,
           agentMemoryToolEnabled: state.agentMemoryToolEnabled,
+          agentNotifyToolEnabled: state.agentNotifyToolEnabled,
           inputSpellcheckEnabled: state.inputSpellcheckEnabled,
           wideChatLayoutEnabled: state.wideChatLayoutEnabled,
           codeBlockLineWrap: state.codeBlockLineWrap,

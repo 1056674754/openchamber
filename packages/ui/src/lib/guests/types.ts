@@ -1,7 +1,9 @@
 import type {
   AttachContribution,
+  FileEditorContribution,
   GuestActionContribution,
   GuestCommandContribution,
+  GuestSurfaceDock,
   GuestToolContribution,
   PublicService,
   PublicGuestCapabilities,
@@ -16,6 +18,9 @@ export type InstalledGuest = {
   icon: string;
   /** Visible panel page. Absent for background-only and tools-only extensions. */
   entry?: string;
+  /** Edge and thickness of `entry` docked beside a shared surface (`PanelContribution.dock`/`size`). */
+  entryDock?: GuestSurfaceDock;
+  entrySize?: number;
   /** Sandboxed HTML loaded on demand for actions and commands, without a rail surface. */
   backgroundEntry?: string;
   /** npm package.json version when the package declared one. */
@@ -28,6 +33,8 @@ export type InstalledGuest = {
   integration?: PublicIntegration;
   /** Declared `contributes.filesystem` patterns, shown on the approval dialog. */
   filesystem?: string[];
+  /** Declared `contributes.origins`: the frame may exchange data with them once approved. */
+  origins?: string[];
   service?: PublicService;
   /** Declared `contributes.actions`; the UI shows them only for an active guest. */
   actions?: GuestActionContribution[];
@@ -35,6 +42,8 @@ export type InstalledGuest = {
   commands?: GuestCommandContribution[];
   /** Declared `contributes.tools`; the chat applies them only for an active guest. */
   tools?: GuestToolContribution[];
+  /** Declared `contributes.fileEditors`; the Files view opens matching files in them only for an active guest. */
+  fileEditors?: FileEditorContribution[];
   /** What the package asks for and what the user approved at install. */
   capabilities: PublicGuestCapabilities;
   source?: GuestSource;

@@ -2,6 +2,14 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 ﻿import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  'settings.openchamber.tools.field.agentNotifyTool': '智慧代理通知工具',
+  'settings.openchamber.tools.field.agentNotifyToolAria': '智慧代理通知工具',
+  'settings.openchamber.tools.field.agentNotifyToolInfo': '讓代理在完成耗時較長的工作、卡在只有你能解決的問題，或你要求時向你發送通知。通知遵循你的通知設定。預設關閉。重新啟動 OpenCode 後生效。',
+  'settings.openchamber.tools.browserProvider.label': '瀏覽器提供者',
+  'settings.openchamber.tools.browserProvider.aria': '選擇由誰回應代理程式的瀏覽器操作',
+  'settings.openchamber.tools.browserProvider.info': '由哪個瀏覽器回應代理程式的瀏覽器操作。OpenChamber Web 是已連線桌面應用程式的瀏覽器面板。已安裝且提供瀏覽器的擴充功能會在伺服器上執行瀏覽器，代理程式無需開啟桌面用戶端即可瀏覽。自下一次瀏覽器操作起生效。',
+  'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.browserProvider.toast.reset': '{name} 無法再提供瀏覽器。代理程式將重新使用 OpenChamber Web。',
   'settings.themeImport.selectAll': '全選',
   'settings.themeImport.deselectAll': '取消全選',
   'settings.themeImport.complete': '匯入完成',

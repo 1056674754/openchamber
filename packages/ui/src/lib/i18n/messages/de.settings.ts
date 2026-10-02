@@ -2,6 +2,14 @@ import { extensionsSettingsI18n } from './extensions.settings.i18n';
 import { guestIntegrationsI18n } from './guest-integrations.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 export const settingsDict = {
+  'settings.openchamber.tools.field.agentNotifyTool': 'Agenten-Benachrichtigungswerkzeug',
+  'settings.openchamber.tools.field.agentNotifyToolAria': 'Agenten-Benachrichtigungswerkzeug',
+  'settings.openchamber.tools.field.agentNotifyToolInfo': 'Lässt Agenten Ihnen eine Benachrichtigung senden, wenn sie eine lange Aufgabe beendet haben, bei etwas feststecken, das nur Sie lösen können, oder Sie darum gebeten haben. Benachrichtigungen folgen Ihren Benachrichtigungseinstellungen. Standardmäßig aus. Gilt nach einem Neustart von OpenCode.',
+  'settings.openchamber.tools.browserProvider.label': 'Browser-Anbieter',
+  'settings.openchamber.tools.browserProvider.aria': 'Auswählen, wer die Browser-Aktionen des Agenten beantwortet',
+  'settings.openchamber.tools.browserProvider.info': 'Welcher Browser die Browser-Aktionen des Agenten beantwortet. OpenChamber Web ist die Browser-Ansicht einer verbundenen Desktop-App. Eine installierte Erweiterung, die einen Browser bereitstellt, führt ihn auf dem Server aus, sodass der Agent ohne geöffneten Desktop-Client browsen kann. Gilt ab der nächsten Browser-Aktion.',
+  'settings.openchamber.tools.browserProvider.option.builtin': 'OpenChamber Web',
+  'settings.openchamber.tools.browserProvider.toast.reset': '{name} kann den Browser nicht mehr bereitstellen. Agenten verwenden wieder OpenChamber Web.',
   'settings.themeImport.selectAll': 'Alle auswählen',
   'settings.themeImport.deselectAll': 'Auswahl aufheben',
   'settings.themeImport.complete': 'Import abgeschlossen',

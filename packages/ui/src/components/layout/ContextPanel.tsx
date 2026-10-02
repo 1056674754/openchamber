@@ -27,8 +27,19 @@ import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
 import { useGuestsStore } from '@/lib/guests/store';
+import { guestHasSharedSurface, guestSurfaceDocking } from '@/lib/guests/surfaces';
 import { isPluginContextPanelMode, pluginIdFromMode } from '@/lib/surfaces/modes';
 const PluginPane = lazyWithChunkRecovery(() => import('@/components/layout/PluginPane').then(m => ({ default: m.PluginPane })));
+const GuestSurfacePane = lazyWithChunkRecovery(() => import('@/components/layout/GuestSurfacePane').then(m => ({ default: m.GuestSurfacePane })));
+// How an extension page sits beside its shared surface: flex direction puts
+// the page first on top/left and last on bottom/right; the page's size is
+// fixed across the docked edge and the picture takes the rest.
+const DOCK_LAYOUT = {
+  top: { container: 'flex-col', page: 'border-b border-border', vertical: true },
+  bottom: { container: 'flex-col-reverse', page: 'border-t border-border', vertical: true },
+  left: { container: 'flex-row', page: 'border-r border-border', vertical: false },
+  right: { container: 'flex-row-reverse', page: 'border-l border-border', vertical: false },
+} as const;
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useInputStore } from '@/sync/input-store';
@@ -2241,6 +2252,38 @@ const ContextPanelTabContent: React.FC<{
   }
 
   if (isPluginContextPanelMode(tab.mode)) {
+    // A shared-surface extension's picture is drawn by the host and mounted
+    // only while shown, so an unwatched surface holds no socket and its
+    // service can idle out. Its own page, when it has one, is docked to one
+    // edge of the picture and stays mounted like any panel iframe. (upstream 5883d28af, 959d179c6)
+    const guestId = pluginIdFromMode(tab.mode);
+    const guest = useGuestsStore.getState().guests.find((entry) => entry.id === guestId);
+    if (guest && guestHasSharedSurface(guest)) {
+      const docking = guestSurfaceDocking(guest);
+      if (!docking) {
+        return (
+          <React.Suspense fallback={null}>
+            <GuestSurfacePane mode={tab.mode} />
+          </React.Suspense>
+        );
+      }
+      const layout = DOCK_LAYOUT[docking.dock];
+      return (
+        <React.Suspense fallback={null}>
+          <div className={cn('flex h-full', layout.container)}>
+            <div
+              className={cn('shrink-0', layout.page)}
+              style={layout.vertical ? { height: docking.size } : { width: docking.size }}
+            >
+              <PluginPane mode={tab.mode} />
+            </div>
+            <div className="min-h-0 min-w-0 flex-1">
+              {active ? <GuestSurfacePane mode={tab.mode} /> : null}
+            </div>
+          </div>
+        </React.Suspense>
+      );
+    }
     // Extension panel iframe; each tab keeps its pane mounted like the
     // browser/terminal panes. (upstream 5181bcd33)
     return (

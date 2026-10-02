@@ -18,6 +18,7 @@ import { useWebNotificationStream } from '@/hooks/useWebNotificationStream';
 import { useSettingsSaveFailureToast } from '@/hooks/useSettingsSaveFailureToast';
 import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
+import { useBrowserProviderSync } from '@/hooks/useBrowserProviderSync';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -716,6 +717,7 @@ function App({ apis }: AppProps) {
   useWebNotificationStream({ enabled: embeddedBackgroundWorkEnabled });
   usePwaInstallPrompt();
   useEnterprisePolicySync();
+  useBrowserProviderSync();
   useRoutingSync();
 
   useWindowTitle();

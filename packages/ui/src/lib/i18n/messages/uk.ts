@@ -10,8 +10,16 @@ import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  "filesView.excalidraw.installHint": "Встановіть розширення Excalidraw, щоб малювати в цьому файлі.",
+  "filesView.excalidraw.installAction": "Встановити",
+  "filesView.fileEditor.save": "Зберегти",
+  "filesView.fileEditor.snapshotFailed": "Не вдалося отримати ваші зміни з {editor}. Спробуйте ще раз.",
+  "filesView.fileEditor.unsupported": "{editor} не може відкрити цей файл. Натомість показано код.",
+  "filesView.fileEditor.tooLarge": "Цей файл завеликий для {editor}. Редагуйте натомість код.",
   ...linearIssuePickerI18n.uk,
   ...linearIntegrationI18n["uk"],
   ...linearPanelI18n.uk,
@@ -22,6 +30,8 @@ export const dict: Record<I18nKey, string> = {
   ...chatsI18n.uk,
   ...routingI18n.uk,
   ...pluginPanelI18n.uk,
+  ...surfacePanelI18n.uk,
+  ...extensionCatalogI18n.uk,
   ...fileArtifactsI18n['uk'],
   "planView.error.loadFailed": "Не вдалося завантажити цей план",
   "common.loading": "Завантаження...",

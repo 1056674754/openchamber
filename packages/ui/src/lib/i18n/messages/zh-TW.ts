@@ -10,8 +10,16 @@ import { btwI18n } from './btw.i18n';
 import { chatsI18n } from './chats.i18n';
 import { routingI18n } from './routing.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  'filesView.excalidraw.installHint': '安裝 Excalidraw 擴充功能即可在此檔案中繪圖。',
+  'filesView.excalidraw.installAction': '安裝',
+  'filesView.fileEditor.save': '儲存',
+  'filesView.fileEditor.snapshotFailed': '無法從 {editor} 取得你的變更。請再試一次。',
+  'filesView.fileEditor.unsupported': '{editor} 無法開啟此檔案，已改為顯示原始碼。',
+  'filesView.fileEditor.tooLarge': '此檔案對 {editor} 來說太大。請改為編輯原始碼。',
   ...linearIssuePickerI18n["zh-TW"],
   ...fileArtifactsI18n['zh-TW'],
   ...linearIntegrationI18n["zh-TW"],
@@ -23,6 +31,8 @@ export const dict: Record<I18nKey, string> = {
   ...chatsI18n['zh-TW'],
   ...routingI18n['zh-TW'],
   ...pluginPanelI18n['zh-TW'],
+  ...surfacePanelI18n['zh-TW'],
+  ...extensionCatalogI18n['zh-TW'],
   'planView.error.loadFailed': '無法載入此計畫',
   'common.loading': '載入中...',
   'common.unavailable': '無法使用',

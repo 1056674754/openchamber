@@ -10,7 +10,15 @@ import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { linearIntegrationI18n } from './linear-integration.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
+import { surfacePanelI18n } from './surface-panel.i18n';
+import { extensionCatalogI18n } from './extension-catalog.i18n';
 export const dict = {
+  'filesView.excalidraw.installHint': 'Install the Excalidraw extension to draw in this file.',
+  'filesView.excalidraw.installAction': 'Install',
+  'filesView.fileEditor.save': 'Save',
+  'filesView.fileEditor.snapshotFailed': 'Couldn\'t get your changes from {editor}. Try again.',
+  'filesView.fileEditor.unsupported': '{editor} can\'t open this file. Showing the source instead.',
+  'filesView.fileEditor.tooLarge': 'This file is too large for {editor}. Edit the source instead.',
   ...linearIssuePickerI18n.en,
   ...linearIntegrationI18n.en,
   ...linearPanelI18n.en,
@@ -21,6 +29,8 @@ export const dict = {
   ...chatsI18n.en,
   ...routingI18n.en,
   ...pluginPanelI18n.en,
+  ...surfacePanelI18n.en,
+  ...extensionCatalogI18n.en,
   ...fileArtifactsI18n['en'],
   'planView.error.loadFailed': 'Could not load this plan',
   'common.loading': 'Loading...',

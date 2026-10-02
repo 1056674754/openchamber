@@ -21,6 +21,12 @@ import { PreviewToggleButton } from './PreviewToggleButton';
 import { createFileContentPoller } from './fileContentPoller';
 import { hasFileStatChanged } from './fileStatChange';
 import { DiagramEditor } from '@/components/diagram';
+import { EMPTY_CANVAS_READ, shouldShowFileCanvas, type FileCanvasHandle } from '@/components/views/files/fileCanvas';
+import { GuestFileEditor } from '@/components/views/files/GuestFileEditor';
+import { findGuestFileEditor, useGuestFileEditor } from '@/lib/guests/file-editors';
+import { useGuestsStore } from '@/lib/guests/store';
+import { GUEST_FILE_EDITOR_CONTENT_MAX } from '@openchamber/sdk';
+import { uploadWorkspaceFile } from '@/lib/workspaceFileUpload';
 import { JsonTreeView } from '@/components/ui/JsonTreeView';
 import { SimpleMarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { languageByExtension, loadLanguageByExtension } from '@/lib/codemirror/languageByExtension';
@@ -403,6 +409,21 @@ const isMarkdownFile = (path: string): boolean => {
   return ext === 'md' || ext === 'markdown';
 };
 
+/**
+ * Files an extension's file editor opens. For callbacks and loaders; render
+ * code reads the reactive `useGuestFileEditor` instead.
+ */
+const opensInFileCanvas = (path: string | null | undefined): boolean => Boolean(
+  path && findGuestFileEditor(useGuestsStore.getState().guests, path),
+);
+
+/** Excalidraw drawings open in the Excalidraw extension (Integrations page). */
+const isExcalidrawFile = (path: string | null | undefined): boolean => {
+  if (!path) return false;
+  const lower = path.toLowerCase();
+  return lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.md');
+};
+
 const isJsonFile = (path: string): boolean => {
   if (!path) return false;
   const ext = path.toLowerCase().split('.').pop();
@@ -756,6 +777,40 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const [showMobilePageContent, setShowMobilePageContent] = React.useState(false);
   const [wrapLines, setWrapLines] = React.useState(true);
   const [isFullscreen, setIsFullscreen] = React.useState(false);
+  // Moving the canvas between dock and fullscreen must not drop unsaved edits:
+  // text hands them to the draft, a binary editor saves in place first.
+  const selectedFilePathRef = React.useRef<string | null>(null);
+  const canvasDirtyRef = React.useRef(false);
+  const binaryCanvasRef = React.useRef(false);
+  const canvasEditorRef = React.useRef<FileCanvasHandle | null>(null);
+  const saveDraftRef = React.useRef<(() => Promise<boolean>) | null>(null);
+  const changeFullscreen = React.useCallback((next: boolean) => {
+    if (!canvasDirtyRef.current) {
+      setIsFullscreen(next);
+      return;
+    }
+    const pathAtToggle = selectedFilePathRef.current;
+    // Bytes have no text draft to travel through, so a binary editor's
+    // unsaved changes are saved before it moves.
+    if (binaryCanvasRef.current) {
+      void saveDraftRef.current?.().then((saved) => {
+        if (saved && selectedFilePathRef.current === pathAtToggle) setIsFullscreen(next);
+      });
+      return;
+    }
+    void Promise.resolve(canvasEditorRef.current?.getContent('handoff') ?? EMPTY_CANVAS_READ).then((read) => {
+      if (selectedFilePathRef.current !== pathAtToggle) return;
+      if (!read.ok) {
+        toast.error(read.message);
+        return;
+      }
+      if (read.snapshot && 'content' in read.snapshot) {
+        setDraftContent(read.snapshot.content);
+        setCanvasDirty(false);
+      }
+      setIsFullscreen(next);
+    });
+  }, []);
   const [isSearchOpen, setIsSearchOpen] = React.useState(false);
   const [isFloatingToolbarOpen, setIsFloatingToolbarOpen] = React.useState(false);
   const floatingToolbarRef = React.useRef<HTMLDivElement | null>(null);
@@ -793,7 +848,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const [jsonViewMode, setJsonViewMode] = React.useState<'tree' | 'text'>('tree');
   const [htmlViewMode, setHtmlViewMode] = React.useState<PreviewViewMode>('edit');
   const [drawioViewMode, setDrawioViewMode] = React.useState<PreviewViewMode>('preview');
+  const [canvasViewMode, setCanvasViewMode] = React.useState<PreviewViewMode>('preview');
   const [drawioRemountNonce, setDrawioRemountNonce] = React.useState(0);
+  const [canvasRemountNonce, setCanvasRemountNonce] = React.useState(0);
   const [svgViewMode, setSvgViewMode] = React.useState<PreviewViewMode>('preview');
   const [mermaidViewMode, setMermaidViewMode] = React.useState<PreviewViewMode>('preview');
   const [tableViewMode, setTableViewMode] = React.useState<'table' | 'text'>('table');
@@ -806,12 +863,21 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const mermaidViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
   const tableViewModeByPathRef = React.useRef<Record<string, 'table' | 'text'>>({});
   const drawioViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const canvasViewModeByPathRef = React.useRef<Record<string, PreviewViewMode>>({});
+  const pendingCanvasPreviewFrameRef = React.useRef<number | null>(null);
   const diagramAutoSaveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const diagramXmlRef = React.useRef('');
   const diagramSavedXmlRef = React.useRef('');
   const pendingDrawioPreviewFrameRef = React.useRef<number | null>(null);
   const diagramEditorRef = React.useRef<React.ComponentRef<typeof DiagramEditor>>(null);
+  const [canvasDirty, setCanvasDirty] = React.useState(false);
+  canvasDirtyRef.current = canvasDirty;
+  const canvasWrapperRef = React.useRef<HTMLDivElement | null>(null);
+  // Last canvas edit, so autosave waits until the user stops. A ref: edits
+  // arrive every frame and must not re-render this view.
+  const canvasLastEditAtRef = React.useRef(0);
   const [diagramSaved, setDiagramSaved] = React.useState(false);
+  const [canvasSaved, setCanvasSaved] = React.useState(false);
 
   const lightTheme = React.useMemo(
     () => availableThemes.find((theme) => theme.metadata.id === lightThemeId) ?? getDefaultTheme(false),
@@ -1630,7 +1696,21 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     [fileContent]
   );
 
-  const isDirty = draftContent !== displayedContent;
+  const isDirty = draftContent !== displayedContent || canvasDirty;
+
+  const applyLoadedTextContent = React.useCallback((content: string, remountCanvas = true) => {
+    if (remountCanvas && opensInFileCanvas(selectedFilePathRef.current)) {
+      setCanvasRemountNonce((nonce) => nonce + 1);
+    }
+    lastLoadedFileContentRef.current = content;
+    lastLoadedFileRevisionRef.current += 1;
+    setFileContent(content);
+    diagramXmlRef.current = content;
+    diagramSavedXmlRef.current = content;
+    setDraftContent(content.length > MAX_VIEW_CHARS
+      ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
+      : content);
+  }, []);
 
   const saveDraft = React.useCallback(async () => {
     if (!selectedFile || !files.writeFile) {
@@ -1638,7 +1718,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       return false;
     }
 
-    const selectedIsBinary = isBinaryFile(selectedFile.path) || contentDetectedBinary;
+    // A binary file saves only through the extension editor that owns it.
+    const selectedIsBinary = (isBinaryFile(selectedFile.path) || contentDetectedBinary) && !binaryCanvasRef.current;
     if (!shouldAllowFileDraftSave({
       selectedFilePath: selectedFile.path,
       loadedFilePath,
@@ -1657,14 +1738,62 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     setIsSaving(true);
 
     try {
-      const result = await files.writeFile(selectedFile.path, draftContent);
-      if (!result?.success) {
-        toast.error(t('filesView.toast.writeFileFailed'));
+      // One snapshot: what is written and what is later marked saved are the
+      // same state, so edits made during the write stay unsaved. A canvas that
+      // cannot answer fails the save instead of writing the stale draft.
+      const canvas = canvasDirty ? canvasEditorRef.current : null;
+      // A canvas that went away (its extension was paused or removed) took its
+      // edits with it; left set, the flag would keep autosave writing forever.
+      if (canvasDirty && !canvas) setCanvasDirty(false);
+      const canvasRead = canvas ? await canvas.getContent('save') : EMPTY_CANVAS_READ;
+      if (!canvasRead.ok) {
+        toast.error(canvasRead.message);
         return false;
       }
-      setFileContent(draftContent);
-      lastLoadedFileContentRef.current = draftContent;
-      lastLoadedFileRevisionRef.current += 1;
+      const canvasSnapshot = canvasRead.snapshot;
+      if (canvasSnapshot && 'bytes' in canvasSnapshot) {
+        // Bytes go through the atomic upload write, replacing the file.
+        const ownerDirectory = root || currentDirectory;
+        if (!ownerDirectory) {
+          toast.error(t('filesView.toast.savingNotSupported'));
+          return false;
+        }
+        // No baseline while writing: the poll records the new stat instead of
+        // reading our own write as an external change and reloading the editor.
+        lastLoadedFileStatRef.current = null;
+        let written: { success: boolean };
+        try {
+          written = await uploadWorkspaceFile({
+            serverBaseUrl,
+            directory: ownerDirectory,
+            path: selectedFile.path,
+            file: new Blob([canvasSnapshot.bytes]),
+            overwrite: true,
+          });
+        } catch {
+          written = { success: false };
+        }
+        if (!written?.success) {
+          toast.error(t('filesView.toast.writeFileFailed'));
+          return false;
+        }
+        canvasEditorRef.current?.markSaved(canvasSnapshot.signature);
+      } else {
+        const contentToWrite = canvasSnapshot ? canvasSnapshot.content : draftContent;
+        const result = await files.writeFile(selectedFile.path, contentToWrite);
+        if (!result?.success) {
+          toast.error(t('filesView.toast.writeFileFailed'));
+          return false;
+        }
+        if (canvasSnapshot) {
+          applyLoadedTextContent(contentToWrite, false);
+          canvasEditorRef.current?.markSaved(canvasSnapshot.signature);
+        } else {
+          setFileContent(draftContent);
+          lastLoadedFileContentRef.current = draftContent;
+          lastLoadedFileRevisionRef.current += 1;
+        }
+      }
       if (root && selectedFile.path && isPathWithinRoot(selectedFile.path, root)) {
         const relativePath = getDisplayPath(root, selectedFile.path);
         if (relativePath) {
@@ -1703,7 +1832,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     } finally {
       setIsSaving(false);
     }
-  }, [activeServerId, contentDetectedBinary, draftContent, fileLoading, files, isDirty, loadedFilePath, readFileStat, root, selectedFile, serverBaseUrl, t]);
+  }, [activeServerId, applyLoadedTextContent, canvasDirty, contentDetectedBinary, currentDirectory, draftContent, fileLoading, files, isDirty, loadedFilePath, readFileStat, root, selectedFile, serverBaseUrl, t]);
+  saveDraftRef.current = saveDraft;
 
   React.useEffect(() => {
     if (!isDirty) {
@@ -1748,7 +1878,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
   React.useEffect(() => {
     const canWrite = Boolean(selectedFile && files.writeFile);
-    const selectedIsBinary = Boolean(selectedFile?.path && (isBinaryFile(selectedFile.path) || contentDetectedBinary));
+    const selectedIsBinary = Boolean(selectedFile?.path && (isBinaryFile(selectedFile.path) || contentDetectedBinary)) && !binaryCanvasRef.current;
     if (!shouldScheduleFileAutosave({
       autoSaveEnabled,
       isDirty,
@@ -1817,16 +1947,6 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     setAutoSaveStatus('idle');
   }, [selectedFile?.path]);
 
-  const applyLoadedTextContent = React.useCallback((content: string) => {
-    lastLoadedFileContentRef.current = content;
-    lastLoadedFileRevisionRef.current += 1;
-    setFileContent(content);
-    diagramXmlRef.current = content;
-    diagramSavedXmlRef.current = content;
-    setDraftContent(content.length > MAX_VIEW_CHARS
-      ? `${content.slice(0, MAX_VIEW_CHARS)}\n\n… truncated …`
-      : content);
-  }, []);
 
   const loadSelectedFile = React.useCallback(async (node: FileNode) => {
     if (!root && !files.readFile) {
@@ -2185,6 +2305,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     setConfirmDiscardOpen(false);
 
     // Discard draft by reverting back to last loaded content
+    setCanvasDirty(false);
+    setCanvasRemountNonce((nonce) => nonce + 1);
     setDraftContent(displayedContent);
 
     if (closePath) {
@@ -2443,12 +2565,35 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const canCopy = Boolean(selectedFile && (!isSelectedImage || isSelectedSvg) && !isUnsupportedBinary && fileContent.length > 0);
   const canCopyPath = Boolean(selectedFile && displaySelectedPath.length > 0);
   const canEdit = Boolean(selectedFile && !selectedFileIsOutsideWorkspace && !isSelectedBinary && files.writeFile && fileContent.length <= MAX_VIEW_CHARS);
-  const isMarkdown = Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
-  const isJson = Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
-  const isHtml = Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
-  const isDrawio = Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
-  const isMermaid = Boolean(selectedFile?.path && isMermaidFile(selectedFile.path));
-  const isTable = Boolean(selectedFile?.path && isDelimitedTableFile(selectedFile.path));
+  const isTextFile = Boolean(selectedFile && !isSelectedBinary && (!isSelectedImage || isSelectedSvg));
+  // An active extension's editor claims a text file ahead of the host's own
+  // previews.
+  const matchedGuestFileEditor = useGuestFileEditor(selectedFile?.path);
+  // Text editors take text files; binary editors take any matching file.
+  const guestFileEditor = matchedGuestFileEditor && (isTextFile || matchedGuestFileEditor.editor.content === 'binary')
+    ? matchedGuestFileEditor
+    : null;
+  const claimedByGuest = guestFileEditor !== null;
+  const binaryCanvas = guestFileEditor?.editor.content === 'binary';
+  binaryCanvasRef.current = binaryCanvas;
+  selectedFilePathRef.current = selectedFile?.path ?? null;
+  const isMarkdown = !claimedByGuest && Boolean(selectedFile?.path && isMarkdownFile(selectedFile.path));
+  const isJson = !claimedByGuest && Boolean(selectedFile?.path && isJsonFile(selectedFile.path));
+  const isHtml = !claimedByGuest && Boolean(selectedFile?.path && isHtmlFile(selectedFile.path));
+  const isDrawio = !claimedByGuest && Boolean(selectedFile?.path && isDrawioFile(selectedFile.path));
+  const isMermaid = !claimedByGuest && Boolean(selectedFile?.path && isMermaidFile(selectedFile.path));
+  const isTable = !claimedByGuest && Boolean(selectedFile?.path && isDelimitedTableFile(selectedFile.path));
+  const hasCanvas = claimedByGuest;
+  // A binary editor checks the bytes it reads too; the stat size spares a read.
+  const canMountCanvas = claimedByGuest && (binaryCanvas
+    ? artifactSize === null || artifactSize <= GUEST_FILE_EDITOR_CONTENT_MAX
+    : draftContent.length <= GUEST_FILE_EDITOR_CONTENT_MAX);
+  // Excalidraw drawings open in the Excalidraw extension. Without it they show
+  // their text and a pointer to the Integrations card, where the runtime can
+  // install extensions at all.
+  const guestCatalogStatus = useGuestsStore((state) => state.status);
+  const suggestExcalidrawExtension = !claimedByGuest && isTextFile && guestCatalogStatus !== 'unsupported'
+    && Boolean(selectedFile?.path && isExcalidrawFile(selectedFile.path));
   const jsonFileViewState = React.useMemo(
     () => (isJson ? resolveJsonFileViewState(jsonViewMode, draftContent) : null),
     [draftContent, isJson, jsonViewMode],
@@ -2456,8 +2601,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const invalidJsonError = jsonFileViewState?.kind === 'invalid-source'
     ? jsonFileViewState.error
     : null;
-  const isTextFile = Boolean(selectedFile && !isSelectedBinary && (!isSelectedImage || isSelectedSvg));
-  const canUseShikiFileView = isTextFile && !isMarkdown && !isDrawio
+  const canUseShikiFileView = isTextFile && !isMarkdown && !isDrawio && !hasCanvas
     && !(isHtml && htmlViewMode === 'preview')
     && !(isSelectedSvg && svgViewMode === 'preview')
     && !(isMermaid && mermaidViewMode === 'preview')
@@ -2525,7 +2669,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     }
 
     const defaultMode: TextViewMode = settingsDefaultFileViewerPreview ? 'view' : 'edit';
-    setTextViewMode(textViewModeByPathRef.current[selectedPath] ?? defaultMode);
+    const hasOwnPreviewMode = isMarkdownFile(selectedPath) || isHtmlFile(selectedPath)
+      || isJsonFile(selectedPath) || isDrawioFile(selectedPath) || isSvgFile(selectedPath)
+      || isMermaidFile(selectedPath) || isDelimitedTableFile(selectedPath)
+      || opensInFileCanvas(selectedPath);
+    setTextViewMode(textViewModeByPathRef.current[selectedPath] ?? (hasOwnPreviewMode ? 'edit' : defaultMode));
 
     // Respect per-type localStorage preference when available,
     // falling back to the setting-derived default when nothing is stored.
@@ -2552,6 +2700,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     setHtmlViewMode(htmlViewModeByPathRef.current[selectedPath] ?? htmlDefault);
 
     setDrawioViewMode(drawioViewModeByPathRef.current[selectedPath] ?? 'preview');
+    setCanvasViewMode(canvasViewModeByPathRef.current[selectedPath] ?? 'preview');
 
     // Artifacts an agent produces are opened to be looked at: the picture,
     // the diagram, the table come first regardless of the text-first setting.
@@ -2653,6 +2802,24 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     }
     container.focus({ preventScroll: true });
   }, []);
+  const saveNow = React.useCallback(() => {
+    // Cancel pending auto-save because the explicit save should run immediately.
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+    if (!isSaving) {
+      void saveDraft().then((saved) => {
+        if (!saved) return;
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus('idle'), 2000);
+      });
+    }
+  }, [isSaving, saveDraft]);
+  // The keydown effect runs on a fixed dep list; the ref keeps the latest saver.
+  const saveNowRef = React.useRef(saveNow);
+  saveNowRef.current = saveNow;
+
   const mdPreviewFocusTargetPath = selectedFile && isMarkdown && getMdViewMode() === 'preview' && !fileLoading
     ? selectedFile.path
     : null;
@@ -2669,18 +2836,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
       if (e.key.toLowerCase() === 's') {
         e.preventDefault();
-        // Cancel pending auto-save; user wants immediate save
-        if (autoSaveTimerRef.current) {
-          clearTimeout(autoSaveTimerRef.current);
-          autoSaveTimerRef.current = null;
-        }
-        if (!isSaving) {
-          void saveDraft().then((saved) => {
-            if (!saved) return;
-            setAutoSaveStatus('saved');
-            setTimeout(() => setAutoSaveStatus('idle'), 2000);
-          });
-        }
+        saveNowRef.current();
       } else if (e.key.toLowerCase() === 'f') {
         // Rendered Markdown preview: open the in-preview find bar instead of
         // the editor search, but only when the event target sits inside the
@@ -2754,6 +2910,72 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       return;
     }
   }, [draftContent, fileContent, root, selectedFile?.path]);
+
+  const saveCanvasViewMode = React.useCallback((mode: PreviewViewMode) => {
+    const selectedPath = selectedFile?.path;
+    const rememberMode = () => {
+      if (selectedPath) canvasViewModeByPathRef.current[selectedPath] = mode;
+    };
+    if (mode === 'edit') {
+      if (!canvasDirtyRef.current) {
+        rememberMode();
+        setCanvasDirty(false);
+        setCanvasViewMode(mode);
+        return;
+      }
+      // Unsaved canvas edits move into the text draft; if the canvas cannot
+      // hand them over, it stays open rather than dropping them.
+      void Promise.resolve(canvasEditorRef.current?.getContent('handoff') ?? EMPTY_CANVAS_READ).then((read) => {
+        if (selectedFilePathRef.current !== selectedPath) return;
+        if (!read.ok) {
+          toast.error(read.message);
+          return;
+        }
+        rememberMode();
+        setDraftContent(read.snapshot && 'content' in read.snapshot ? read.snapshot.content : fileContent);
+        setCanvasDirty(false);
+        setCanvasViewMode(mode);
+      });
+      return;
+    }
+    if (!canMountCanvas) {
+      if (guestFileEditor) toast.error(t('filesView.fileEditor.tooLarge', { editor: guestFileEditor.editor.title }));
+      return;
+    }
+    rememberMode();
+    setCanvasDirty(false);
+    const pathAtToggle = selectedPath;
+    if (pendingCanvasPreviewFrameRef.current !== null) {
+      cancelAnimationFrame(pendingCanvasPreviewFrameRef.current);
+    }
+    pendingCanvasPreviewFrameRef.current = requestAnimationFrame(() => {
+      pendingCanvasPreviewFrameRef.current = null;
+      if (root && pathAtToggle && useFilesViewTabsStore.getState().byRoot[root]?.selectedPath !== pathAtToggle) {
+        return;
+      }
+      setCanvasRemountNonce((value) => value + 1);
+      setCanvasViewMode('preview');
+    });
+  }, [canMountCanvas, fileContent, guestFileEditor, root, selectedFile?.path, t]);
+
+  const handleCanvasUnsupported = React.useCallback(() => {
+    const path = selectedFilePathRef.current;
+    if (path) {
+      canvasViewModeByPathRef.current[path] = 'edit';
+    }
+    setCanvasDirty(false);
+    setCanvasViewMode('edit');
+    if (guestFileEditor) toast.error(t('filesView.fileEditor.unsupported', { editor: guestFileEditor.editor.title }));
+  }, [guestFileEditor, t]);
+
+  React.useEffect(() => {
+    return () => {
+      if (pendingCanvasPreviewFrameRef.current !== null) {
+        cancelAnimationFrame(pendingCanvasPreviewFrameRef.current);
+        pendingCanvasPreviewFrameRef.current = null;
+      }
+    };
+  }, [canvasViewMode, selectedFile?.path]);
 
   const saveDiagramXml = React.useCallback(async (path: string, xml: string) => {
     if (!files.writeFile || xml === diagramSavedXmlRef.current) { return false; }
@@ -3445,6 +3667,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   }, [cancel, commentText, deleteDraft, editingDraftId, filesFileDrafts, handleSaveComment, isDragging, lineSelection, selectedFile?.path, startEdit]);
 
   const previewReady = !fileLoading && !fileError && loadedFilePath === selectedFilePath;
+  const showCanvas = React.useMemo(
+    () => Boolean(selectedFilePath) && shouldShowFileCanvas({ hasCanvas, viewMode: canvasViewMode, previewReady, mountable: canMountCanvas }),
+    [canMountCanvas, canvasViewMode, hasCanvas, previewReady, selectedFilePath],
+  );
   const codePreviewActive = previewReady && canUseShikiFileView && !isJson && textViewMode === 'view';
   const markdownPreviewActive = previewReady && isMarkdown && getMdViewMode() === 'preview';
   const { setScroller: setMainCodeScroller, restore: restoreMainCodeScroll } = useFilePreviewScrollPosition(codePreviewActive ? `${filePositionKey}:code` : null);
@@ -3736,6 +3962,34 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           </Button>
         )}
 
+        {hasCanvas && (
+          <>
+            {/* Bytes have no source view. */}
+            {!binaryCanvas && (
+              <PreviewToggleButton
+                currentMode={canvasViewMode}
+                onToggle={() => saveCanvasViewMode(canvasViewMode === 'preview' ? 'edit' : 'preview')}
+              />
+            )}
+            {canvasViewMode === 'preview' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  const saved = await saveDraft();
+                  if (!saved) return;
+                  setCanvasSaved(true);
+                  setTimeout(() => setCanvasSaved(false), 1500);
+                }}
+                className="size-6 p-0 text-foreground hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                title={t('filesView.fileEditor.save')}
+              >
+                {canvasSaved ? <Icon name="check" className="size-4 text-[color:var(--status-success)]" /> : <Icon name="save-3" className="size-4" />}
+              </Button>
+            )}
+          </>
+        )}
+
         {isDrawio && (
           <>
             <PreviewToggleButton
@@ -3888,7 +4142,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setIsFullscreen(false)}
+            onClick={() => changeFullscreen(false)}
             className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
             title={t('filesView.editor.exitFullscreen')}
             aria-label={t('filesView.editor.exitFullscreen')}
@@ -3899,7 +4153,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setIsFullscreen(!isFullscreen)}
+            onClick={() => changeFullscreen(!isFullscreen)}
             className="size-6 p-0 hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
             title={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
             aria-label={isFullscreen ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
@@ -3914,6 +4168,70 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       </div>
     );
   };
+
+  // A binary editor reads the file itself at mount, so a reload of the file
+  // (the poll found an external change and nothing was unsaved) remounts it.
+  // The first load of a path mounts the editor anyway; only a repeat reloads.
+  const lastLoadedCanvasPathRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!loadedFilePath) return;
+    if (binaryCanvasRef.current && lastLoadedCanvasPathRef.current === loadedFilePath) setCanvasRemountNonce((nonce) => nonce + 1);
+    lastLoadedCanvasPathRef.current = loadedFilePath;
+  }, [loadedFilePath]);
+
+  const loadCanvasBytes = React.useCallback(async (): Promise<Uint8Array<ArrayBuffer>> => {
+    const path = selectedFilePathRef.current;
+    if (!path) throw new Error('No file is open.');
+    const response = await runtimeFetch(`${resolveApiUrl('/api/fs/raw', serverBaseUrl)}?${new URLSearchParams({
+      path,
+      ...(selectedFileReadOptions.allowOutsideWorkspace ? { allowOutsideWorkspace: 'true' } : {}),
+      ...(!selectedFileReadOptions.allowOutsideWorkspace && currentDirectory ? { directory: currentDirectory } : {}),
+    }).toString()}`, {
+      signal: AbortSignal.timeout(60_000),
+      cache: 'no-store',
+    });
+    if (!response.ok) throw new Error(t('filesView.error.readFileFailed'));
+    return new Uint8Array(await response.arrayBuffer());
+  }, [currentDirectory, selectedFileReadOptions, serverBaseUrl, t]);
+
+  const handleCanvasLoadProblem = React.useCallback((message: string) => {
+    const path = selectedFilePathRef.current;
+    if (path) canvasViewModeByPathRef.current[path] = 'edit';
+    setCanvasDirty(false);
+    setCanvasViewMode('edit');
+    toast.error(message);
+  }, []);
+
+  const canvasInFullscreen = mode === 'full' && isFullscreen;
+  const canvasKey = selectedFile
+    ? `${selectedFile.path}:${canvasRemountNonce}:${canvasInFullscreen ? 'fullscreen' : 'docked'}`
+    : '';
+  const canvasElement = showCanvas && selectedFile && guestFileEditor ? (
+    <div ref={canvasWrapperRef} className="h-full overflow-hidden" style={{ minHeight: '400px' }}>
+      <GuestFileEditor
+        key={`${canvasKey}:${guestFileEditor.guestId}:${guestFileEditor.editor.id}`}
+        ref={canvasEditorRef}
+        guestId={guestFileEditor.guestId}
+        editorId={guestFileEditor.editor.id}
+        title={guestFileEditor.editor.title}
+        contentKind={binaryCanvas ? 'binary' : 'text'}
+        path={displaySelectedPath || selectedFile.path}
+        content={draftContent}
+        loadBytes={loadCanvasBytes}
+        readOnly={!selectedFile || selectedFileIsOutsideWorkspace || !files.writeFile}
+        onDirtyChange={setCanvasDirty}
+        onEdit={() => { canvasLastEditAtRef.current = Date.now(); }}
+        onSaveRequest={saveNow}
+        onUnsupported={handleCanvasUnsupported}
+        onTooLarge={() => handleCanvasLoadProblem(t('filesView.fileEditor.tooLarge', { editor: guestFileEditor.editor.title }))}
+        onLoadFailed={() => handleCanvasLoadProblem(t('filesView.error.readFileFailed'))}
+      />
+    </div>
+  ) : null;
+
+  const openExcalidrawExtensionCard = React.useCallback(() => {
+    useUIStore.getState().setSettingsDialogOpen(true);
+  }, []);
 
   const fileViewer = (
     <div
@@ -4093,6 +4411,15 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
       </div>
 
+      {suggestExcalidrawExtension ? (
+        <div className="flex flex-shrink-0 items-center gap-2 border-b border-border/40 bg-[var(--surface-muted)] px-3 py-1.5 typography-ui text-muted-foreground">
+          <Icon name="information" className="size-4 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{t('filesView.excalidraw.installHint')}</span>
+          <Button type="button" size="xs" variant="outline" onClick={openExcalidrawExtensionCard}>
+            {t('filesView.excalidraw.installAction')}
+          </Button>
+        </div>
+      ) : null}
       <div className="flex-1 min-h-0 min-w-0 relative">
         {selectedFile && !isSearchOpen && (
           <div
@@ -4134,6 +4461,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
               )
           ) : fileError ? (
             <div className="p-3 typography-ui text-[color:var(--status-error)]">{fileError}</div>
+          ) : showCanvas ? (
+            // Ahead of the host previews: a binary editor may claim an image or PDF.
+            // Shown fullscreen instead while the overlay is open: one canvas instance.
+            canvasInFullscreen ? <div className="h-full" /> : canvasElement
           ) : artifactPreview ? (
             artifactPreview
           ) : selectedFile && isDrawio && drawioViewMode === 'preview' ? (
@@ -4473,6 +4804,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
               )
           ) : fileError ? (
             <div className="p-4 typography-ui text-[color:var(--status-error)]">{fileError}</div>
+          ) : showCanvas ? (
+            canvasElement
           ) : artifactPreview ? (
             artifactPreview
           ) : isMarkdown && getMdViewMode() === 'preview' ? (
