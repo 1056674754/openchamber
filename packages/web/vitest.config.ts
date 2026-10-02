@@ -19,5 +19,11 @@ export default defineConfig({
   test: {
     // Playwright owns the reconnect-recovery spec; vitest must not load it.
     exclude: [...configDefaults.exclude, 'e2e/**'],
+    // The Git-heavy suites (spaces code in/out, git service) drive a real `git`
+    // binary against temporary repositories; those subprocess round-trips pass
+    // the 5s default on a loaded machine (upstream carries the same 30s
+    // timeout for the same reason).
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });
