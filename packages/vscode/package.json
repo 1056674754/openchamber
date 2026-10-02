@@ -99,8 +99,8 @@
       {
         "command": "openchamber.openAgentManager",
         "category": "OpenChamber",
-        "title": "Open Agent Manager",
-        "icon": "$(circuit-board)"
+        "title": "Run on Several Models",
+        "icon": "$(repo-forked)"
       },
       {
         "command": "openchamber.openActiveSessionInEditor",

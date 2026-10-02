@@ -1,7 +1,17 @@
 import { opencodeClient } from '@/lib/opencode/client';
 import type { Session } from '@/lib/opencode/client';
-import type { Metadata } from '@/lib/opencode/model';
+import type { Metadata, Session as ModelSession } from '@/lib/opencode/model';
 import { getMultiRunMembership, withMultiRunMembership, type MultiRunIdentity } from './identity';
+
+/**
+ * Bridge the fork's two Session shapes at the lane boundary: the client
+ * surfaces the SDK v2 Session (`cost` optional, `slug`/`version` present)
+ * while the stores and the identity/runs helpers use the fork's model.Session.
+ * Lane logic only reads the fields both shapes carry — the same seam
+ * createMultiRunSession already relies on.
+ */
+export const toModelSession = (session: Session): ModelSession => session as unknown as ModelSession;
+export const toClientSession = (session: ModelSession): Session => session as unknown as Session;
 
 /**
  * Fork adaptation of upstream's createMultiRunSession. The fork's client has

@@ -91,7 +91,7 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - `chat-participant-protocol.ts` holds the pure parts (SSE frame parser, reference formatting, assistant-only text accumulator with role gating) so they stay unit-testable without the vscode API.
 
 - `webview-diagnostics-client.ts`
-  - Provides the request/response timeout bridge used to collect the same read-only DOM diagnostics from the sidebar, session editor panels, and Agent Manager panel.
+  - Provides the request/response timeout bridge used to collect the same read-only DOM diagnostics from the sidebar and session editor panels.
 
 - `opencodeConfig.ts`
   - Reads layered OpenCode JSON/JSONC for VS Code-owned agent, command, MCP, provider, and skill operations.

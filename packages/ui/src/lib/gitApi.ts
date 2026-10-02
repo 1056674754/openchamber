@@ -862,12 +862,29 @@ export async function deleteGitWorktree(
   return gitHttp.deleteGitWorktree(directory, payload);
 }
 
+/**
+ * Records a worktree's complete state (HEAD plus staged, unstaged and
+ * untracked-not-ignored work) as a commit under a private
+ * `refs/openchamber/runs/**` ref, without touching HEAD or the index.
+ */
+export async function snapshotGitWorktree(
+  directory: string,
+  payload: import('./api/types').GitWorktreeSnapshotPayload
+): Promise<import('./api/types').GitWorktreeSnapshotResult> {
+  const runtime = getRuntimeGit();
+  if (runtime?.worktree?.snapshot) {
+    return runtime.worktree.snapshot(directory, payload);
+  }
+  return gitHttp.snapshotGitWorktree(directory, payload);
+}
+
 export const git = {
   worktree: {
     list: listGitWorktrees,
     validate: validateGitWorktree,
     create: createGitWorktree,
     remove: deleteGitWorktree,
+    snapshot: snapshotGitWorktree,
   },
 };
 

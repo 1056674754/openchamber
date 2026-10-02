@@ -13,6 +13,8 @@ import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { McpDropdown } from '@/components/mcp/McpDropdown';
 import { SessionSwitcherDropdown } from '@/components/session/SessionSwitcherDropdown';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { RunOverview } from '@/components/multirun/RunOverview';
 import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
@@ -140,6 +142,16 @@ export const VSCodeLayout: React.FC = () => {
         ? (window as unknown as { __VSCODE_CONFIG__?: { workspaceFolder?: unknown } }).__VSCODE_CONFIG__?.workspaceFolder
         : null;
     return typeof configured === 'string' && configured.trim().length > 0 ? configured.trim() : null;
+  }, []);
+
+  // The "Run on several models" command opens a new-session tab whose draft
+  // starts in parallel mode.
+  const initialParallelComposer = React.useMemo<boolean>(() => {
+    const configured =
+      typeof window !== 'undefined'
+        ? (window as unknown as { __VSCODE_CONFIG__?: { initialComposer?: unknown } }).__VSCODE_CONFIG__?.initialComposer
+        : null;
+    return configured === 'parallel';
   }, []);
 
   const bootDraftOpen = React.useMemo(() => {
@@ -293,8 +305,21 @@ export const VSCodeLayout: React.FC = () => {
   }, [currentSessionId, newSessionDraftOpen, currentView, viewMode, isSyncingMessages, hasActiveSessionWork]);
 
   const handleBackToSessions = React.useCallback(() => {
+    useUIStore.getState().setRunOverviewKey(null);
     setCurrentView('sessions');
   }, []);
+
+  // A run overview replaces the chat like any other surface: opening one shows
+  // the chat column, and selecting a session closes it.
+  const runOverviewKey = useUIStore((state) => state.runOverviewKey);
+  React.useEffect(() => {
+    if (runOverviewKey) setCurrentView((view) => (view === 'sessions' ? 'chat' : view));
+  }, [runOverviewKey]);
+  React.useEffect(() => useSessionUIStore.subscribe((state, prev) => {
+    if (state.currentSessionId && state.currentSessionId !== prev.currentSessionId) {
+      useUIStore.getState().setRunOverviewKey(null);
+    }
+  }), []);
 
   React.useEffect(() => {
     currentViewRef.current = currentView;
@@ -418,6 +443,7 @@ export const VSCodeLayout: React.FC = () => {
     if (!initialSessionId) {
       hasAppliedInitialSession.current = true;
       openNewSessionDraft(bootstrapWorkspaceFolder ? { directoryOverride: bootstrapWorkspaceFolder } : undefined);
+      if (initialParallelComposer) useUIStore.getState().requestParallelComposer();
       return;
     }
 
@@ -427,7 +453,7 @@ export const VSCodeLayout: React.FC = () => {
 
     hasAppliedInitialSession.current = true;
     void useSessionUIStore.getState().setCurrentSession(initialSessionId);
-  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
+  }, [bootstrapWorkspaceFolder, connectionStatus, hasInitializedOnce, initialParallelComposer, initialSessionExists, initialSessionId, openNewSessionDraft, viewMode]);
 
   // Track container width for responsive settings layout
   React.useEffect(() => {
@@ -520,7 +546,8 @@ export const VSCodeLayout: React.FC = () => {
   return (
     <div ref={containerRef} className="h-full w-full bg-background text-foreground flex flex-col">
       {viewMode === 'editor' ? (
-        // Editor mode: just chat, no sidebar
+        // Editor mode: just chat, no sidebar. A run launched here opens its
+        // overview over the chat, as in the other layouts.
         <div className="flex flex-col h-full">
           <VSCodeHeader
             title={activeSessionTitle || t('vscodeLayout.title.chat')}
@@ -529,10 +556,11 @@ export const VSCodeLayout: React.FC = () => {
             showRateLimits
             enableSessionSwitcher
           />
-          <div className="flex-1 overflow-hidden">
+          <div className="relative flex-1 overflow-hidden">
             <ErrorBoundary>
               <ChatView />
             </ErrorBoundary>
+            <ErrorBoundary><RunOverview /></ErrorBoundary>
           </div>
         </div>
       ) : currentView === 'settings' ? (
@@ -586,10 +614,11 @@ export const VSCodeLayout: React.FC = () => {
               layoutOverride={layoutOverride}
               onToggleLayout={toggleLayoutOverride}
             />
-            <div className="flex-1 overflow-hidden">
+            <div className="relative flex-1 overflow-hidden">
               <ErrorBoundary>
                 <ChatView />
               </ErrorBoundary>
+              <ErrorBoundary><RunOverview /></ErrorBoundary>
             </div>
           </div>
         </div>
@@ -626,10 +655,11 @@ export const VSCodeLayout: React.FC = () => {
               layoutOverride={layoutOverride}
               onToggleLayout={toggleLayoutOverride}
             />
-            <div className="flex-1 overflow-hidden">
+            <div className="relative flex-1 overflow-hidden">
               <ErrorBoundary>
                 <ChatView />
               </ErrorBoundary>
+              <ErrorBoundary><RunOverview /></ErrorBoundary>
             </div>
           </div>
         </>
@@ -646,7 +676,6 @@ interface VSCodeHeaderProps {
   onBack?: () => void;
   onNewSession?: () => void;
   onSettings?: () => void;
-  onAgentManager?: () => void;
   showMcp?: boolean;
   showContextUsage?: boolean;
   showRateLimits?: boolean;
@@ -655,7 +684,7 @@ interface VSCodeHeaderProps {
   onToggleLayout?: () => void;
 }
 
-const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, onAgentManager, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher, layoutOverride, onToggleLayout }) => {
+const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, onNewSession, onSettings, showMcp, showContextUsage, showRateLimits, enableSessionSwitcher, layoutOverride, onToggleLayout }) => {
   const { t } = useI18n();
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
@@ -836,15 +865,6 @@ const VSCodeHeader: React.FC<VSCodeHeaderProps> = ({ title, showBack, onBack, on
           aria-label={t('vscodeLayout.actions.newSessionAria')}
         >
           <Icon name="add" className="h-5 w-5" />
-        </button>
-      )}
-      {onAgentManager && (
-        <button
-          onClick={onAgentManager}
-          className="inline-flex h-9 w-9 items-center justify-center p-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={t('vscodeLayout.actions.openAgentManagerAria')}
-        >
-          <Icon name="robot-2" className="h-5 w-5" />
         </button>
       )}
       {showMcp && (

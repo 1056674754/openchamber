@@ -5,8 +5,6 @@ import { getThemeKindName } from './theme';
 import type { ConnectionStatus } from './opencode';
 import type { WorkspaceFolderCandidate } from './workspaceResolver';
 
-export type PanelType = 'chat' | 'agentManager';
-
 export interface WebviewHtmlOptions {
   webview: vscode.Webview;
   extensionUri: vscode.Uri;
@@ -14,8 +12,9 @@ export interface WebviewHtmlOptions {
   workspaceFolders?: WorkspaceFolderCandidate[];
   initialStatus: ConnectionStatus;
   cliAvailable: boolean;
-  panelType?: PanelType;
   initialSessionId?: string;
+  /** A new-session editor tab that opens its draft in "Run on several models" mode. */
+  initialComposer?: 'parallel';
   viewMode?: 'sidebar' | 'editor';
   devServerUrl?: string | null;
   extensionVersion?: string;
@@ -74,8 +73,8 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     workspaceFolders = [],
     initialStatus,
     cliAvailable,
-    panelType = 'chat',
     initialSessionId,
+    initialComposer,
     viewMode = 'sidebar',
     devServerUrl,
     extensionVersion = '',
@@ -203,9 +202,9 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       extensionVersion: "${extensionVersion.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}",
       platform: "${os.platform()}",
       arch: "${os.arch()}",
-      panelType: "${panelType}",
       viewMode: "${viewMode}",
       initialSessionId: ${initialSessionId ? `"${initialSessionId.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : 'null'},
+      initialComposer: ${initialComposer ? `"${initialComposer}"` : 'null'},
     };
     window.__OPENCHAMBER_HOME__ = "${workspaceFolder.replace(/\\/g, '\\\\')}";
     

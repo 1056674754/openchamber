@@ -295,6 +295,24 @@ export async function revertGitFile(directory: string, filePath: string, options
   }
 }
 
+export async function snapshotGitWorktree(directory: string, payload: import('./api/types').GitWorktreeSnapshotPayload): Promise<import('./api/types').GitWorktreeSnapshotResult> {
+  const response = await fetch(buildUrl(`${API_BASE}/worktrees/snapshot`, directory), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const message = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(message.error || 'Failed to snapshot worktree');
+  }
+  const result = await response.json() as { ref?: unknown; commit?: unknown; head?: unknown };
+  if (typeof result.ref !== 'string' || typeof result.commit !== 'string' || result.commit.length === 0 || typeof result.head !== 'string' || result.head.length === 0) {
+    throw new Error('Malformed worktree snapshot response');
+  }
+  return { ref: result.ref, commit: result.commit, head: result.head };
+}
+
 export async function stageGitFiles(directory: string, filePaths: string[]): Promise<void> {
   const paths = filePaths.map((path) => path.trim()).filter(Boolean);
   if (paths.length === 0) {

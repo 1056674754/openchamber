@@ -14,7 +14,7 @@
 ## What you get
 
 - **Chat beside your code** — responsive layout that adapts to narrow and wide panels
-- **Agent Manager** — run the same prompt across multiple models in parallel, compare results side by side
+- **Run on several models** — send one prompt to several models at once, compare the answers side by side, keep the best or fuse them
 - **Right-click actions** — add context, explain selections, and improve code in-place
 - **Click-to-open** — file paths in tool output open directly in your editor; edit-style results land in a focused diff view
 - **Session editor panel** — keep chat sessions open alongside files
@@ -29,7 +29,7 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 | `OpenChamber: Focus Chat` | Focus the chat panel |
 | `OpenChamber: New Session` | Start a new chat session |
 | `OpenChamber: Open Sidebar` | Open the OpenChamber sidebar |
-| `OpenChamber: Open Agent Manager` | Launch parallel multi-model runs |
+| `OpenChamber: Run on Several Models` | Open a new tab set up to run one prompt on several models |
 | `OpenChamber: Open Session in Editor` | Open current or new session in an editor tab |
 | `OpenChamber: Settings` | Open extension settings |
 | `OpenChamber: Restart API Connection` | Restart the OpenCode API process |
