@@ -225,6 +225,32 @@ describe('OpenCode env runtime', () => {
     }
   });
 
+  it('keeps shell startup output out of the login-shell snapshot', () => {
+    setPlatform('darwin');
+    const previousShell = process.env.SHELL;
+    const shell = path.join(createTempDir('openchamber-shell-'), 'zsh');
+    fs.writeFileSync(shell, '#!/bin/sh\n', { mode: 0o755 });
+    process.env.SHELL = shell;
+    try {
+      const { runtime, state } = createRuntime({}, {
+        // Stands in for a shell whose interactive rc file prints a banner to
+        // stdout before it runs the probe command: only the `echo` part of the
+        // command and `env -0` are emulated.
+        spawnSync: (_command, args) => {
+          const echoed = args[1].match(/^echo (\S+); /);
+          const stdout = `Welcome to test-host\n${echoed ? `${echoed[1]}\n` : ''}HOME=/home/test-user\0PATH=/shell/bin\0`;
+          return { status: 0, stdout, stderr: '' };
+        },
+      });
+      state.cachedLoginShellEnvSnapshot = undefined;
+
+      expect(runtime.getLoginShellEnvSnapshot()).toEqual({ HOME: '/home/test-user', PATH: '/shell/bin' });
+    } finally {
+      if (previousShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previousShell;
+    }
+  });
+
   it('discovers the system npm prefix on Windows', () => {
     setPlatform('win32');
     const root = createTempDir('openchamber-opencode-windows-fallbacks-');
