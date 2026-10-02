@@ -125,6 +125,7 @@
   **验证**：type-check 8 包 0 错；触及文件 eslint 0 新增（全仓 lint 债为基线既有，逐文件比对 HEAD 确认）；web vitest 全量 3882 过/8 失败全部归因（5 spaces/code-out=HEAD 基线同败、config-file-watcher=S4 预declared 环境、guests/background=HEAD 基线同败、network-defaults=并行负载超时且隔离绿）；ui bun 全量失败集对 HEAD 基线差集为空（354 vs 355，均为并行 flake）；sync 全目录差集为空（同 S6 方法）。
   **仍挂账**：v2 激活门（J1-J10）待 ../opencode 2.x 就绪后统一执行；nativeRecords 渲染面；MERGE_V1.12.md 脊柱各批证据补录（本批已录，S1-S7 证据随各批 commit message+本台账）。
 - **B5 进行中**：files/editor + CodeMirror 三连 + multirun composer。
+- **B8 Spaces 接线批完成**（2026-10-02，4 commits：3e56d479f server+proxy、640074aec runtime-fetch+terminal、5845ba7af sidebar/composer/挂载/Archive、台账 MERGE_V1.12.md）：鸿蒙落地+OC2 S6/S8 后 6 项挂账全收口。switch 默认关零行为变化（journey 读 gating、拒绝路径 fall-through）；fork 多服务器重适：合并只在宿主 OpenCode proxy lane、remote lane 永不合并；index.js 与 OC2/guests/enterprise 四套接线逐处核对共存。type-check 0 错，ui 触及域 342 测试绿。Header 标题 hunk 与 realtime-proxy allowlist 为 fork 无表面 N/A。
 - **待鸿蒙让位后补（更新 2026-10-02）**：MERGE_V1.12.md 台账（B1 14 条 + 脊柱 S1-S7 + B3 明细）仍待补录；index.js 接线/S8 final wiring/VS Code OC2 探针 **已落地**（S8）；VS Code enterprise-policy 桥路由待 B 系 Enterprise 批对账；MobileApp 2 行待鸿蒙面归属确认。
 - **等价核实挂账**：启动族 3 项（367e5c926/2832c9254/b3760852e）；perf 3 项（40a17b11a/7a5568769/32d0b4de0）；#88 retention 等价核实；PR 家族对齐核对（D10）。
 - **stash 遗留**：事故副本 stash@{2}（f305b975b WIP 重复件）仍待用户审后清理。

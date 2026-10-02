@@ -3603,3 +3603,21 @@ v1.20.0-sscity 尚未宣布完成：当前未关闭 `#135/#140/#142-#151/#154/#1
 **验证**：type-check 8 包 0 错；触及文件 eslint 0 新增（全仓 lint 债逐文件与 HEAD 比对确认为既有）；web vitest 全量 3882 过 / 8 失败全部归因既有（5 spaces/code-out=HEAD 基线隔离同败、config-file-watcher=S4 预declared 环境、guests/background=HEAD 基线同败、network-defaults=并行负载 spawn 超时且隔离绿）；ui bun 全量失败集与 HEAD 基线差集为空（354 vs 355 并行 flake）；sync 全目录失败集差集为空。v1 零变化红线：全部 v2 路径 handle.mode/protocol 门控，v1 套件（sync/opencode lib/event-stream 等）与基线差集为空。
 
 **激活门状态**：J2（/api/info 探测）、J3（事件词汇翻译覆盖）、J4（directory header）、J5/J6（credential/generation，R5 版本门在 mode 判定内）、J9（双布局打包）侧代码就绪；J1/J7/J8/J10 待 `../opencode` 2.x 可部署版本后按 spine-plan §6 执行激活联调。**有意挂账**：nativeRecords 渲染面（S6a 差距清单延续）、#22 session-metadata 2.0.15 大改、useSmallModelStore（fork smallModel.ts 已双轨服务）。
+
+## Spaces 隔离空间接线批：B8 挂账 6 项收口（2026-10-02，4 commits）
+
+B8 已落全部 stage 0→5e-4 组件层（8 commits，189 文件 +40.4k，switch 默认关）；本批补完被 foreign 文件阻塞的 6 项接线，Spaces 全链路打通。鸿蒙会话落地（5e799b465）与 OC2 脊柱 S6/S8 完成后原阻塞解除。上游对照：`f9d212f38`/`d67dcca2d`/`1290fd121`/`211a5e713`/`117e45456`/`688c31477`/`6e9c57bf3` 的接线 hunk。设计：[`docs/isolated-spaces/`](../openchamber-merge-v1.11.0/docs/isolated-spaces/DESIGN.md)。
+
+**Commits**：
+- `3e56d479f` server 接线（index.js + proxy.js）：project-directory runtime 的 refuseDirectory 缝；启动读 persisted switch，开则 buildSpacesHost（关则零进程零路由零 docker）；spaceArchive.guard + dispatcher middleware 挂在 auth gate 后、目录路由前、OpenCode proxy 前；upgrade 监听；startEvents 入 global hub；live switch controller + registerSpaceRoutes；space 内 idle stop（OPENCHAMBER_SPACE_IDLE_STOP_FILE）；shutdown 走 shutdown-runtime 既有 getSpacesHost 缝。proxy.js：全局 SSE 逐块间插 space 块（仅无 directory/header 的全局流）；/api/session 首页合并。
+- `640074aec` runtime-fetch + 终端：addressSpace 按 directory 暗示（option/directory query/x-opencode-directory header/Request headers）把空间请求改写到 /api/spaces/<id>/，relay 与 network 同径；terminalApi 每目标 transport 重键为 server+space，空间 HTTP/WS 走本机前缀、绝不走 remote base（其路径改写会毁前缀）；TerminalAPI 面（options/resize payload/sendInput/close）与调用点（TerminalView/ProjectActionsButton/useTerminalStore）穿 directory；VS Code 决策 16 保持无此功能。
+- `5845ba7af` sidebar + composer + 挂载 + ArchiveView：见 commit message。
+- 本条台账。
+
+**fork 多服务器重适（B8 挂账原话的落实）**：首页合并只在宿主机自己的 OpenCode proxy lane 生效——remote 实例走 registerRemoteProxy 直达远端，不经 registerOpenCodeProxy，宿主合并无从泄漏进远端列表；fork 的 cursor 翻页与 x-opencode-directory 域限请求保持 host-only（无空间合并）；一切拒绝路径 fall through 到通用 proxy，关开关时字节路径不变。fork 的全局列表为 v1 数组形，mergeSessionLists 数组臂不携带 spaces 标记，sidebar 空间组由 journey 路由（switch 开时每次挂载一次读 + 创建流程 addJourneyEntry + space-progress/space-setup 事件 + 重连补读）供料——marks 的 stale/partial 精细态随 v2 对象形响应生效。
+
+**index.js 四套接线共存核对**：OC2（S8 的 translated intake/路由/嵌入式双布局不受影响，spaces 的 wire 事件经 hub 双轨 spaces opt-in，v1 轨默认不见）；B1 guests（beginGuestServiceShutdown/stopAllGuestServices/getRelayService 原位，spaces 的 getSpacesHost 追加其后者，互不覆盖）；B3 enterprise（断网门先于 main 内 spaces 装配执行，spaces 路由在 auth gate 后与 enterprise 的 loopback 门无交叠；relayBlockedByEnterprise 不触及 spaces）；spaces 中间件槽位一次性挂载、call-time 读 host，live switch 双向生效。upgrade 监听：spaces handler 只取 /api/spaces/<id>/ 前缀、其余原样放行，先于 terminal/message-stream/preview/dev-tunnel/remote 注册亦不抢占。
+
+**有意分叉/N/A**：fork Header 无 surface-title 槽位（上游 spacesSurfaceProjectId 标题 hunk 无挂点，页标题由 SpacesView 自担）；fork 无 MobileSessionsSheet/MobileProjectEditSurface 独立面（mobileVariant 复用 SessionSidebar/SessionGroupSection，随桌面面生效）；fork 无 realtime-proxy surface（上游 allowlist hunk N/A）；host session.import 端点嵌入式 OpenCode 尚无，archive 导入按 chat 失败计入 not-saved（删除确认已承载该路径，../opencode 2.x 后即通）。
+
+**验证**：type-check 8 包 0 错；触及文件 eslint 0 新增（5 error/3 warning 逐条与 HEAD~1 比对全部既有）；ui bun 触及域（sidebar/spaces/runtime-fetch）342 测试 0 失败；web vitest 全量 3885 过 / 5 失败全部归因既有（2 code-out=B8 bba37705b 记录的同一对读回预算测试隔离复跑同败、config-file-watcher=S4 预declared 环境、guests/background=HEAD 基线同败、network-defaults=并行负载超时且隔离 5/5 绿——串行隔离复跑对账，失败集与 S8 基线差集为空且通过数更多）。**Docker live（OPENCHAMBER_TEST_DOCKER=1，Engine 29.7.2）**：190 过 / 12 失败 / 100 自跳过——12 失败全部级联自 pinned 基础镜像 `node@sha256:dd58…` 本机不存在且本网络会话两次 20 分钟拉取停滞（套件内首个建空间测试等镜像超时后级联，跳过闸同一镜像检查）；失败路径未触及接线代码，B8 批本就未跑过 live 套件。镜像可得后应复跑。零行为红线：switch 关 = 无 host 无路由无 docker 无请求（journey 读 gating 于 isolatedSpacesEnabled），v1 事件/polling 套件与基线差集为空。
