@@ -171,13 +171,16 @@ describe('VS Code system bridge api:workspace:addFolder', () => {
 describe('VS Code system bridge api:opencode/health', () => {
   const originalFetch = globalThis.fetch;
 
-  test('normalizes OpenCode /global/health to {healthy:true}', async () => {
-    const fetchMock = mock(async () => ({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      json: async () => ({ healthy: true, version: '1.0.0' }),
-    }));
+  // v1 stub: /api/info 404s, /global/health answers the v1 contract.
+  const mockV1Server = (healthBody) => mock(async (url) => {
+    if (String(url).endsWith('/api/info')) {
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => null };
+    }
+    return { ok: true, status: 200, statusText: 'OK', json: async () => healthBody };
+  });
+
+  test('normalizes a v1 OpenCode /global/health to {healthy:true} behind the /api/info fallback', async () => {
+    const fetchMock = mockV1Server({ healthy: true, version: '1.0.0' });
     globalThis.fetch = fetchMock;
 
     try {
@@ -197,21 +200,56 @@ describe('VS Code system bridge api:opencode/health', () => {
         success: true,
         data: { healthy: true },
       });
-      const [url, init] = fetchMock.mock.calls[0];
-      expect(url).toBe('http://127.0.0.1:41235/global/health');
-      expect(init.headers).toEqual({ Accept: 'application/json', Authorization: 'Bearer token' });
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+        'http://127.0.0.1:41235/api/info',
+        'http://127.0.0.1:41235/global/health',
+      ]);
+      expect(fetchMock.mock.calls[0][1].headers).toEqual({ Accept: 'application/json', Authorization: 'Bearer token' });
+      expect(fetchMock.mock.calls[1][1].headers).toEqual({ Accept: 'application/json', Authorization: 'Bearer token' });
     } finally {
       globalThis.fetch = originalFetch;
     }
   });
 
-  test('reports healthy:false when the health endpoint fails', async () => {
-    globalThis.fetch = mock(async () => ({
-      ok: false,
-      status: 503,
-      statusText: 'Service Unavailable',
-      json: async () => null,
-    }));
+  test('treats a v2 /api/info answer as healthy without contacting /global/health', async () => {
+    const fetchMock = mock(async (url) => {
+      if (String(url).endsWith('/api/info')) {
+        return { ok: true, status: 200, statusText: 'OK', json: async () => ({ version: '2.0.14-sscity', pid: 9 }) };
+      }
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ healthy: true, version: '1.0.0' }) };
+    });
+    globalThis.fetch = fetchMock;
+
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'health-v2',
+        type: 'api:opencode/health',
+      }, {
+        manager: {
+          getApiUrl: () => 'http://127.0.0.1:41235',
+          getOpenCodeAuthHeaders: () => ({}),
+        },
+      }, deps);
+
+      expect(response).toEqual({
+        id: 'health-v2',
+        type: 'api:opencode/health',
+        success: true,
+        data: { healthy: true },
+      });
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['http://127.0.0.1:41235/api/info']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reports healthy:false when both probe endpoints fail', async () => {
+    globalThis.fetch = mock(async (url) => {
+      if (String(url).endsWith('/api/info')) {
+        return { ok: false, status: 404, statusText: 'Not Found', json: async () => null };
+      }
+      return { ok: false, status: 503, statusText: 'Service Unavailable', json: async () => null };
+    });
 
     try {
       const response = await handleSystemBridgeMessage({
@@ -252,5 +290,128 @@ describe('VS Code system bridge api:opencode/health', () => {
       success: true,
       data: { healthy: false, error: 'OpenCode manager unavailable' },
     });
+  });
+});
+
+describe('VS Code system bridge api:opencode/version', () => {
+  const originalFetch = globalThis.fetch;
+
+  test('reads the version from a v1 /global/health behind the /api/info fallback', async () => {
+    globalThis.fetch = mock(async (url) => {
+      if (String(url).endsWith('/api/info')) {
+        return { ok: false, status: 404, statusText: 'Not Found', json: async () => null };
+      }
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ version: 'v1.18.8-sscity', healthy: true }) };
+    });
+
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'version-v1',
+        type: 'api:opencode/version',
+      }, {
+        manager: {
+          getApiUrl: () => 'http://127.0.0.1:41235',
+          getOpenCodeAuthHeaders: () => ({}),
+        },
+      }, deps);
+
+      expect(response).toEqual({
+        id: 'version-v1',
+        type: 'api:opencode/version',
+        success: true,
+        data: { version: '1.18.8-sscity' },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reads the version from a v2 /api/info answer', async () => {
+    globalThis.fetch = mock(async (url) => {
+      if (String(url).endsWith('/api/info')) {
+        return { ok: true, status: 200, statusText: 'OK', json: async () => ({ version: '2.0.14-sscity', pid: 3 }) };
+      }
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => null };
+    });
+
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'version-v2',
+        type: 'api:opencode/version',
+      }, {
+        manager: {
+          getApiUrl: () => 'http://127.0.0.1:41235',
+          getOpenCodeAuthHeaders: () => ({}),
+        },
+      }, deps);
+
+      expect(response).toEqual({
+        id: 'version-v2',
+        type: 'api:opencode/version',
+        success: true,
+        data: { version: '2.0.14-sscity' },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('surfaces the probe error when neither endpoint answers', async () => {
+    globalThis.fetch = mock(async (url) => {
+      if (String(url).endsWith('/api/info')) {
+        return { ok: false, status: 404, statusText: 'Not Found', json: async () => null };
+      }
+      return { ok: false, status: 503, statusText: '', json: async () => ({ error: 'down' }) };
+    });
+
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'version-fail',
+        type: 'api:opencode/version',
+      }, {
+        manager: {
+          getApiUrl: () => 'http://127.0.0.1:41235',
+          getOpenCodeAuthHeaders: () => ({}),
+        },
+      }, deps);
+
+      expect(response).toEqual({
+        id: 'version-fail',
+        type: 'api:opencode/version',
+        success: true,
+        data: { version: null, error: 'down' },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('reports the manager-unavailable contract without probing', async () => {
+    const fetchMock = mock(async () => {
+      throw new Error('should not fetch');
+    });
+    globalThis.fetch = fetchMock;
+
+    try {
+      const response = await handleSystemBridgeMessage({
+        id: 'version-no-manager',
+        type: 'api:opencode/version',
+      }, {
+        manager: {
+          getApiUrl: () => null,
+          getOpenCodeAuthHeaders: () => ({}),
+        },
+      }, deps);
+
+      expect(response).toEqual({
+        id: 'version-no-manager',
+        type: 'api:opencode/version',
+        success: true,
+        data: { version: null, error: 'OpenCode manager unavailable' },
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

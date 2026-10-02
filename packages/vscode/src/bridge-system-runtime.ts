@@ -13,6 +13,7 @@ import {
 } from './opencodeGoQuota';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
+import { probeOpenCodeVersion } from './opencode-server-probe';
 import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { reconstructOriginalContentFromPatch } from './patchReconstruction';
@@ -216,22 +217,16 @@ export async function handleSystemBridgeMessage(
         if (!apiUrl) {
           return { id, type, success: true, data: { version: null, error: 'OpenCode manager unavailable' } };
         }
-        const base = `${apiUrl.replace(/\/+$/, '')}/`;
-        const response = await fetch(new URL('global/health', base).toString(), {
-          method: 'GET',
-          headers: { Accept: 'application/json', ...(ctx?.manager?.getOpenCodeAuthHeaders() || {}) },
+        // v2 removed /global/health and answers /api/info — probe both
+        // generations; a v1 server only sees the fallback after /api/info 404s.
+        const probe = await probeOpenCodeVersion(apiUrl, fetch, {
+          headers: ctx?.manager?.getOpenCodeAuthHeaders() || {},
+          defaultError: 'Failed to read OpenCode version',
         });
-        const health = await response.json().catch(() => null) as { version?: unknown; error?: unknown } | null;
-        if (!response.ok) {
-          const message = typeof health?.error === 'string'
-            ? health.error
-            : response.statusText || 'Failed to read OpenCode version';
-          return { id, type, success: true, data: { version: null, error: message } };
+        if (!probe.mode) {
+          return { id, type, success: true, data: { version: null, error: probe.error } };
         }
-        const version = typeof health?.version === 'string' && health.version.trim().length > 0
-          ? health.version.trim().replace(/^v/, '')
-          : null;
-        return { id, type, success: true, data: { version } };
+        return { id, type, success: true, data: { version: probe.version } };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: true, data: { version: null, error: errorMessage } };
@@ -240,26 +235,27 @@ export async function handleSystemBridgeMessage(
 
     case 'api:opencode/health': {
       // Webview checkHealth() requests /api/opencode/health (the OpenChamber web
-      // server route). The managed OpenCode server has no such path — its health
-      // lives at /global/health — so translate here and normalize to {healthy}.
+      // server route). The managed OpenCode server has no such path — v1 exposes
+      // /global/health, v2 removed it and answers /api/info — so translate here
+      // and normalize to {healthy}.
       try {
         const apiUrl = ctx?.manager?.getApiUrl();
         if (!apiUrl) {
           return { id, type, success: true, data: { healthy: false, error: 'OpenCode manager unavailable' } };
         }
-        const base = `${apiUrl.replace(/\/+$/, '')}/`;
-        const response = await fetch(new URL('global/health', base).toString(), {
-          method: 'GET',
-          headers: { Accept: 'application/json', ...(ctx?.manager?.getOpenCodeAuthHeaders() || {}) },
+        const probe = await probeOpenCodeVersion(apiUrl, fetch, {
+          headers: ctx?.manager?.getOpenCodeAuthHeaders() || {},
+          defaultError: 'OpenCode health check failed',
         });
-        const health = await response.json().catch(() => null) as { healthy?: unknown; error?: unknown } | null;
-        if (!response.ok) {
-          const message = typeof health?.error === 'string'
-            ? health.error
-            : response.statusText || 'OpenCode health check failed';
-          return { id, type, success: true, data: { healthy: false, error: message } };
+        if (!probe.mode) {
+          return { id, type, success: true, data: { healthy: false, error: probe.error } };
         }
-        return { id, type, success: true, data: { healthy: health?.healthy === true } };
+        return {
+          id,
+          type,
+          success: true,
+          data: { healthy: probe.mode === 'v2' || probe.healthy === true },
+        };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: true, data: { healthy: false, error: errorMessage } };

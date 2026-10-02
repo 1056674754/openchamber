@@ -767,6 +767,9 @@ export async function activate(context: vscode.ExtensionContext) {
       };
 
       const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
+        // v2 removed /global/health and answers /api/info — report both so the
+        // status panel stays truthful on either server generation.
+        { label: 'info', path: '/api/info', includeDirectory: false },
         { label: 'health', path: '/global/health', includeDirectory: false },
         { label: 'config', path: '/config', includeDirectory: true },
         { label: 'providers', path: '/config/providers', includeDirectory: true },

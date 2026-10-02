@@ -8,6 +8,11 @@ import {
 
 const originalFetch = globalThis.fetch;
 
+// A v1 OpenCode server 404s /api/info (the v2 probe) before /global/health
+// answers; every fetch stub below that models a v1 managed server starts with
+// this branch.
+const isV1ApiInfoRequest = (url: string) => url.endsWith('/api/info');
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
@@ -28,8 +33,11 @@ describe('VS Code OpenCode upgrades', () => {
     const { manager } = createManager();
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
       const url = String(input);
+      if (isV1ApiInfoRequest(url)) {
+        return new Response(null, { status: 404, statusText: 'Not Found' });
+      }
       if (url.endsWith('/global/health')) {
-        return new Response(JSON.stringify({ version: '1.18.8' }));
+        return new Response(JSON.stringify({ version: '1.18.8', healthy: true }));
       }
       return new Response(JSON.stringify({ version: '1.18.9', tag_name: 'v1.18.9' }));
     }) as typeof fetch;
@@ -42,18 +50,63 @@ describe('VS Code OpenCode upgrades', () => {
     });
   });
 
+  test('reads the current version from /api/info on a v2 managed OpenCode', async () => {
+    const { manager } = createManager();
+    let healthEndpointHit = false;
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.endsWith('/api/info')) {
+        return new Response(JSON.stringify({ version: '2.0.14-sscity', pid: 7 }));
+      }
+      if (url.endsWith('/global/health')) {
+        healthEndpointHit = true;
+        return new Response(JSON.stringify({ version: '1.0.0', healthy: true }));
+      }
+      return new Response(JSON.stringify({ version: '2.1.0', tag_name: 'v2.1.0' }));
+    }) as typeof fetch;
+
+    assert.deepEqual(await getOpenCodeUpgradeStatus(manager), {
+      available: true,
+      currentVersion: '2.0.14-sscity',
+      latestVersion: '2.1.0',
+      upgrade: { supported: true, manager: 'opencode', reason: null },
+    });
+    assert.equal(healthEndpointHit, false);
+  });
+
   test('does not treat an sscity build as older than the same stable core', async () => {
     const { manager } = createManager();
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
       const url = String(input);
+      if (isV1ApiInfoRequest(url)) {
+        return new Response(null, { status: 404, statusText: 'Not Found' });
+      }
       if (url.endsWith('/global/health')) {
-        return new Response(JSON.stringify({ version: '1.18.5-sscity' }));
+        return new Response(JSON.stringify({ version: '1.18.5-sscity', healthy: true }));
       }
       return new Response(JSON.stringify({ version: '1.18.5', tag_name: 'v1.18.5' }));
     }) as typeof fetch;
 
     const status = await getOpenCodeUpgradeStatus(manager);
     assert.equal(status.available, false);
+  });
+
+  test('surfaces the probe error when both version endpoints fail', async () => {
+    const { manager } = createManager();
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.startsWith('http://127.0.0.1:4096/')) {
+        if (url.endsWith('/api/info')) {
+          return new Response(null, { status: 404, statusText: 'Not Found' });
+        }
+        return new Response(JSON.stringify({ error: 'down' }), { status: 503, statusText: 'Service Unavailable' });
+      }
+      return new Response(JSON.stringify({ version: '1.18.9', tag_name: 'v1.18.9' }));
+    }) as typeof fetch;
+
+    const status = await getOpenCodeUpgradeStatus(manager);
+    assert.equal(status.available, null);
+    assert.equal(status.error, 'down');
   });
 
   test('fails closed for externally managed OpenCode without contacting the updater', async () => {

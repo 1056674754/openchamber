@@ -10,6 +10,7 @@ import { normalizeWindowsDriveLetter } from './pathUtils';
 import { spawnManagedOpenCodeProcess } from './managed-opencode-process';
 import { applyProviderEnvAliases } from './provider-env-aliases';
 import { namespacePathForUri, remoteSessionForWorkspace, isUnsupportedRemoteWorkspace, ensureNamespaceMounted, getRemoteConfigDir } from './remoteNamespace';
+import { probeOpenCodeVersion } from './opencode-server-probe';
 
 const READY_CHECK_TIMEOUT_MS = 30000;
 const MAX_AUTOMATIC_RECOVERY_ATTEMPTS = 3;
@@ -611,27 +612,23 @@ async function waitForReady(
       const abort = () => controller.abort();
       signal?.addEventListener('abort', abort, { once: true });
       try {
-        // OpenCode readiness check.
-        const url = new URL(`${baseUrl}/global/health`);
-        const res = await fetch(url.toString(), {
-          method: 'GET',
-          headers: { Accept: 'application/json', ...authHeaders },
+        // OpenCode readiness probe. v1 answers /global/health with healthy:true;
+        // v2 removed that endpoint and answers /api/info — accept either
+        // generation as ready. The controller signal caps the whole attempt at
+        // 3s, exactly as tight as the previous single-probe loop.
+        const probe = await probeOpenCodeVersion(baseUrl, fetch, {
+          headers: authHeaders,
           signal: controller.signal,
+          timeoutMs: 3000,
         });
 
-        let body: { healthy?: boolean, version?: string } | null = null;
-        try {
-          body = (await res.json()) as { healthy?: boolean, version?: string };
-        } catch {
-          body = null;
-        }
-
         outputChannel?.appendLine(
-          `Health check to ${url.toString()} returned ${res.status} with body: ${JSON.stringify(body)}`
+          `OpenCode probe on ${baseUrl}: mode=${probe.mode ?? 'none'} version=${probe.version ?? 'none'}${probe.error ? ` error=${probe.error}` : ''}`
         );
 
-        if (res.ok && body?.healthy === true) {
-          return { ok: true, baseUrl, elapsedMs: Date.now() - start, attempts, version: body?.version ?? null };
+        const ready = probe.mode === 'v2' || (probe.mode === 'v1' && probe.healthy === true);
+        if (ready) {
+          return { ok: true, baseUrl, elapsedMs: Date.now() - start, attempts, version: probe.version };
         }
       } catch {
         // ignore

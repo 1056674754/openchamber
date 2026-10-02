@@ -1,3 +1,5 @@
+import { probeOpenCodeVersion } from './opencode-server-probe';
+
 type UpgradeCapability = {
   supported: boolean;
   manager: 'opencode' | 'external' | null;
@@ -116,26 +118,19 @@ export const getOpenCodeUpgradeStatus = async (
     return { available: false, currentVersion: null, latestVersion: null, upgrade };
   }
   try {
-    const [healthResponse, latestVersion] = await Promise.all([
-      fetch(new URL('global/health', apiUrl).toString(), {
-        method: 'GET',
-        headers: { Accept: 'application/json', ...manager.getOpenCodeAuthHeaders() },
+    // v2 removed /global/health; the dual probe keeps v1 servers on their
+    // byte-identical path and lets 2.x managed runtimes report their version.
+    const [probe, latestVersion] = await Promise.all([
+      probeOpenCodeVersion(apiUrl, fetch, {
+        headers: manager.getOpenCodeAuthHeaders(),
+        defaultError: 'Failed to read OpenCode version',
       }),
       fetchLatestVersion(),
     ]);
-    const health = await healthResponse.json().catch(() => null) as {
-      version?: unknown;
-      error?: unknown;
-    } | null;
-    if (!healthResponse.ok) {
-      const error = typeof health?.error === 'string'
-        ? health.error
-        : healthResponse.statusText || 'Failed to read OpenCode version';
-      return { available: null, error, upgrade };
+    if (!probe.mode) {
+      return { available: null, error: probe.error, upgrade };
     }
-    const currentVersion = typeof health?.version === 'string' && health.version.trim()
-      ? health.version.trim().replace(/^v/, '')
-      : null;
+    const currentVersion = probe.version;
     return {
       available: currentVersion ? isUpgradeAvailable(latestVersion, currentVersion) : null,
       currentVersion,
