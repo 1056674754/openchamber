@@ -38,7 +38,8 @@ export const createWebTerminalAPI = (): TerminalAPI => ({
       handlers.onEvent,
       handlers.onError,
       getRetryPolicy(options),
-      options?.baseUrl
+      options?.baseUrl,
+      options?.directory
     );
 
     return {
@@ -46,16 +47,16 @@ export const createWebTerminalAPI = (): TerminalAPI => ({
     };
   },
 
-  async sendInput(sessionId: string, input: string, baseUrl?: string): Promise<void> {
-    await sendTerminalInput(sessionId, input, baseUrl);
+  async sendInput(sessionId: string, input: string, baseUrl?: string, directory?: string | null): Promise<void> {
+    await sendTerminalInput(sessionId, input, baseUrl, directory);
   },
 
   async resize(payload: ResizeTerminalPayload): Promise<void> {
-    await resizeTerminal(payload.sessionId, payload.cols, payload.rows, payload.baseUrl);
+    await resizeTerminal(payload.sessionId, payload.cols, payload.rows, payload.baseUrl, payload.directory);
   },
 
-  async close(sessionId: string, baseUrl?: string): Promise<void> {
-    await closeTerminal(sessionId, baseUrl);
+  async close(sessionId: string, baseUrl?: string, directory?: string | null): Promise<void> {
+    await closeTerminal(sessionId, baseUrl, directory);
   },
 
   async restartSession(

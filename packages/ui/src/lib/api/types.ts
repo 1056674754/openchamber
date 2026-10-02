@@ -103,6 +103,8 @@ export interface TerminalStreamOptions {
   retry?: Partial<RetryPolicy>;
   connectionTimeoutMs?: number;
   baseUrl?: string;
+  /** The terminal's directory: one inside an isolated space rides that space's prefix. */
+  directory?: string | null;
 }
 
 export interface ResizeTerminalPayload {
@@ -110,6 +112,7 @@ export interface ResizeTerminalPayload {
   cols: number;
   rows: number;
   baseUrl?: string;
+  directory?: string | null;
 }
 
 export interface TerminalError extends Error {
@@ -130,9 +133,9 @@ export interface ForceKillOptions {
 export interface TerminalAPI {
   createSession(options: CreateTerminalOptions): Promise<TerminalSession>;
   connect(sessionId: string, handlers: TerminalHandlers, options?: TerminalStreamOptions): Subscription;
-  sendInput(sessionId: string, input: string, baseUrl?: string): Promise<void>;
+  sendInput(sessionId: string, input: string, baseUrl?: string, directory?: string | null): Promise<void>;
   resize(payload: ResizeTerminalPayload): Promise<void>;
-  close(sessionId: string, baseUrl?: string): Promise<void>;
+  close(sessionId: string, baseUrl?: string, directory?: string | null): Promise<void>;
   restartSession?(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession>;
   forceKill?(options: ForceKillOptions): Promise<void>;
 }

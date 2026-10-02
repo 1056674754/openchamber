@@ -583,6 +583,7 @@ export const ProjectActionsButton = ({
         },
         { maxRetries: 60, initialRetryDelay: 250, maxRetryDelay: 2000, connectionTimeout: 5000 },
         activeServerBaseUrl || undefined,
+        normalizedDirectory,
       );
 
       const hasDesktopForwardSelection = discovered.autoOpenUrl === true
@@ -684,7 +685,7 @@ export const ProjectActionsButton = ({
     updateProjectActionRunStatus(runKey, 'stopping');
 
     try {
-      await terminal.sendInput(activeRun.sessionId, '\x03', activeServerBaseUrl || undefined);
+      await terminal.sendInput(activeRun.sessionId, '\x03', activeServerBaseUrl || undefined, activeRun.directory);
     } catch {
       // noop
     }
@@ -702,13 +703,13 @@ export const ProjectActionsButton = ({
       const baseUrl = activeServerBaseUrl || undefined;
       if (typeof terminal.forceKill === 'function') {
         try {
-          await terminal.forceKill({ sessionId: activeRun.sessionId, baseUrl });
+          await terminal.forceKill({ sessionId: activeRun.sessionId, baseUrl, cwd: activeRun.directory });
         } catch {
           // noop
         }
       } else {
         try {
-          await terminal.close(activeRun.sessionId, baseUrl);
+          await terminal.close(activeRun.sessionId, baseUrl, activeRun.directory);
         } catch {
           // noop
         }

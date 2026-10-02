@@ -265,8 +265,8 @@ export const TerminalView: React.FC = () => {
             return;
         }
 
-        primeTerminalInputTransport(activeServerBaseUrl || undefined);
-    }, [activeServerBaseUrl, isTerminalVisible, runtime.platform]);
+        primeTerminalInputTransport(activeServerBaseUrl || undefined, effectiveDirectory);
+    }, [activeServerBaseUrl, isTerminalVisible, runtime.platform, effectiveDirectory]);
 
     React.useEffect(() => {
         if (isTerminalVisible) {
@@ -488,7 +488,7 @@ export const TerminalView: React.FC = () => {
                         disconnectStream();
                     },
                 },
-                { ...streamOptions, baseUrl: streamBaseUrl }
+                { ...streamOptions, baseUrl: streamBaseUrl, directory }
             );
 
             streamCleanupRef.current = () => {
@@ -608,7 +608,7 @@ export const TerminalView: React.FC = () => {
 
                     if (!stillActive) {
                         try {
-                            await terminal.close(session.sessionId, baseUrl);
+                            await terminal.close(session.sessionId, baseUrl, directory);
                         } catch { /* ignored */ }
                         return;
                     }
@@ -625,6 +625,7 @@ export const TerminalView: React.FC = () => {
                             cols: viewportSize.cols,
                             rows: viewportSize.rows,
                             baseUrl,
+                            directory,
                         }).catch(() => {});
                     }
                     terminalId = session.sessionId;
@@ -821,7 +822,7 @@ export const TerminalView: React.FC = () => {
             const terminalId = terminalIdRef.current;
             if (!terminalId) return;
 
-            void terminal.sendInput(terminalId, payload, serverBaseUrlRef.current || undefined).catch((error) => {
+            void terminal.sendInput(terminalId, payload, serverBaseUrlRef.current || undefined, directoryRef.current).catch((error) => {
                 if (!isReconnectPending) {
                     setConnectionError(
                         error instanceof Error ? error.message : t('terminalView.error.sendInputFailed')
@@ -856,7 +857,7 @@ export const TerminalView: React.FC = () => {
             }
             const terminalId = terminalIdRef.current;
             if (!terminalId) return;
-            void terminal.resize({ sessionId: terminalId, cols, rows, baseUrl: serverBaseUrlRef.current || undefined }).catch(() => {});
+            void terminal.resize({ sessionId: terminalId, cols, rows, baseUrl: serverBaseUrlRef.current || undefined, directory: directoryRef.current }).catch(() => {});
         },
         [isTerminalVisible, terminal]
     );

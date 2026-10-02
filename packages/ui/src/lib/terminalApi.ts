@@ -11,6 +11,7 @@ import type {
 import type { TerminalChunkSize } from '@/stores/useTerminalStore';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
 import { getRuntimeUrlResolver } from './runtime-url';
+import { spaceApiPath, spaceIdOfDirectory } from './spaces/space-route';
 import { isTerminalShell } from './terminalShell';
 
 type Message = Record<string, unknown> & { t: string; s?: string; q?: number };
@@ -90,7 +91,14 @@ export const isRemoteTerminalProxyBaseUrl = (baseUrl?: string): boolean => {
   return /(?:^|\/)api\/remote\/[^/]+$/.test(normalizedPathname);
 };
 
-const terminalApiUrl = (path: string, baseUrl?: string): string => resolveApiUrl(path, baseUrl);
+// A space's requests ride the current host's `/api/spaces/<id>/` prefix — never a remote
+// server's base, whose path rewriting would mangle the prefix and whose server holds no
+// spaces. A host directory resolves exactly as before.
+const terminalApiUrl = (path: string, baseUrl?: string, directory?: string | null): string => {
+  const prefixed = spaceApiPath(path, directory);
+  if (prefixed !== path) return prefixed;
+  return resolveApiUrl(path, baseUrl);
+};
 
 /** The PTY size a snapshot event's history was drawn for, when the server reported one. */
 export const terminalSnapshotSize = (event: Pick<TerminalStreamEvent, 'cols' | 'rows'>): TerminalChunkSize | undefined =>
@@ -110,8 +118,14 @@ const toWebSocketUrl = (httpUrl: string): string => {
  * HTTP terminal calls ride the patched window.fetch bridge (runtime base).
  * WebSocket does not — without an explicit baseUrl we must use the runtime
  * URL resolver, or Capacitor ends up on wss://localhost and stays blank.
+ * A terminal of an isolated space rides the space's prefix on this host's
+ * runtime resolver, never a remote server's base.
  */
-const resolveTerminalWebSocketUrl = (baseUrl?: string): string => {
+const resolveTerminalWebSocketUrl = (baseUrl?: string, directory?: string | null): string => {
+  const prefixed = spaceApiPath('/api/terminal/ws', directory);
+  if (prefixed !== '/api/terminal/ws') {
+    return toWebSocketUrl(prefixed);
+  }
   const trimmed = typeof baseUrl === 'string' ? baseUrl.trim() : '';
   if (trimmed) {
     return toWebSocketUrl(terminalApiUrl('/api/terminal/ws', trimmed));
@@ -138,6 +152,7 @@ export class TerminalTransport {
     private readonly openSocket: (url: string) => WebSocket = (url) => (
       openRuntimeWebSocket(url) as unknown as WebSocket
     ),
+    private readonly directory?: string | null,
   ) {}
 
   subscribe(sessionId: string, handlers: TerminalHandlers): () => void {
@@ -268,7 +283,7 @@ export class TerminalTransport {
           finish(new Error('Terminal connection timed out'));
         }, 10_000);
         try {
-          const socketUrl = resolveTerminalWebSocketUrl(this.baseUrl);
+          const socketUrl = resolveTerminalWebSocketUrl(this.baseUrl, this.directory);
           const socket = this.openSocket(socketUrl);
           pendingSocket = socket;
           socket.binaryType = 'arraybuffer';
@@ -521,21 +536,27 @@ const getGlobalState = (): GlobalTransportState => {
   return root[GLOBAL_KEY];
 };
 
-const transportKey = (baseUrl?: string): string => (baseUrl && baseUrl.trim() ? baseUrl.trim() : '__default__');
+// One socket per target: a server (the fork's per-baseUrl lanes), or one isolated space on
+// that server, whose terminals live behind `/api/spaces/<id>/terminal/ws`. The target is the
+// terminal's working directory, so every call names it; a call without a space directory is
+// the server's own (upstream 1290fd121, re-keyed over the fork's baseUrl map).
+const transportKey = (baseUrl?: string, directory?: string | null): string => (
+  `${baseUrl && baseUrl.trim() ? baseUrl.trim() : '__default__'}\u0000${spaceIdOfDirectory(directory) ?? ''}`
+);
 
-const getTransport = (baseUrl?: string): TerminalTransport => {
+const getTransport = (baseUrl?: string, directory?: string | null): TerminalTransport => {
   const state = getGlobalState();
-  const key = transportKey(baseUrl);
+  const key = transportKey(baseUrl, directory);
   let transport = state.entries.get(key);
   if (!transport) {
-    transport = new TerminalTransport(baseUrl);
+    transport = new TerminalTransport(baseUrl, undefined, directory);
     state.entries.set(key, transport);
   }
   return transport;
 };
 
 export async function createTerminalSession(options: CreateTerminalOptions, baseUrl?: string): Promise<TerminalSession> {
-  const response = await fetch(terminalApiUrl('/api/terminal/create', baseUrl ?? options.baseUrl), {
+  const response = await fetch(terminalApiUrl('/api/terminal/create', baseUrl ?? options.baseUrl, options.cwd), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -582,42 +603,44 @@ export function connectTerminalStream(
   onError?: TerminalHandlers['onError'],
   options: ConnectStreamOptions = {},
   baseUrl?: string,
+  directory?: string | null,
 ): () => void {
   void options;
-  return getTransport(baseUrl).subscribe(sessionId, { onEvent, onError });
+  return getTransport(baseUrl, directory).subscribe(sessionId, { onEvent, onError });
 }
 
-export async function sendTerminalInput(sessionId: string, data: string, baseUrl?: string): Promise<void> {
-  await getTransport(baseUrl).write(sessionId, data);
+export async function sendTerminalInput(sessionId: string, data: string, baseUrl?: string, directory?: string | null): Promise<void> {
+  await getTransport(baseUrl, directory).write(sessionId, data);
 }
 
-async function command(path: string, method: string, body?: unknown, baseUrl?: string): Promise<Response> {
+async function command(path: string, method: string, body?: unknown, baseUrl?: string, directory?: string | null): Promise<Response> {
   const init: RequestInit = { method };
   if (body !== undefined) {
     init.headers = { 'Content-Type': 'application/json' };
     init.body = JSON.stringify(body);
   }
-  const response = await fetch(terminalApiUrl(path, baseUrl), init);
+  const response = await fetch(terminalApiUrl(path, baseUrl, directory), init);
   if (!response.ok) throw await responseError(response, 'Terminal command failed');
   return response;
 }
 
-export async function resizeTerminal(sessionId: string, cols: number, rows: number, baseUrl?: string): Promise<void> {
-  await command(`/api/terminal/${sessionId}/resize`, 'POST', { cols, rows }, baseUrl);
-  getTransport(baseUrl).noteResize(sessionId, cols, rows);
+export async function resizeTerminal(sessionId: string, cols: number, rows: number, baseUrl?: string, directory?: string | null): Promise<void> {
+  await command(`/api/terminal/${sessionId}/resize`, 'POST', { cols, rows }, baseUrl, directory);
+  getTransport(baseUrl, directory).noteResize(sessionId, cols, rows);
 }
 
 export async function updateTerminalAppearance(
   sessionId: string,
   appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>,
   baseUrl?: string,
+  directory?: string | null,
 ): Promise<void> {
-  await command(`/api/terminal/${sessionId}/appearance`, 'POST', appearance, baseUrl);
+  await command(`/api/terminal/${sessionId}/appearance`, 'POST', appearance, baseUrl, directory);
 }
 
-export async function closeTerminal(sessionId: string, baseUrl?: string): Promise<void> {
-  await command(`/api/terminal/${sessionId}`, 'DELETE', undefined, baseUrl);
-  getTransport(baseUrl).forget(sessionId);
+export async function closeTerminal(sessionId: string, baseUrl?: string, directory?: string | null): Promise<void> {
+  await command(`/api/terminal/${sessionId}`, 'DELETE', undefined, baseUrl, directory);
+  getTransport(baseUrl, directory).forget(sessionId);
 }
 
 export async function restartTerminalSession(
@@ -625,7 +648,7 @@ export async function restartTerminalSession(
   options: CreateTerminalOptions,
   baseUrl?: string,
 ): Promise<TerminalSession> {
-  const response = await command(`/api/terminal/${currentSessionId}/restart`, 'POST', options, baseUrl ?? options.baseUrl);
+  const response = await command(`/api/terminal/${currentSessionId}/restart`, 'POST', options, baseUrl ?? options.baseUrl, options.cwd);
   return response.json() as Promise<TerminalSession>;
 }
 
@@ -633,9 +656,9 @@ export async function forceKillTerminal(
   options: { sessionId?: string; cwd?: string },
   baseUrl?: string,
 ): Promise<void> {
-  const response = await command('/api/terminal/force-kill', 'POST', options, baseUrl);
+  const response = await command('/api/terminal/force-kill', 'POST', options, baseUrl, options.cwd);
   const result = await response.json().catch(() => null) as { killedSessionIds?: unknown } | null;
-  const transport = getTransport(baseUrl);
+  const transport = getTransport(baseUrl, options.cwd);
   if (Array.isArray(result?.killedSessionIds)) {
     for (const sessionId of result.killedSessionIds) {
       if (typeof sessionId === 'string') transport.forget(sessionId);
@@ -654,15 +677,18 @@ export function disposeTerminalInputTransport(baseUrl?: string): void {
     }
     return;
   }
-  const key = transportKey(baseUrl);
-  const transport = state.entries.get(key);
-  transport?.dispose();
-  state.entries.delete(key);
+  // Every space of this server goes with it.
+  const prefix = transportKey(baseUrl);
+  for (const [key, transport] of state.entries) {
+    if (!key.startsWith(prefix)) continue;
+    transport.dispose();
+    state.entries.delete(key);
+  }
 }
 
-/** Ensure a per-baseUrl transport entry exists (connection opens on first subscribe). */
-export function primeTerminalInputTransport(baseUrl?: string): void {
-  getTransport(baseUrl);
+/** Ensure a per-target transport entry exists (connection opens on first subscribe). */
+export function primeTerminalInputTransport(baseUrl?: string, directory?: string | null): void {
+  getTransport(baseUrl, directory);
 }
 
 // Compatibility no-ops for callers that still pass stream options shapes.

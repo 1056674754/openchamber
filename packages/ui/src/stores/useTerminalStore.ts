@@ -440,7 +440,7 @@ export const useTerminalStore = create<TerminalStore>()(
 
           if (sessionId) {
             try {
-              await closeTerminal(sessionId, getServerBaseUrl(serverId));
+              await closeTerminal(sessionId, getServerBaseUrl(serverId), directory);
             } catch {
               // ignore
             }
