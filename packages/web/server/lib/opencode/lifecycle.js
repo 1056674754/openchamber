@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import net from 'node:net';
-import { stripAppImageArgv0Leak } from '../inherited-env.js';
+import { stripAppImageArgv0Leak, stripAppImageLauncherEnv } from '../inherited-env.js';
 import { finalizeInterruptedOpenCodeRuns } from './interrupted-runs.js';
 import { applyProviderEnvAliases } from './provider-env-aliases.js';
 import { DEFAULT_PROTOCOL_MODE_SERVER_ID, recordProtocolModeFromVersion, resolveProtocolMode } from './protocol-mode.js';
@@ -843,7 +843,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout: startupTimeoutMs,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
-        env: stripAppImageArgv0Leak(applyProviderEnvAliases({
+        env: stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
           ...shellEnv,
           ...process.env,
           ...managedOpenCodeEnv,
@@ -854,7 +854,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           // OpenCode 1.x ignores the variable, so v1 behaviour is unchanged.
           OPENCODE_PASSWORD: openCodePassword,
           OPENCODE_SERVER_PASSWORD: openCodePassword,
-        })),
+        }))),
       });
 
       if (!serverInstance || !serverInstance.url) {
