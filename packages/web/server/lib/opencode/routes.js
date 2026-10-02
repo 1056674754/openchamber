@@ -832,7 +832,12 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
         getOpenCodeAuthHeaders,
         listProviderAuths,
       });
-      const hasStoredAuth = authResult.states[providerID]?.configured === true;
+      // OpenCode 2 keeps credentials in its own store, out of this server's
+      // sight, so the form states whether one exists or follows this write
+      // (upstream SegB `50766fa0f`). Absent on the v1 track, where the local
+      // auth.json check stays authoritative.
+      const hasStoredAuth = req.body?.hasCredential === true
+        || authResult.states[providerID]?.configured === true;
       const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
 
       // v2 track (spine OC2-S3): OpenCode 2 reloads provider config live, so

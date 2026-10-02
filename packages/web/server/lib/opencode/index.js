@@ -18,6 +18,7 @@ export {
   getAgentPermissionSource,
   getAgentSources,
   getAgentConfig,
+  getAgentPermissions,
   createAgent,
   updateAgent,
   deleteAgent,
@@ -26,6 +27,7 @@ export {
 export {
   getCommandScope,
   getCommandSources,
+  getCommandConfig,
   createCommand,
   updateCommand,
   deleteCommand,

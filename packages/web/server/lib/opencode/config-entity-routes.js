@@ -8,10 +8,12 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     markPendingConfigRestart,
     getAgentSources,
     getAgentConfig,
+    getAgentPermissions,
     createAgent,
     updateAgent,
     deleteAgent,
     getCommandSources,
+    getCommandConfig,
     createCommand,
     updateCommand,
     deleteCommand,
@@ -94,6 +96,26 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to get agent config:', error);
       res.status(500).json({ error: 'Failed to get agent configuration' });
+    }
+  });
+
+  // v2-only route shape (upstream `654705f7d`): the ordered permission rules
+  // that apply to an agent. v1 has no ordered-rules concept, so the route
+  // answers 404 on the v1 track instead of serving a divergent shape.
+  app.get('/api/config/agents/:name/permissions', async (req, res) => {
+    if (resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) !== 'v2' || !getAgentPermissions) {
+      return res.status(404).json({ error: 'Agent permissions require the OpenCode 2 protocol track' });
+    }
+    try {
+      const agentName = req.params.name;
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      res.json(getAgentPermissions(agentName, directory));
+    } catch (error) {
+      console.error('Failed to get agent permissions:', error);
+      res.status(500).json({ error: 'Failed to get agent permissions' });
     }
   });
 
@@ -287,6 +309,26 @@ export const registerConfigEntityRoutes = (app, dependencies) => {
     } catch (error) {
       console.error('Failed to get command sources:', error);
       res.status(500).json({ error: 'Failed to get command configuration metadata' });
+    }
+  });
+
+  // v2-only route shape (upstream `654705f7d`): the canonical v2 command
+  // entity plus where it came from. v1 keeps its metadata-only route, so this
+  // answers 404 on the v1 track.
+  app.get('/api/config/commands/:name/config', async (req, res) => {
+    if (resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) !== 'v2' || !getCommandConfig) {
+      return res.status(404).json({ error: 'Command config requires the OpenCode 2 protocol track' });
+    }
+    try {
+      const commandName = req.params.name;
+      const { directory, error } = await resolveProjectDirectory(req);
+      if (!directory) {
+        return res.status(400).json({ error });
+      }
+      res.json(getCommandConfig(commandName, directory));
+    } catch (error) {
+      console.error('Failed to get command config:', error);
+      res.status(500).json({ error: 'Failed to get command configuration' });
     }
   });
 

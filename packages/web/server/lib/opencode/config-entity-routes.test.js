@@ -17,10 +17,24 @@ const createApp = () => {
     markPendingConfigRestart,
     getAgentSources: vi.fn(),
     getAgentConfig: vi.fn(),
+    getAgentPermissions: vi.fn(() => ({
+      global: [],
+      agent: [{ action: 'edit', resource: '*', effect: 'allow' }],
+      effective: [{ action: 'edit', resource: '*', effect: 'allow', source: 'agent' }],
+      source: 'md',
+      path: '/tmp/project/.opencode/agents/build.md',
+    })),
     createAgent: vi.fn(() => ({ path: '/tmp/project/.opencode/agents/build.md', scope: 'project', source: 'md' })),
     updateAgent: vi.fn(() => ({ path: '/tmp/project/.opencode/agents/build.md' })),
     deleteAgent: vi.fn(),
     getCommandSources: vi.fn(),
+    getCommandConfig: vi.fn(() => ({
+      source: 'md',
+      scope: 'project',
+      path: '/tmp/project/.opencode/commands/ship.md',
+      legacy: false,
+      config: { template: 'Ship {{args}}' },
+    })),
     createCommand: vi.fn(() => ({ path: '/tmp/project/.opencode/commands/ship.md' })),
     updateCommand: vi.fn(() => ({ path: '/tmp/project/.opencode/commands/ship.md' })),
     deleteCommand: vi.fn(),
@@ -110,5 +124,52 @@ describe('agent config mutation responses', () => {
       message: 'MCP server "fetcher" created.',
       path: '/tmp/opencode.json',
     });
+  });
+});
+
+describe('v2-only entity route shapes', () => {
+  it('answers ordered agent permission rules on the v2 track', async () => {
+    process.env.OPENCHAMBER_PROTOCOL_MODE = 'v2';
+    resetProtocolModes();
+    const app = createApp();
+
+    const response = await request(app).get('/api/config/agents/build/permissions');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      global: [],
+      agent: [{ action: 'edit', resource: '*', effect: 'allow' }],
+      effective: [{ action: 'edit', resource: '*', effect: 'allow', source: 'agent' }],
+      source: 'md',
+      path: '/tmp/project/.opencode/agents/build.md',
+    });
+  });
+
+  it('answers the canonical v2 command entity on the v2 track', async () => {
+    process.env.OPENCHAMBER_PROTOCOL_MODE = 'v2';
+    resetProtocolModes();
+    const app = createApp();
+
+    const response = await request(app).get('/api/config/commands/ship/config');
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      source: 'md',
+      scope: 'project',
+      path: '/tmp/project/.opencode/commands/ship.md',
+      legacy: false,
+      config: { template: 'Ship {{args}}' },
+    });
+  });
+
+  it('answers 404 on the v1 track where those shapes do not exist', async () => {
+    resetProtocolModes();
+    const app = createApp();
+
+    const permissions = await request(app).get('/api/config/agents/build/permissions');
+    expect(permissions.status).toBe(404);
+
+    const commandConfig = await request(app).get('/api/config/commands/ship/config');
+    expect(commandConfig.status).toBe(404);
   });
 });
