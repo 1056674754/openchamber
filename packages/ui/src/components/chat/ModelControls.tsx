@@ -16,6 +16,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { IconName } from "@/components/icon/icons";
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
@@ -344,12 +345,15 @@ interface ModelControlsProps {
     className?: string;
     mobilePanel?: MobileControlsPanel;
     onMobilePanelChange?: (panel: MobileControlsPanel) => void;
+    /** Offers "Run on several models" at the top of the desktop model picker. */
+    onRunInParallel?: () => void;
 }
 
 export const ModelControls: React.FC<ModelControlsProps> = ({
     className,
     mobilePanel,
     onMobilePanelChange,
+    onRunInParallel,
 }) => {
     const { t } = useI18n();
     const { isReady, isUnavailable } = useOpenCodeReadiness();
@@ -2656,6 +2660,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 labels={modelPickerLabels}
                                 selectedModel={currentProviderId && currentModelId ? { providerID: currentProviderId, modelID: currentModelId } : null}
                                 leadingEntry={autoEntry}
+                                leadingAction={onRunInParallel ? {
+                                    label: t('chat.modelControls.runInParallel'),
+                                    icon: <ArrowsMerge className="h-3.5 w-3.5 flex-shrink-0" />,
+                                    onSelect: () => {
+                                        setModelSelectorOpen(false);
+                                        onRunInParallel();
+                                    },
+                                } : null}
                                 hiddenModels={effectiveHiddenModels}
                                 collapsedSections={collapsedSections}
                                 onToggleSectionCollapsed={toggleSectionCollapsed}

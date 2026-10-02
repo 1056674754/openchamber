@@ -26,11 +26,22 @@ export interface MultiRunGroup {
   prompt: string;
   /** Models to run against for this group */
   models: MultiRunModelSelection[];
+  /** Files that belong to this prompt variant only (for example resolved @mentions). */
+  files?: MultiRunFileAttachment[];
+}
+
+export interface MultiRunAutoFusion {
+  providerID: string;
+  modelID: string;
+  variant?: string;
+  agent?: string;
 }
 
 export interface CreateMultiRunParams {
   /** Group name used for worktree directory and branch naming */
   name: string;
+  /** Human title shown in the sidebar and overview; defaults to `name`. */
+  title?: string;
   /** Prompt/model groups to run */
   groups: MultiRunGroup[];
   /** Optional agent to use for all runs */
@@ -43,13 +54,19 @@ export interface CreateMultiRunParams {
   files?: MultiRunFileAttachment[];
   /** Setup commands to run in each new worktree after creation */
   setupCommands?: string[];
+  /** Fuse the lanes automatically once all of them finish. */
+  autoFusion?: MultiRunAutoFusion;
 }
 
 export interface CreateMultiRunResult {
   /** Canonical group slug used in session titles */
   groupSlug: string;
+  /** Identity key every lane of this run shares. */
+  groupKey: string;
   /** Session IDs created successfully (in selection order) */
   sessionIds: string[];
   /** First successfully created session ID, if any */
   firstSessionId: string | null;
+  /** Lanes that failed to start; the rest of the run is unaffected. */
+  failedCount: number;
 }

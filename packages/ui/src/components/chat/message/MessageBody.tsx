@@ -1251,7 +1251,9 @@ const AssistantMessageBody = React.memo(({
         }
         return null;
     });
-    const openMultiRunLauncherWithPrompt = useUIStore((state) => state.openMultiRunLauncherWithPrompt);
+    // Fork keeps the old launcher store fields for its MainLayout surface;
+    // the entry point itself now opens the composer in parallel mode.
+    const requestParallelComposer = useUIStore((state) => state.requestParallelComposer);
     const projects = useProjectsStore((state) => state.projects);
     const effectiveDirectory = useEffectiveDirectory();
     const finalizedAssistantMarkdownContents = React.useMemo(() => {
@@ -1482,9 +1484,9 @@ const AssistantMessageBody = React.memo(({
             }
 
             const prefilledPrompt = `${MULTIRUN_EXECUTION_FORK_PROMPT_META_TEXT}\n\n${assistantPlanText}`;
-            openMultiRunLauncherWithPrompt(prefilledPrompt);
+            requestParallelComposer(prefilledPrompt);
         },
-        [assistantPlanText, openMultiRunLauncherWithPrompt]
+        [assistantPlanText, requestParallelComposer]
     );
 
     const handleSaveAsPlanClick = React.useCallback(

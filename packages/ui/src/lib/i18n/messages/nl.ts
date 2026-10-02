@@ -35,4 +35,6 @@ export const dict: Partial<Record<I18nKey, string>> = {
   'filesView.symbols.noMatches': 'Geen overeenkomende symbolen',
   'filesView.tree.actions.showGitignored': 'Door git genegeerde bestanden tonen',
   'filesView.tree.actions.hideGitignored': 'Door git genegeerde bestanden verbergen',
+  'sidebarFilesTree.menu.uploadFiles': 'Bestanden uploaden',
+  'sidebarFilesTree.actions.uploadFilesTitle': 'Bestanden uploaden',
 };

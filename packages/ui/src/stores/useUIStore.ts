@@ -657,6 +657,10 @@ interface UIStore {
   theme: 'light' | 'dark' | 'system';
   isMultiRunLauncherOpen: boolean;
   multiRunLauncherPrefillPrompt: string;
+  /** Key of the multi-run whose overview replaces the chat area, if open. */
+  runOverviewKey: string | null;
+  /** One-shot request for the composer to enter parallel mode; the composer consumes it. */
+  parallelComposerRequest: { id: number; prompt: string } | null;
   isSidebarOpen: boolean;
   sidebarWidth: number;
   hasManuallyResizedLeftSidebar: boolean;
@@ -972,6 +976,9 @@ interface UIStore {
   setGitChangesViewMode: (mode: 'flat' | 'tree') => void;
   setToolJsonViewMode: (mode: 'summary' | 'formatted' | 'raw') => void;
   setMultiRunLauncherOpen: (open: boolean) => void;
+  setRunOverviewKey: (runKey: string | null) => void;
+  requestParallelComposer: (prompt?: string) => void;
+  consumeParallelComposerRequest: (id: number) => void;
   setTimelineDialogOpen: (open: boolean) => void;
   setPromptNavigatorPanelOpen: (open: boolean) => void;
   togglePromptNavigatorPanel: () => void;
@@ -1045,6 +1052,8 @@ export const useUIStore = create<UIStore>()(
 
         theme: 'system',
         isMultiRunLauncherOpen: false,
+        runOverviewKey: null,
+        parallelComposerRequest: null,
         multiRunLauncherPrefillPrompt: '',
         isSidebarOpen: true,
         sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
@@ -1713,6 +1722,7 @@ export const useUIStore = create<UIStore>()(
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
             isMultiRunLauncherOpen: false,
+            runOverviewKey: null,
             openGuestPageId: null,
           });
         },
@@ -1823,6 +1833,7 @@ export const useUIStore = create<UIStore>()(
                 isArchivePageOpen: false,
                 worktreesPageProjectId: null,
                 isMultiRunLauncherOpen: false,
+            runOverviewKey: null,
                 openGuestPageId: null,
               }
             : { isScheduledTasksDialogOpen: false });
@@ -1835,6 +1846,7 @@ export const useUIStore = create<UIStore>()(
                 isScheduledTasksDialogOpen: false,
                 worktreesPageProjectId: null,
                 isMultiRunLauncherOpen: false,
+            runOverviewKey: null,
                 openGuestPageId: null,
               }
             : { isArchivePageOpen: false });
@@ -1847,6 +1859,7 @@ export const useUIStore = create<UIStore>()(
                 isScheduledTasksDialogOpen: false,
                 isArchivePageOpen: false,
                 isMultiRunLauncherOpen: false,
+            runOverviewKey: null,
                 openGuestPageId: null,
               }
             : { worktreesPageProjectId: null });
@@ -1860,6 +1873,7 @@ export const useUIStore = create<UIStore>()(
                 isArchivePageOpen: false,
                 worktreesPageProjectId: null,
                 isMultiRunLauncherOpen: false,
+            runOverviewKey: null,
               }
             : { openGuestPageId: null });
         },
@@ -1871,6 +1885,7 @@ export const useUIStore = create<UIStore>()(
             && !state.isArchivePageOpen
             && !state.worktreesPageProjectId
             && !state.isMultiRunLauncherOpen
+            && !state.runOverviewKey
             && !state.openGuestPageId
           ) {
             return;
@@ -1880,6 +1895,7 @@ export const useUIStore = create<UIStore>()(
             isArchivePageOpen: false,
             worktreesPageProjectId: null,
             isMultiRunLauncherOpen: false,
+            runOverviewKey: null,
             multiRunLauncherPrefillPrompt: '',
             openGuestPageId: null,
           });
@@ -2438,6 +2454,20 @@ export const useUIStore = create<UIStore>()(
             worktreesPageProjectId: null,
             openGuestPageId: null,
           });
+        },
+
+        setRunOverviewKey: (runKey) => {
+          set(runKey
+            ? { runOverviewKey: runKey, isScheduledTasksDialogOpen: false, isArchivePageOpen: false, worktreesPageProjectId: null, isMultiRunLauncherOpen: false, openGuestPageId: null }
+            : { runOverviewKey: null });
+        },
+
+        requestParallelComposer: (prompt = '') => {
+          set({ parallelComposerRequest: { id: Date.now(), prompt } });
+        },
+
+        consumeParallelComposerRequest: (id) => {
+          set((state) => (state.parallelComposerRequest?.id === id ? { parallelComposerRequest: null } : state));
         },
 
         setTimelineDialogOpen: (open) => {

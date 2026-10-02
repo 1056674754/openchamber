@@ -56,6 +56,9 @@ import { SnippetAutocomplete, type SnippetAutocompleteHandle } from './SnippetAu
 import { cn, formatDirectoryName, isMacOS } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { ModelControls } from './ModelControls';
+import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
+import { useParallelComposer } from './composer/parallel/useParallelComposer';
+import { ParallelComposerStrip } from './composer/parallel/ParallelComposerStrip';
 import { SessionGoalRow } from '@/components/chat/SessionGoalRow';
 import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
@@ -816,6 +819,8 @@ type ComposerActionButtonsProps = {
     onSendNow: () => void;
     onAbort: () => void;
     followUpBehavior: FollowUpBehavior;
+    /** Parallel mode says how many runs start, instead of "send message". */
+    sendLabel?: string;
 };
 
 const ComposerActionButtons = React.memo(function ComposerActionButtons(props: ComposerActionButtonsProps) {
@@ -835,6 +840,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
         onSendNow,
         onAbort,
         followUpBehavior,
+        sendLabel,
     } = props;
     const { t } = useI18n();
     const [isCtrlHeld, setIsCtrlHeld] = React.useState(false);
@@ -897,7 +903,8 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
                     ? 'text-primary hover:text-primary'
                     : 'opacity-30'
             )}
-            aria-label={t('chat.chatInput.actions.sendMessageAria')}
+            aria-label={sendLabel ?? t('chat.chatInput.actions.sendMessageAria')}
+            title={sendLabel}
         >
             <Icon name="send-plane-2" className={cn(sendIconSizeClass)} />
         </button>
@@ -980,6 +987,7 @@ const ComposerActionButtons = React.memo(function ComposerActionButtons(props: C
     && prev.onQueueMessage === next.onQueueMessage
     && prev.onSendNow === next.onSendNow
     && prev.onAbort === next.onAbort
+    && prev.sendLabel === next.sendLabel
 ));
 
 interface ChatInputProps {
@@ -1193,19 +1201,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             : null
     ), [btwPanel.btwDirectory, btwPanel.btwSessionId, currentSessionId]);
     const isBtwActive = btwSessionRef !== null && !btwPanel.collapsed;
-    // The btw panel owns the floating slot whenever a sheet (expanded or
-    // collapsed) or a creation frame is on screen, hiding queue and suggestion.
-    const isBtwPanelVisible = btwSessionRef !== null || btwPanel.creating;
-    React.useEffect(() => {
-        setUnsyncedSkillError(null);
-    }, [composerDirectoryContext, currentSessionId]);
-    React.useEffect(() => {
-        if (!showSkillAutocomplete) {
-            setUnsyncedSkillError(null);
-        }
-    }, [showSkillAutocomplete]);
-    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
-    const newSessionDraftOpen = Boolean(newSessionDraft?.open);
+
     const draftPermissionMode = useSessionUIStore(
         (s) => (s.newSessionDraft.open ? s.newSessionDraft.permissionIntent.mode : null),
     );
@@ -1247,6 +1243,48 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const getCurrentModel = useConfigStore((state) => state.getCurrentModel);
     const agents = getVisibleAgents();
     const isMobile = useUIStore((state) => state.isMobile);
+
+    const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
+    const newSessionDraftOpen = Boolean(newSessionDraft?.open);
+    const draftOpenForTarget = newSessionDraftOpen && newSessionDraft?.target !== 'chat';
+
+    // "Run in parallel" state: one editor, N model lanes. Launching goes
+    // through the multi-run store; the fork's queue/follow-up semantics stay
+    // untouched for ordinary sends.
+    const parallel = useParallelComposer({
+        enabled: !isMobile && !isBtwActive,
+        draftOpen: draftOpenForTarget,
+        draftProjectId: newSessionDraft?.selectedProjectId ?? null,
+        message,
+        setMessage,
+    });
+    const parallelProjectId = newSessionDraft?.selectedProjectId ?? null;
+    const parallelProject = useProjectsStore(React.useCallback((state) => {
+        const project = state.projects.find((entry) => entry.id === (parallelProjectId ?? state.activeProjectId));
+        return project ? `${project.id}\n${project.path}` : null;
+    }, [parallelProjectId]));
+    const parallelProjectRef = React.useMemo(() => {
+        if (!parallelProject) return null;
+        const [id, path] = parallelProject.split('\n');
+        return { id, path };
+    }, [parallelProject]);
+    const enterParallel = parallel.enter;
+    const handleRunInParallel = React.useCallback(() => {
+        // The picker offers it everywhere; a run always starts from a new-session draft.
+        if (draftOpenForTarget) enterParallel();
+        else openParallelComposer(messageRef.current);
+    }, [draftOpenForTarget, enterParallel]);
+    // The btw panel owns the floating slot whenever a sheet (expanded or
+    // collapsed) or a creation frame is on screen, hiding queue and suggestion.
+    const isBtwPanelVisible = btwSessionRef !== null || btwPanel.creating;
+    React.useEffect(() => {
+        setUnsyncedSkillError(null);
+    }, [composerDirectoryContext, currentSessionId]);
+    React.useEffect(() => {
+        if (!showSkillAutocomplete) {
+            setUnsyncedSkillError(null);
+        }
+    }, [showSkillAutocomplete]);
     const inputBarOffset = useUIStore((state) => state.inputBarOffset);
     // PWA/web only: Capacitor inset ownership lives in useNativeMobileChrome
     // (Keyboard plugin + single visualViewport fallback). Do not dual-write here.
@@ -2198,6 +2236,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     const lastSoftNetworkErrorToastAtRef = React.useRef(0);
 
     const handleSubmit = async (options?: SubmitOptions) => {
+        // "Run in parallel" launches the run instead of sending a message.
+        if (parallel.isActive && !options?.queuedOnly) {
+            if (parallel.runCount >= 2) void parallel.launch();
+            return;
+        }
         const queuedOnly = options?.queuedOnly ?? false;
         const queuedMessageId = options?.queuedMessageId;
         const deliveryMode = options?.deliveryMode ?? 'normal';
@@ -3021,7 +3064,17 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
     // Update ref with latest handleSubmit on every render
     handleSubmitRef.current = handleSubmit;
 
+    const parallelRef = React.useRef(parallel);
+    parallelRef.current = parallel;
+
     const handlePrimaryAction = React.useCallback(() => {
+        // Parallel mode: the primary action launches the run (fork queue and
+        // follow-up behavior apply to ordinary sends only).
+        const parallelState = parallelRef.current;
+        if (parallelState.isActive) {
+            if (parallelState.runCount >= 2) void parallelState.launch();
+            return;
+        }
         const inputSnapshot = getCurrentInputSnapshot();
         const canQueue = !isBtwActive && inputMode === 'normal' && inputSnapshot.hasContent && currentSessionId && (sessionPhase !== 'idle' || autoReviewRunning);
         const action = resolveFollowUpAction({
@@ -4882,6 +4935,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                             onDrop={handleDrop}
                             onDragEnd={handleDragEnd}
                         >
+                            {parallel.isActive ? <ParallelComposerStrip parallel={parallel} project={parallelProjectRef} /> : null}
                             <ComposerEditor
                                 ref={composerRef}
                                 viewStore={composerViewStore}
@@ -5144,7 +5198,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             percentIconClassName="h-4.5 w-4.5"
                                         />
                                     ) : null}
-                                    <MemoModelControls className={cn('flex-1 min-w-0 justify-end')} />
+                                    <MemoModelControls
+                                        className={cn('flex-1 min-w-0 justify-end')}
+                                        onRunInParallel={!isMobile && !isBtwActive ? handleRunInParallel : undefined}
+                                    />
                                     <MemoBrowserVoiceButton voice={voice} />
                                     <ComposerActionButtons
                                         isMobile={isMobile}
@@ -5162,6 +5219,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                                 onSendNow={handleSendNow}
                                                 onAbort={handleAbort}
                                                 followUpBehavior={followUpBehavior}
+                                                sendLabel={parallel.isActive
+                                                    ? t('chat.parallel.runAria', { count: parallel.runCount })
+                                                    : undefined}
                                             />
                                 </div>
                             </>
