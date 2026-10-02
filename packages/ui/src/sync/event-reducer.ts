@@ -10,7 +10,7 @@ import type {
 } from "@opencode-ai/sdk/v2/client"
 import type { FormRequest } from "@/types/form"
 import { Binary } from "./binary"
-import type { DirectoryEventFrame, FileDiff, GlobalState, State } from "./types"
+import type { DirectoryEventFrame, FileDiff, GlobalState, NativeSessionRecord, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
@@ -791,6 +791,47 @@ export function applyDirectoryEvent(
       if (props.sessionID) {
         draft.session_activity[props.sessionID] = Date.now()
       }
+      return true
+    }
+
+    case "message.record": {
+      // v2 transcript records the fork message store has no role for
+      // (plumbing notices, shells, compactions) — kept on the side channel,
+      // never entering `draft.message`. Upsert by id; a shell's ended event
+      // names only the shell, so an id miss falls back to the shellID match.
+      const props = event.properties as { sessionID: string; record: NativeSessionRecord }
+      const record = props.record
+      if (!props.sessionID || !record?.id || !record.role) return false
+      if (!draft.nativeRecords) draft.nativeRecords = {}
+      const records = draft.nativeRecords[props.sessionID] ?? []
+      let index = records.findIndex((entry) => entry.id === record.id)
+      if (index < 0 && record.role === "shell" && record.shellID) {
+        index = records.findIndex((entry) => entry.role === "shell" && entry.shellID === record.shellID)
+      }
+      const next = [...records]
+      if (index >= 0) {
+        next[index] = { ...next[index], ...record, time: { ...next[index].time, ...record.time } }
+      } else {
+        next.push(record)
+      }
+      draft.nativeRecords[props.sessionID] = next
+      return true
+    }
+
+    case "message.record.delta": {
+      // The compaction summary streams into the running record; the event
+      // names only the session, so the reducer finds it (same semantics as
+      // upstream's message.compaction.delta).
+      const props = event.properties as { sessionID: string; delta: string }
+      if (!props.sessionID || !props.delta) return false
+      const records = draft.nativeRecords?.[props.sessionID]
+      if (!records) return false
+      const index = records.findIndex((entry) => entry.role === "compaction" && entry.compactionStatus === "running")
+      if (index < 0) return false
+      const running = records[index]
+      const next = [...records]
+      next[index] = { ...running, summary: (running.summary ?? "") + props.delta }
+      draft.nativeRecords[props.sessionID] = next
       return true
     }
 

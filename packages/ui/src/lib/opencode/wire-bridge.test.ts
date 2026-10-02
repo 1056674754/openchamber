@@ -55,6 +55,7 @@ describe("translateV2WireEvent", () => {
     ])
     expect(types(translateV2WireEvent(wire("session.model.selected", { sessionID: "ses_1", model: { providerID: "p", id: "m" } })))).toEqual([
       "session.patched",
+      "message.record",
     ])
   })
 
@@ -178,12 +179,17 @@ describe("translateV2WireEvent", () => {
     expect(part.id).toBe("msg_u1:text:0")
     expect(part.text).toBe("hello")
 
-    // Non-user inbox items are not modeled.
-    expect(translateV2WireEvent(wire("session.inbox.enqueued", {
+    // Synthetic inbox items are plumbing records on the side channel (S8).
+    const [synthetic] = translateV2WireEvent(wire("session.inbox.enqueued", {
       sessionID: "ses_1",
       inboxID: "msg_x",
       item: { type: "synthetic", payload: { text: "x" } },
-    }))).toEqual([])
+    }))
+    expect(synthetic.type).toBe("message.record")
+    expect((synthetic.properties as { record: { role: string; text: string } }).record).toMatchObject({
+      role: "synthetic",
+      text: "x",
+    })
   })
 
   test("permission asks normalize onto the v1 field names", () => {
@@ -228,9 +234,65 @@ describe("translateV2WireEvent", () => {
     expect(mcp.type).toBe("mcp.status.changed")
   })
 
+  test("plumbing, shell and compaction records ride the side channel (S8)", () => {
+    const [synthetic] = translateV2WireEvent(wire("session.synthetic", { sessionID: "ses_1", text: "loop", description: "d" }, { id: "evt_9" }))
+    expect(synthetic.type).toBe("message.record")
+    expect((synthetic.properties as { record: Record<string, unknown> }).record).toMatchObject({
+      id: "msg_9",
+      role: "synthetic",
+      text: "loop",
+      description: "d",
+    })
+
+    const [skill] = translateV2WireEvent(wire("session.skill.activated", { sessionID: "ses_1", id: "s", name: "Skill", text: "t" }))
+    expect((skill.properties as { record: Record<string, unknown> }).record).toMatchObject({ role: "skill", skill: "s", name: "Skill" })
+
+    const [instructions] = translateV2WireEvent(wire("session.instructions.updated", { sessionID: "ses_1", text: "rule", delta: { a: 1 } }))
+    expect((instructions.properties as { record: Record<string, unknown> }).record).toMatchObject({ role: "system", text: "rule" })
+    // No text, no record.
+    expect(translateV2WireEvent(wire("session.instructions.updated", { sessionID: "ses_1" }))).toEqual([])
+
+    const [shellStarted] = translateV2WireEvent(wire("session.shell.started", { sessionID: "ses_1", shell: { id: "sh_1", command: "ls", status: "running" } }))
+    expect((shellStarted.properties as { record: Record<string, unknown> }).record).toMatchObject({
+      role: "shell",
+      shellID: "sh_1",
+      command: "ls",
+      status: "running",
+    })
+
+    const [shellEnded] = translateV2WireEvent(wire("session.shell.ended", { sessionID: "ses_1", shell: { id: "sh_1", status: "completed", exit: 0 }, output: "out" }))
+    const endedRecord = (shellEnded.properties as { record: Record<string, unknown> }).record
+    expect(endedRecord).toMatchObject({ role: "shell", shellID: "sh_1", status: "completed", exit: 0, output: "out" })
+    // The ended record matches the started one by shellID.
+    expect(endedRecord.id).toBe("shell:sh_1")
+
+    const [compactionStarted] = translateV2WireEvent(wire("session.compaction.started", { sessionID: "ses_1", reason: "manual" }))
+    expect((compactionStarted.properties as { record: Record<string, unknown> }).record).toMatchObject({
+      role: "compaction",
+      compactionStatus: "running",
+      summary: "",
+    })
+
+    const [compactionDelta] = translateV2WireEvent(wire("session.compaction.delta", { sessionID: "ses_1", text: "sum" }))
+    expect(compactionDelta.type).toBe("message.record.delta")
+    expect(compactionDelta.properties).toMatchObject({ sessionID: "ses_1", delta: "sum" })
+
+    const [compactionEnded] = translateV2WireEvent(wire("session.compaction.ended", { sessionID: "ses_1", text: "done", cost: 3 }))
+    expect((compactionEnded.properties as { record: Record<string, unknown> }).record).toMatchObject({
+      role: "compaction",
+      compactionStatus: "completed",
+      summary: "done",
+      cost: 3,
+    })
+
+    const [compactionFailed] = translateV2WireEvent(wire("session.compaction.failed", { sessionID: "ses_1", reason: "x", error: { message: "no" } }))
+    expect((compactionFailed.properties as { record: Record<string, unknown> }).record).toMatchObject({
+      role: "compaction",
+      compactionStatus: "failed",
+    })
+  })
+
   test("unmodeled and unknown wire types drop silently", () => {
-    expect(translateV2WireEvent(wire("session.compaction.delta", { sessionID: "ses_1", text: "x" }))).toEqual([])
-    expect(translateV2WireEvent(wire("session.shell.started", { sessionID: "ses_1" }))).toEqual([])
     expect(translateV2WireEvent(wire("tui.toast.show", { sessionID: "ses_1" }))).toEqual([])
     expect(translateV2WireEvent(wire("rpc.something", { sessionID: "ses_1" }))).toEqual([])
     expect(translateV2WireEvent(wire("brand.new.event", { sessionID: "ses_1" }))).toEqual([])

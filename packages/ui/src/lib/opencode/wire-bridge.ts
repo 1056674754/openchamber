@@ -14,19 +14,19 @@
  * - v2 wire (input): `{ type, id, created, location?, data }` records.
  * - fork v1 events (output): the `@opencode-ai/sdk` shapes the reducer
  *   switches on (`session.created`, `message.part.updated`, ...).
- * - fork-adjacent bridge events (output): four names the v1 wire never emits
+ * - fork-adjacent bridge events (output): names the v1 wire never emits
  *   and the reducer gained v2-only cases for — `session.patched` and
- *   `message.patched` (partial records: v2 patches, v1 replaces), and
- *   `message.tool.transition` (a tool part's next state without a full part).
- *   The `catalog.updated` carrier is consumed in sync-context before the
- *   reducer (store refresh), never reduced.
+ *   `message.patched` (partial records: v2 patches, v1 replaces),
+ *   `message.tool.transition` (a tool part's next state without a full part),
+ *   `message.record` / `message.record.delta` (the plumbing/shell/compaction
+ *   transcript records the fork store keeps on the `nativeRecords` channel —
+ *   the fork message store is user/assistant-shaped, so these roles never
+ *   enter it). The `catalog.updated` carrier is consumed in sync-context
+ *   before the reducer (store refresh), never reduced.
  *
  * Deliberately not translated (single-point registrations, MERGE evidence):
- * plumbing-role messages (synthetic/skill/instructions/switch notices — the
- * fork message store is user/assistant-shaped), shell.* (the fork materializes
- * shells from request/response), compaction.* (no fork role; display gap until
- * the projection work), `location.shutdown` (the fork's refresh callback is
- * not wired for server.instance.disposed either).
+ * `location.shutdown` (the fork's refresh callback is not wired for
+ * server.instance.disposed either) and `session.viewed`.
  */
 
 import type { Event, Message, Part, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
@@ -112,6 +112,45 @@ export type CatalogBridgeKind =
   | "project"
 
 /**
+ * A v2-native transcript record the fork store keeps on the side (`State`
+ * `nativeRecords`): plumbing notices, shells and compactions. Mirrors
+ * `NativeSessionRecord` in `sync/types` (kept structurally identical).
+ */
+export type RecordBridgeRole =
+  | "synthetic"
+  | "system"
+  | "skill"
+  | "shell"
+  | "compaction"
+  | "location-switched"
+  | "agent-switched"
+  | "model-switched"
+
+export type RecordBridgePayload = {
+  id: string
+  role: RecordBridgeRole
+  time?: { created?: number; completed?: number }
+  text?: string
+  description?: string
+  skill?: string
+  name?: string
+  directory?: string
+  agent?: string
+  previous?: unknown
+  model?: unknown
+  shellID?: string
+  command?: string
+  status?: string
+  exit?: number | null
+  output?: string
+  compactionStatus?: "running" | "completed" | "failed"
+  reason?: string
+  summary?: string
+  error?: unknown
+  cost?: number
+}
+
+/**
  * Everything the bridge can emit. A discriminated superset of the fork `Event`
  * union — the extra members are the fork-adjacent names above, which v1 never
  * produces and the reducer/sync-context branch on by string.
@@ -124,6 +163,8 @@ export type BridgeEvent =
       type: "message.tool.transition"
       properties: { sessionID: string; messageID: string; partID: string; transition: ToolBridgeTransition }
     }
+  | { type: "message.record"; properties: { sessionID: string; record: RecordBridgePayload } }
+  | { type: "message.record.delta"; properties: { sessionID: string; delta: string } }
   | { type: "catalog.updated"; properties: { kind: CatalogBridgeKind } }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +256,18 @@ const normalizePermissionProperties = (data: Record<string, unknown>): Record<st
   always: Array.isArray(data.always) ? data.always : Array.isArray(data.save) ? data.save : [],
 })
 
+// --- transcript records (plumbing roles, shells, compactions) ---------------
+
+/** Upstream's derivation: a record's id comes from its announcing event id. */
+const messageIdFromWireEvent = (source: WirePayload): string =>
+  typeof source.id === "string" ? source.id.replace(/^evt_/, "msg_") : ""
+
+const finiteExit = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null
+
+const recordEvent = (sessionID: string, record: RecordBridgePayload, source: WirePayload): BridgeEvent =>
+  event("message.record", { sessionID, record }, source)
+
 // ---------------------------------------------------------------------------
 // Translation
 // ---------------------------------------------------------------------------
@@ -297,6 +350,14 @@ export function translateV2WireEvent(payload: unknown): BridgeEvent[] {
           }),
           wire,
         ),
+        ...(directory
+          ? [recordEvent(sessionID, {
+            id: messageIdFromWireEvent(wire),
+            role: "location-switched",
+            time: { created: now },
+            directory,
+          }, wire)]
+          : []),
       ]
     }
 
@@ -318,13 +379,33 @@ export function translateV2WireEvent(payload: unknown): BridgeEvent[] {
     case "session.agent.selected": {
       if (!sessionID) return []
       const agent = trimmed(data.agent)
-      return agent ? [event("session.patched", withDirectory({ sessionID, patch: { agent } }), wire)] : []
+      if (!agent) return []
+      return [
+        event("session.patched", withDirectory({ sessionID, patch: { agent } }), wire),
+        recordEvent(sessionID, {
+          id: messageIdFromWireEvent(wire),
+          role: "agent-switched",
+          time: { created: now },
+          agent,
+          previous: data.previous,
+        }, wire),
+      ]
     }
 
     case "session.model.selected": {
       if (!sessionID) return []
       const model = wireModelRef(data)
-      return model ? [event("session.patched", withDirectory({ sessionID, patch: { model } }), wire)] : []
+      if (!model) return []
+      return [
+        event("session.patched", withDirectory({ sessionID, patch: { model } }), wire),
+        recordEvent(sessionID, {
+          id: messageIdFromWireEvent(wire),
+          role: "model-switched",
+          time: { created: now },
+          model: data.model,
+          previous: data.previous,
+        }, wire),
+      ]
     }
 
     case "session.revert.staged":
@@ -382,6 +463,17 @@ export function translateV2WireEvent(payload: unknown): BridgeEvent[] {
       const messageID = trimmed(data.inboxID)
       const item = isRecord(data.item) ? data.item : {}
       const itemPayload = isRecord(item.payload) ? item.payload : {}
+      // Synthetic inbox items (loop continuations, plan injections) are
+      // plumbing records, not prompts the user typed.
+      if (messageID && item.type === "synthetic") {
+        return [recordEvent(sessionID, {
+          id: messageIdFromWireEvent(wire) || messageID,
+          role: "synthetic",
+          time: { created: now },
+          text: typeof itemPayload.text === "string" ? itemPayload.text : "",
+          description: typeof itemPayload.description === "string" ? itemPayload.description : undefined,
+        }, wire)]
+      }
       if (!messageID || item.type !== "user") return []
       const text = typeof itemPayload.text === "string" ? itemPayload.text : ""
       const info = compact({
@@ -708,6 +800,113 @@ export function translateV2WireEvent(payload: unknown): BridgeEvent[] {
           wire,
         ),
       ]
+    }
+
+    // --- plumbing notices, shells, compactions --------------------------------
+    // The fork message store is user/assistant-shaped, so these ride the
+    // adjacent `message.record` channel (`State.nativeRecords`) instead of
+    // entering it. Record ids derive from the announcing event id (upstream's
+    // `messageIdFromEvent`).
+
+    case "session.synthetic": {
+      if (!sessionID) return []
+      return [recordEvent(sessionID, {
+        id: messageIdFromWireEvent(wire),
+        role: "synthetic",
+        time: { created: now },
+        text: typeof data.text === "string" ? data.text : "",
+        description: typeof data.description === "string" ? data.description : undefined,
+      }, wire)]
+    }
+
+    case "session.skill.activated": {
+      if (!sessionID) return []
+      return [recordEvent(sessionID, {
+        id: messageIdFromWireEvent(wire),
+        role: "skill",
+        time: { created: now },
+        skill: trimmed(data.id) || undefined,
+        name: typeof data.name === "string" ? data.name : undefined,
+        text: typeof data.text === "string" ? data.text : undefined,
+      }, wire)]
+    }
+
+    case "session.instructions.updated": {
+      if (!sessionID || data.text === undefined) return []
+      return [recordEvent(sessionID, {
+        id: messageIdFromWireEvent(wire),
+        role: "system",
+        time: { created: now },
+        text: typeof data.text === "string" ? data.text : "",
+        description: isRecord(data.delta) ? `Instructions updated: ${Object.keys(data.delta).join(", ")}` : undefined,
+      }, wire)]
+    }
+
+    case "session.shell.started": {
+      if (!sessionID) return []
+      const shell = isRecord(data.shell) ? data.shell : null
+      if (!shell) return []
+      return [recordEvent(sessionID, {
+        id: messageIdFromWireEvent(wire),
+        role: "shell",
+        time: { created: now },
+        shellID: trimmed(shell.id) || undefined,
+        command: typeof shell.command === "string" ? shell.command : "",
+        status: typeof shell.status === "string" ? shell.status : undefined,
+        exit: finiteExit(shell.exit),
+      }, wire)]
+    }
+
+    case "session.shell.ended": {
+      if (!sessionID) return []
+      const shell = isRecord(data.shell) ? data.shell : null
+      if (!shell) return []
+      return [recordEvent(sessionID, {
+        // The started event carried the record's id; the ended event names
+        // only the shell, so the reducer matches by shellID.
+        id: `shell:${trimmed(shell.id)}`,
+        role: "shell",
+        time: { created: now, completed: now },
+        shellID: trimmed(shell.id) || undefined,
+        status: typeof shell.status === "string" ? shell.status : undefined,
+        exit: finiteExit(shell.exit),
+        output: typeof data.output === "string" ? data.output : undefined,
+      }, wire)]
+    }
+
+    case "session.compaction.started": {
+      if (!sessionID) return []
+      return [recordEvent(sessionID, {
+        id: typeof data.inputID === "string" && data.inputID ? data.inputID : messageIdFromWireEvent(wire),
+        role: "compaction",
+        time: { created: now },
+        compactionStatus: "running",
+        reason: typeof data.reason === "string" ? data.reason : undefined,
+        summary: "",
+      }, wire)]
+    }
+
+    // The summary streams into the running compaction record; the event names
+    // only the session, so the reducer finds that record itself.
+    case "session.compaction.delta": {
+      if (!sessionID || typeof data.text !== "string") return []
+      return [event("message.record.delta", { sessionID, delta: data.text }, wire)]
+    }
+
+    case "session.compaction.ended":
+    case "session.compaction.failed": {
+      if (!sessionID) return []
+      const failed = type === "session.compaction.failed"
+      return [recordEvent(sessionID, {
+        id: typeof data.inputID === "string" && data.inputID ? data.inputID : messageIdFromWireEvent(wire),
+        role: "compaction",
+        time: { created: now, completed: now },
+        compactionStatus: failed ? "failed" : "completed",
+        reason: typeof data.reason === "string" ? data.reason : undefined,
+        summary: failed ? "" : typeof data.text === "string" ? data.text : "",
+        error: failed ? data.error : undefined,
+        cost: typeof data.cost === "number" ? data.cost : undefined,
+      }, wire)]
     }
 
     // --- requests to the user -------------------------------------------------

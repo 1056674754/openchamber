@@ -76,6 +76,15 @@ export type State = {
    * `useScopedBlockingForms` and the v2 dock surfaces.
    */
   nativeForm: Record<string, FormInfo[]>
+  /**
+   * v2-native transcript records the fork's user/assistant message store has
+   * no role for (OC2 spine S8): the plumbing notices (synthetic, system,
+   * skill, the switched notices), shells and compactions. Fed by the wire
+   * bridge's `message.record` / `message.record.delta` frames — always empty
+   * on the v1 track. Rendering these is a registered display gap; the channel
+   * exists so the records are translated and kept instead of dropped.
+   */
+  nativeRecords: Record<string, NativeSessionRecord[]>
   lsp: LspStatus[]
   vcs: VcsInfo | undefined
   limit: number
@@ -126,6 +135,36 @@ export type BridgeEventFrame =
       type: "message.tool.transition"
       properties: { sessionID?: string; messageID: string; partID: string; transition: Record<string, unknown> }
     }
+  | { type: "message.record"; properties: { sessionID: string; record: NativeSessionRecord } }
+  | { type: "message.record.delta"; properties: { sessionID: string; delta: string } }
+
+/**
+ * A v2-native transcript record the fork store keeps on the side (see
+ * `State.nativeRecords`). Shape mirrors what upstream's projection keeps for
+ * these roles, narrowed to the fields the records actually carry.
+ */
+export type NativeSessionRecord = {
+  id: string
+  role: "synthetic" | "system" | "skill" | "shell" | "compaction" | "location-switched" | "agent-switched" | "model-switched"
+  time?: { created?: number; completed?: number }
+  text?: string
+  description?: string
+  skill?: string
+  name?: string
+  directory?: string
+  agent?: string
+  previous?: unknown
+  model?: unknown
+  shellID?: string
+  command?: string
+  status?: string
+  exit?: number | null
+  output?: string
+  compactionStatus?: "running" | "completed" | "failed"
+  reason?: string
+  summary?: string
+  error?: unknown
+}
 
 export type DirectoryEventFrame = Event | FormEventFrame | BridgeEventFrame
 
@@ -182,6 +221,7 @@ export const INITIAL_STATE: State = {
   permission: {},
   form: {},
   nativeForm: {},
+  nativeRecords: {},
   lsp: [],
   vcs: undefined,
   limit: 5,

@@ -1272,6 +1272,35 @@ class OpencodeService {
 
     await waitForWorktreeBootstrap(requestDirectory);
 
+    // OC2 spine S8: a v2 shell is `session.shell` with the client-generated
+    // id; the shell record reaches the store through the event stream
+    // (`session.shell.*` → wire bridge), so there is no response body. The
+    // returned minimal record is an ACCEPTANCE RECEIPT for the signature, not
+    // a store record — the v2 caller must not materialize it (v2 has no user
+    // message echo to reconcile against).
+    const handle = this.resolveSdkHandle(requestDirectory, params.id, params.serverId ?? undefined);
+    if (handle.mode === 'v2') {
+      try {
+        await sendWithProviderCircuit(params.providerID, () =>
+          handle.client.session.shell({ sessionID: params.id, id: messageId, command: params.command }),
+        );
+      } catch (error) {
+        throw toV2SendError('Run shell command', error);
+      }
+      return {
+        info: {
+          id: messageId,
+          sessionID: params.id,
+          role: 'user',
+          agent: params.agent,
+          modelID: params.modelID,
+          providerID: params.providerID,
+          time: { created: Date.now() },
+        },
+        parts: [],
+      } as unknown as MessageWithParts;
+    }
+
     const remoteBaseUrl = resolveBaseUrlForSession(params.id, requestDirectory, params.serverId ?? undefined);
     const effectiveBase = remoteBaseUrl ?? this.baseUrl;
     const url = buildApiFetchUrl(
@@ -1317,6 +1346,22 @@ class OpencodeService {
   }
 
   async abortSession(id: string): Promise<boolean> {
+    // OC2 spine S8: v2 renamed the interrupt to `session.interrupt`, which
+    // answers whether a running turn was actually interrupted. Only route
+    // resolution is guarded — an interrupt failure must surface, never fall
+    // through to the v1 endpoint.
+    if (this.currentDirectory) {
+      let handle: ProtocolSdkHandle | null = null;
+      try {
+        handle = this.resolveSdkHandle(this.currentDirectory, id);
+      } catch {
+        handle = null;
+      }
+      if (handle?.mode === 'v2') {
+        const result = await handle.client.session.interrupt({ sessionID: id });
+        return Boolean((result as { interrupted?: unknown })?.interrupted);
+      }
+    }
     const response = await this.client.session.abort(
       {
         sessionID: id,
@@ -1362,6 +1407,28 @@ class OpencodeService {
   }
 
   async revertSession(sessionId: string, messageId: string, partId?: string): Promise<Session> {
+    // OC2 spine S8: v2 splits the revert into stage/commit/clear; staging
+    // alone is the v1 `revert` (nothing changes until it is committed).
+    if (this.currentDirectory) {
+      let handle: ProtocolSdkHandle | null = null;
+      try {
+        handle = this.resolveSdkHandle(this.currentDirectory, sessionId);
+      } catch {
+        handle = null;
+      }
+      if (handle?.mode === 'v2') {
+        // v2 stages the revert (nothing changes until a commit); the wrapper's
+        // contract returns the session record, so read it back after staging.
+        await handle.client.session.revert.stage({
+          sessionID: sessionId,
+          messageID: messageId,
+          ...(partId ? { partID: partId } : {}),
+        } as Parameters<typeof handle.client.session.revert.stage>[0]);
+        const refreshed = await handle.client.session.get({ sessionID: sessionId });
+        if (!refreshed) throw new Error('Failed to revert session');
+        return refreshed as unknown as Session;
+      }
+    }
     const response = await this.client.session.revert({
       sessionID: sessionId,
       ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),
@@ -1373,6 +1440,26 @@ class OpencodeService {
   }
 
   async unrevertSession(sessionId: string): Promise<Session> {
+    // OC2 spine S8: v2 has no `unrevert` — `session.revert.clear` drops the
+    // staged revert, which is what unrevert means once v2 stages instead of
+    // applying.
+    if (this.currentDirectory) {
+      let handle: ProtocolSdkHandle | null = null;
+      try {
+        handle = this.resolveSdkHandle(this.currentDirectory, sessionId);
+      } catch {
+        handle = null;
+      }
+      if (handle?.mode === 'v2') {
+        // `revert.clear` answers void; the cleared session comes back through
+        // the `session.revert.cleared` patch and is read back here for the
+        // wrapper's session contract.
+        await handle.client.session.revert.clear({ sessionID: sessionId });
+        const refreshed = await handle.client.session.get({ sessionID: sessionId });
+        if (!refreshed) throw new Error('Failed to unrevert session');
+        return refreshed as unknown as Session;
+      }
+    }
     const response = await this.client.session.unrevert({
       sessionID: sessionId,
       ...(this.currentDirectory ? { directory: this.currentDirectory } : {})
@@ -1382,6 +1469,27 @@ class OpencodeService {
   }
 
   async forkSession(sessionId: string, messageId?: string): Promise<Session> {
+    // OC2 spine S8: v2 replaced the fork boundary object with a single
+    // optional `before` message id (2.0.8); omitting it copies the whole
+    // transcript, matching the v1 messageID-less fork.
+    if (this.currentDirectory) {
+      let handle: ProtocolSdkHandle | null = null;
+      try {
+        handle = this.resolveSdkHandle(this.currentDirectory, sessionId);
+      } catch {
+        handle = null;
+      }
+      if (handle?.mode === 'v2') {
+        const forked = await handle.client.session.fork({
+          sessionID: sessionId,
+          ...(messageId ? { before: messageId } : {}),
+        });
+        if (!forked) {
+          throw new Error('Failed to fork session');
+        }
+        return forked as unknown as Session;
+      }
+    }
     const response = await this.client.session.fork({
       sessionID: sessionId,
       ...(this.currentDirectory ? { directory: this.currentDirectory } : {}),

@@ -21,6 +21,7 @@
 
 import { collectRecentTurns } from './context.js';
 import { buildAssistPrompt, buildAssistSystemPrompt } from './prompt.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from '../opencode/protocol-mode.js';
 
 const LOCAL_SERVER_ID = 'default';
 const IDLE_QUIET_MS = 60_000;
@@ -83,6 +84,10 @@ export const createSessionAssistRuntime = ({
 }) => {
   const timers = new Map();
   const inflight = new Set();
+  // Sessions holding an assist this process wrote, keyed to their directory
+  // (upstream segb cb7400923). Only the v2 track retires on a new turn; the
+  // v1 track keeps today's overwrite-only behavior byte-stable.
+  const persisted = new Map();
   let stopped = false;
 
   const clearTimer = (sessionId) => {
@@ -165,7 +170,38 @@ export const createSessionAssistRuntime = ({
         },
       },
     });
+    persisted.set(sessionId, directory);
     return assist;
+  };
+
+  // A new turn makes the stored recap and suggestion describe an older turn:
+  // delete them so "has a suggestion" in metadata means the same everywhere
+  // (upstream segb cb7400923). v2-gated: the v1 track keeps overwriting until
+  // the next assist, exactly as before.
+  const retireStored = (sessionId, directory) => {
+    if (!persisted.has(sessionId)) return;
+    const storedDirectory = persisted.get(sessionId);
+    persisted.delete(sessionId);
+    void (async () => {
+      const session = await fetchSession(sessionId, directory || storedDirectory);
+      const currentMetadata = session?.metadata && typeof session.metadata === 'object' ? session.metadata : {};
+      const currentNamespace = currentMetadata.openchamber && typeof currentMetadata.openchamber === 'object'
+        ? currentMetadata.openchamber
+        : {};
+      if (!Object.prototype.hasOwnProperty.call(currentNamespace, ASSIST_NAMESPACE)) return;
+      const nextNamespace = { ...currentNamespace };
+      delete nextNamespace[ASSIST_NAMESPACE];
+      await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, {
+        directory: directory || storedDirectory,
+        method: 'PATCH',
+        body: {
+          metadata: {
+            ...currentMetadata,
+            openchamber: nextNamespace,
+          },
+        },
+      });
+    })().catch(() => console.warn('[session-assist] failed to retire a stale assist'));
   };
 
   const generateAssist = async (sessionId, directory, armedAt) => {
@@ -320,6 +356,9 @@ export const createSessionAssistRuntime = ({
         armTimer(status.sessionID, dir);
       } else {
         clearTimer(status.sessionID);
+        if (resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2') {
+          retireStored(status.sessionID, dir);
+        }
       }
       return;
     }

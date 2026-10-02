@@ -327,4 +327,96 @@ describe("reducer bridge cases (v2-only event names)", () => {
       expect(result.materialization.type).toBe("incomplete-session-snapshot")
     }
   })
+
+  test("message.record keeps plumbing/shell/compaction records on the side channel", () => {
+    const draft = baseState()
+    const created = applyDirectoryEvent(draft, patchFrame({
+      type: "message.record",
+      properties: {
+        sessionID: "ses_1",
+        record: { id: "msg_9", role: "synthetic", text: "loop", time: { created: 1 } },
+      },
+    }))
+    expect(created).toBe(true)
+    // Never enters the user/assistant message store.
+    expect(draft.message["ses_1"]).toBeUndefined()
+    expect(draft.nativeRecords["ses_1"]).toEqual([
+      { id: "msg_9", role: "synthetic", text: "loop", time: { created: 1 } },
+    ])
+
+    // Same id replaces in place.
+    applyDirectoryEvent(draft, patchFrame({
+      type: "message.record",
+      properties: {
+        sessionID: "ses_1",
+        record: { id: "msg_9", role: "synthetic", text: "loop 2", time: { created: 1 } },
+      },
+    }))
+    expect(draft.nativeRecords["ses_1"]).toHaveLength(1)
+    expect(draft.nativeRecords["ses_1"]![0]!.text).toBe("loop 2")
+
+    // A shell's ended event names only the shell: matched by shellID.
+    applyDirectoryEvent(draft, patchFrame({
+      type: "message.record",
+      properties: {
+        sessionID: "ses_1",
+        record: { id: "msg_10", role: "shell", shellID: "sh_1", command: "ls", status: "running", time: { created: 2 } },
+      },
+    }))
+    const ended = applyDirectoryEvent(draft, patchFrame({
+      type: "message.record",
+      properties: {
+        sessionID: "ses_1",
+        record: { id: "shell:sh_1", role: "shell", shellID: "sh_1", status: "completed", exit: 0, output: "out", time: { created: 3, completed: 3 } },
+      },
+    }))
+    expect(ended).toBe(true)
+    expect(draft.nativeRecords["ses_1"]).toHaveLength(2)
+    expect(draft.nativeRecords["ses_1"]!.find((record) => record.role === "shell")).toMatchObject({
+      id: "shell:sh_1",
+      status: "completed",
+      command: "ls",
+    })
+  })
+
+  test("message.record.delta appends to the running compaction record", () => {
+    const draft = baseState()
+    applyDirectoryEvent(draft, patchFrame({
+      type: "message.record",
+      properties: {
+        sessionID: "ses_1",
+        record: { id: "msg_11", role: "compaction", compactionStatus: "running", summary: "", time: { created: 1 } },
+      },
+    }))
+
+    expect(applyDirectoryEvent(draft, patchFrame({
+      type: "message.record.delta",
+      properties: { sessionID: "ses_1", delta: "sum" },
+    }))).toBe(true)
+    expect(applyDirectoryEvent(draft, patchFrame({
+      type: "message.record.delta",
+      properties: { sessionID: "ses_1", delta: "mary" },
+    }))).toBe(true)
+    expect(draft.nativeRecords["ses_1"]![0]).toMatchObject({ role: "compaction", summary: "summary" })
+
+    // No running record: the delta is dropped, matching upstream semantics.
+    const empty = baseState()
+    expect(applyDirectoryEvent(empty, patchFrame({
+      type: "message.record.delta",
+      properties: { sessionID: "ses_1", delta: "x" },
+    }))).toBe(false)
+  })
+
+  test("records without identity or role are dropped", () => {
+    const draft = baseState()
+    expect(applyDirectoryEvent(draft, patchFrame({
+      type: "message.record",
+      properties: { sessionID: "ses_1", record: { role: "synthetic" } },
+    }))).toBe(false)
+    expect(applyDirectoryEvent(draft, patchFrame({
+      type: "message.record",
+      properties: { sessionID: "", record: { id: "msg_1", role: "synthetic" } },
+    }))).toBe(false)
+    expect(draft.nativeRecords?.["ses_1"]).toBeUndefined()
+  })
 })

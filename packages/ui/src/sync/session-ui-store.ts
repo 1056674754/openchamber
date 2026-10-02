@@ -195,6 +195,31 @@ export async function routeMessage(params: {
     if (!shellAgent) {
       throw new Error("Cannot run shell command: agent is not selected")
     }
+
+    // OC2 spine S8: a v2 shell has no user-message echo — `session.shell`
+    // creates a shell record that arrives through the event stream. Sending
+    // through the optimistic user-message path would strand that message
+    // forever (the server never echoes it), so v2 sends directly and the
+    // v2 execution events drive the status. The v1 path below is untouched.
+    let shellProtocolMode: 'v1' | 'v2' = 'v1'
+    try {
+      shellProtocolMode = opencodeClient.resolveSdkHandle(sessionDirectory, params.sessionId, targetServerId ?? undefined).mode
+    } catch {
+      // Unresolvable (e.g. unregistered remote): keep the v1 routing.
+    }
+    if (shellProtocolMode === "v2") {
+      await opencodeClient.sendShell({
+        id: params.sessionId,
+        providerID: params.providerID,
+        modelID: params.modelID,
+        command: params.content,
+        agent: shellAgent,
+        directory: sessionDirectory,
+        serverId: targetServerId,
+      })
+      return
+    }
+
     return optimisticSend({
       sessionId: params.sessionId,
       content: USER_SHELL_MARKER_TEXT,

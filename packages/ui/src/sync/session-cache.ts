@@ -7,7 +7,7 @@ import type {
   Todo,
 } from "@opencode-ai/sdk/v2/client"
 import type { FormRequest } from "@/types/form"
-import type { FileDiff } from "./types"
+import type { FileDiff, NativeSessionRecord } from "./types"
 
 type SessionCache = {
   session_status: Record<string, SessionStatus | undefined>
@@ -19,6 +19,7 @@ type SessionCache = {
   permission: Record<string, PermissionRequest[] | undefined>
   form: Record<string, FormRequest[] | undefined>
   nativeForm?: Record<string, FormInfo[] | undefined>
+  nativeRecords?: Record<string, NativeSessionRecord[] | undefined>
 }
 
 export function getProtectedSessionCacheIds(store: SessionCache): Set<string> {
@@ -95,6 +96,9 @@ export function dropSessionCaches(store: SessionCache, sessionIDs: Iterable<stri
     delete store.form[sessionID]
     if (store.nativeForm) {
       delete store.nativeForm[sessionID]
+    }
+    if (store.nativeRecords) {
+      delete store.nativeRecords[sessionID]
     }
   }
 }
