@@ -17,7 +17,7 @@ import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { reconstructOriginalContentFromPatch } from './patchReconstruction';
 import type { BridgeContext, BridgeResponse } from './bridge';
-import { isEnterpriseMode } from '../../web/server/lib/enterprise-mode.js';
+import { isEnterpriseMode, publicEnterprisePolicy } from '../../web/server/lib/enterprise-mode.js';
 
 type BridgeMessageInput = {
   id: string;
@@ -332,6 +332,13 @@ export async function handleSystemBridgeMessage(
     case 'api:zen:models': {
       const models = await fetchFreeZenModels();
       return { id, type, success: true, data: { models } };
+    }
+
+    // The same machine policy the web server enforces (policy file or
+    // OPENCHAMBER_ENTERPRISE_MODE in the editor's environment); the
+    // extension runs no OpenChamber server, so the webview reads it here.
+    case 'api:openchamber:enterprise-policy': {
+      return { id, type, success: true, data: publicEnterprisePolicy() };
     }
 
     case 'api:openchamber:update-check': {

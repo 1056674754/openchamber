@@ -1255,6 +1255,16 @@ const handleLocalApiRequest = async (url: URL, init?: RequestInit) => {
     });
   }
 
+  if (pathname === '/api/openchamber/enterprise-policy' && method === 'GET') {
+    try {
+      const data = await sendBridgeMessage('api:openchamber:enterprise-policy');
+      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(JSON.stringify({ error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (pathname === '/api/openchamber/sessions/markers' && method === 'GET') {
     return new Response(JSON.stringify({ version: 0, sessions: {} }), {
       status: 200,
