@@ -8,10 +8,14 @@
 // Scan strategy (in order):
 // 1. Capawesome startScan (CameraX behind WebView). Patched to emit on the first
 //    ML Kit decode (upstream default is 10 consistent votes).
-// 2. Web BarcodeDetector + getUserMedia when Capawesome is unavailable.
-// 3. Capawesome scan() Google Code Scanner — often unavailable without GMS module.
+// 2. HarmonyOS shell: HMS Scan Kit default UI (one-shot) via the ArkTS bridge —
+//    the ArkWeb http origin has no getUserMedia, so web fallbacks cannot work.
+// 3. Web BarcodeDetector + getUserMedia when Capawesome is unavailable.
+// 4. Capawesome scan() Google Code Scanner — often unavailable without GMS module.
 
+import { getOhosScannerPlugin } from '@/apps/nativeShell';
 import { parsePairingConnectionPayload, type PairingConnectionPayload } from '@/lib/connectionPayload';
+import { isOhosApp } from '@/lib/platform';
 
 export type MobileConnectionPayload = {
   url: string;
@@ -70,6 +74,8 @@ let activeScanCancel: (() => void) | null = null;
 
 const getScannerPlugin = (): BarcodeScannerPlugin | null => {
   if (typeof window === 'undefined') return null;
+  const ohosPlugin = getOhosScannerPlugin();
+  if (ohosPlugin) return ohosPlugin;
   const capacitor = (window as typeof window & {
     Capacitor?: { Plugins?: Record<string, unknown> };
   }).Capacitor;
@@ -384,6 +390,21 @@ export const scanConnectionQr = async (): Promise<QrScanResult> => {
     // Native Capacitor: Capawesome CameraX first (real preview + patched first-decode).
     if (plugin && typeof plugin.startScan === 'function') {
       return await scanWithCameraPreview(plugin);
+    }
+
+    // HarmonyOS shell: HMS Scan Kit system UI before any web fallback — the
+    // ArkWeb page runs on an insecure (intercepted http) origin, so getUserMedia
+    // and BarcodeDetector are unavailable there.
+    if (plugin && isOhosApp() && typeof plugin.scan === 'function') {
+      const result = await plugin.scan({ formats: ['QR_CODE'] });
+      logScan('ohos-result', { hasResult: Boolean(result), count: result?.barcodes?.length ?? -1 });
+      // undefined = bridge error/timeout (never maps to 'cancelled').
+      if (!result) return { status: 'failed' };
+      const barcode = result.barcodes?.[0];
+      const raw = (barcode?.rawValue ?? barcode?.displayValue ?? '').trim();
+      // Empty = the scan UI closed without a decode — a genuine cancel.
+      if (!raw) return { status: 'cancelled' };
+      return payloadFromRaw(raw);
     }
 
     // Browser / fallback only — skip on native when Capawesome exists (handled above).

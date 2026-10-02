@@ -6,6 +6,7 @@ import {
   getInitialSessionSidebarRowIndexes,
   mergeSessionSidebarVirtualIndexes,
 } from './sessionSidebarVirtualization';
+import { isOhosApp } from '@/lib/platform';
 
 type Props = {
   model: SessionSidebarRowModel;
@@ -30,6 +31,10 @@ export function SessionSidebarRows({
   onFirstVisibleIndexChange,
 }: Props): React.ReactNode {
   const rows = model.rows;
+  // ArkWeb scroll-event delivery breaks the virtualizer's measurements (rows
+  // unmount mid-scroll, totalSize inflates → growing blank spacer). On ohos
+  // render every row directly and derive the first visible index from the DOM.
+  const disableVirtualization = isOhosApp();
   const getScrollElement = React.useCallback(() => scrollElement, [scrollElement]);
   const estimateSize = React.useCallback((index: number) => rows[index]?.estimateSize ?? 32, [rows]);
   const getItemKey = React.useCallback((index: number) => rows[index]?.key ?? index, [rows]);
@@ -39,7 +44,7 @@ export function SessionSidebarRows({
 
   const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
     count: rows.length,
-    enabled: scrollElement !== null,
+    enabled: scrollElement !== null && !disableVirtualization,
     getScrollElement,
     estimateSize,
     getItemKey,
@@ -56,8 +61,42 @@ export function SessionSidebarRows({
     : 0;
   const firstVisibleIndex = findFirstVisibleSessionSidebarRowIndex(virtualItems, scrollOffset);
   React.useLayoutEffect(() => {
+    if (disableVirtualization) return;
     onFirstVisibleIndexChange(firstVisibleIndex);
-  }, [firstVisibleIndex, onFirstVisibleIndexChange]);
+  }, [disableVirtualization, firstVisibleIndex, onFirstVisibleIndexChange]);
+
+  // Non-virtualized ohos path: all rows rendered; first-visible derived from
+  // the DOM on scroll (drives the sticky group header).
+  React.useEffect(() => {
+    if (!disableVirtualization || !scrollElement) return;
+    const onScroll = (): void => {
+      const scrollerTop = scrollElement.getBoundingClientRect().top;
+      let first = 0;
+      for (const node of scrollElement.querySelectorAll('[data-sidebar-static-index]')) {
+        const rect = node.getBoundingClientRect();
+        if (rect.bottom > scrollerTop) {
+          first = Number((node as HTMLElement).dataset.sidebarStaticIndex);
+          break;
+        }
+      }
+      onFirstVisibleIndexChange(first);
+    };
+    onScroll();
+    scrollElement.addEventListener('scroll', onScroll, { passive: true });
+    return () => scrollElement.removeEventListener('scroll', onScroll);
+  }, [disableVirtualization, scrollElement, onFirstVisibleIndexChange, rows]);
+
+  if (disableVirtualization) {
+    return <div>
+      {rows.map((row, index) => {
+        return <div
+          key={row.key}
+          data-sidebar-static-index={index}
+          className={sectionSpacingAfter(row, rows[index + 1])}
+        >{renderRow(row, index)}</div>;
+      })}
+    </div>;
+  }
 
   if (!scrollElement) {
     const indexes = getInitialSessionSidebarRowIndexes(rows.length);

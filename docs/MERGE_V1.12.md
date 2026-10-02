@@ -141,7 +141,7 @@
 | 主题 | 状态 | 说明 |
 |---|---|---|
 | Oniro Capacitor-OpenHarmony | 不采用 | 0.1.x、插件不全；不进 #9 |
-| ArkUI / 鸿蒙原生壳 | 不做（本轨） | 若做鸿蒙 App，优先独立 WI，不绑 Capacitor |
+| ArkUI / 鸿蒙原生壳 | 已启动（独立轨道） | `packages/harmony`：ArkTS 薄壳 + ArkWeb 复用同一份 web 构建（不绑 Capacitor）；见 `packages/harmony/README.md` |
 | 鸿蒙 NEXT 官方支持 | 未规划 | 用户可自测 Android APK；失败不阻塞 #9 |
 | App Store / 华为商店上架与签名流水线 | 有意延期（P2） | [#50](https://coding.s-s.city/songsong/openchamber/-/work_items/50) |
 | APNs / FCM Push | 有意延期（P2） | [#49](https://coding.s-s.city/songsong/openchamber/-/work_items/49) |

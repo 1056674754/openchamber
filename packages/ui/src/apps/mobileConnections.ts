@@ -5,9 +5,10 @@
 //
 // Persistence model (deliberately simple so it is correct-by-inspection):
 //   - Instance *metadata* (id/label/url/lastUsedAt + a `hasToken` flag) lives in
-//     localStorage. On native it NEVER contains the client token.
+//     localStorage. On native shells it NEVER contains the client token.
 //   - The client token lives in the OS secure store (iOS Keychain / Android
-//     Keystore) via @aparajita/capacitor-secure-storage, keyed per instance URL.
+//     Keystore via @aparajita/capacitor-secure-storage; HarmonyOS asset store
+//     via the ArkTS bridge) keyed per instance URL.
 //   - On web (browser-hosted mobile.html) there is no secure store, so the token
 //     stays inline in localStorage — that surface is not the native security target.
 //
@@ -18,9 +19,10 @@ import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { Capacitor } from '@capacitor/core';
 import React from 'react';
 
+import { ohosHttpRequest, ohosSecureGet, ohosSecureRemove, ohosSecureSet } from '@/apps/nativeShell';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
-import { isCapacitorApp } from '@/lib/platform';
+import { isCapacitorApp, isNativeShellApp, isOhosApp } from '@/lib/platform';
 import { adoptRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { addRuntimeProxyHeaders, runtimeFetch } from '@/lib/runtime-fetch';
@@ -54,9 +56,10 @@ const getMobileDeviceId = (): string => {
 const mobileClientDedupeKey = (): string => `mobile:${getMobileDeviceId()}`;
 
 // Display-only device metadata shown in the server's device list ("iOS",
-// "Android"). Capacitor knows the native platform; no extra plugin needed.
+// "Android", "ohos"). Capacitor knows the native platform; no extra plugin needed.
 const mobileDevicePlatform = (): string | undefined => {
   try {
+    if (isOhosApp()) return 'ohos';
     const platform = Capacitor.getPlatform();
     return platform === 'ios' || platform === 'android' ? platform : undefined;
   } catch {
@@ -425,7 +428,26 @@ const getJsonRequestData = (body: BodyInit | null | undefined): unknown => {
 };
 
 const nativeHttpRequest = async (url: string, init?: RequestInit): Promise<MobileFetchResponse | null> => {
-  if (!isCapacitorApp()) return null;
+  if (!isCapacitorApp() && !isOhosApp()) return null;
+  if (isOhosApp()) {
+    // ArkWeb blocks cors-mode cross-origin fetches to LAN IPs inside the
+    // renderer — the native bridge is the only path (CapacitorHttp equivalent).
+    const headers = Object.fromEntries(addRuntimeProxyHeaders(url, new Headers(init?.headers)).entries());
+    const body = typeof init?.body === 'string' ? init.body : null;
+    const response = await ohosHttpRequest({
+      url,
+      method: init?.method || 'GET',
+      headers,
+      body,
+    });
+    if (!response) return null;
+    return {
+      ok: response.status >= 200 && response.status < 300,
+      status: response.status,
+      source: 'native-http',
+      json: async () => parseMaybeJson(response.text),
+    };
+  }
   try {
     const { CapacitorHttp } = await import('@capacitor/core');
     const headers = Object.fromEntries(addRuntimeProxyHeaders(url, new Headers(init?.headers)).entries());
@@ -636,7 +658,7 @@ const readConnections = (): MobileSavedConnection[] => {
     return [];
   }
   if (!Array.isArray(parsed)) return [];
-  const native = isCapacitorApp();
+  const native = isNativeShellApp();
   return parsed
     .flatMap((item): MobileSavedConnection[] => {
       if (!item || typeof item !== 'object') return [];
@@ -669,7 +691,7 @@ const serializeCandidate = (c: MobileTransportCandidate): unknown =>
 
 const writeConnections = (connections: MobileSavedConnection[]): void => {
   if (typeof window === 'undefined') return;
-  const native = isCapacitorApp();
+  const native = isNativeShellApp();
   const serialized = connections.slice(0, MOBILE_CONNECTIONS_LIMIT).map((c) => {
     // grant/token never land here — only transport metadata.
     const shared = {
@@ -696,7 +718,7 @@ const upsertConnectionInList = (
   const existing = connections.find(
     (item) => (draft.id && item.id === draft.id) || candidateSetsMatch(item.candidates, draft.candidates),
   );
-  const native = isCapacitorApp();
+  const native = isNativeShellApp();
   const next: MobileSavedConnection = {
     id: draft.id || existing?.id || crypto.randomUUID(),
     label: draft.label,
@@ -752,7 +774,7 @@ const withTimeout = async <T,>(operation: Promise<T>, fallback: T): Promise<T> =
 
 // Bound a native Keychain call so a stalled/failed bridge can never hang the flow.
 const boundedSecure = async <T,>(label: string, run: () => Promise<T>, fallback: T): Promise<T> => {
-  if (!isCapacitorApp()) return fallback;
+  if (!isNativeShellApp()) return fallback;
   return withTimeout(
     run().catch((error) => {
       console.warn(`[mobile-storage] ${label} failed`, error);
@@ -764,11 +786,13 @@ const boundedSecure = async <T,>(label: string, run: () => Promise<T>, fallback:
 
 const readSecureToken = async (key: string): Promise<string | undefined> => {
   logStorage('secure:read-start', { key });
-  const value = await boundedSecure(
-    'secure:read',
-    async () => (await nativeSecure.internalGetItem({ prefixedKey: prefixedTokenKey(key), sync: false })).data,
-    null,
-  );
+  const value = isOhosApp()
+    ? await withTimeout(ohosSecureGet(prefixedTokenKey(key)), null)
+    : await boundedSecure(
+        'secure:read',
+        async () => (await nativeSecure.internalGetItem({ prefixedKey: prefixedTokenKey(key), sync: false })).data,
+        null,
+      );
   const token = typeof value === 'string' && value.trim() ? value : undefined;
   logStorage('secure:read', { key, hasToken: Boolean(token) });
   return token;
@@ -776,20 +800,26 @@ const readSecureToken = async (key: string): Promise<string | undefined> => {
 
 const writeSecureToken = async (key: string, token: string): Promise<boolean> => {
   logStorage('secure:write-start', { key });
-  const ok = await boundedSecure('secure:write', async () => {
-    await nativeSecure.internalSetItem({
-      prefixedKey: prefixedTokenKey(key),
-      data: token,
-      sync: false,
-      access: KEYCHAIN_ACCESS_WHEN_UNLOCKED,
-    });
-    return true;
-  }, false);
+  const ok = isOhosApp()
+    ? await withTimeout(ohosSecureSet(prefixedTokenKey(key), token), false)
+    : await boundedSecure('secure:write', async () => {
+        await nativeSecure.internalSetItem({
+          prefixedKey: prefixedTokenKey(key),
+          data: token,
+          sync: false,
+          access: KEYCHAIN_ACCESS_WHEN_UNLOCKED,
+        });
+        return true;
+      }, false);
   logStorage('secure:write', { key, ok });
   return ok;
 };
 
 const deleteSecureToken = async (key: string): Promise<void> => {
+  if (isOhosApp()) {
+    await withTimeout(ohosSecureRemove(prefixedTokenKey(key)), false);
+    return;
+  }
   await boundedSecure('secure:delete', async () => {
     await nativeSecure.internalRemoveItem({ prefixedKey: prefixedTokenKey(key), sync: false });
     return true;
@@ -827,7 +857,7 @@ export const migrateLegacyInlineTokenRecords = async (
 };
 
 const migrateLegacyInlineTokens = async (): Promise<void> => {
-  if (typeof window === 'undefined' || !isCapacitorApp()) return;
+  if (typeof window === 'undefined' || !isNativeShellApp()) return;
   let parsed: unknown;
   try {
     parsed = JSON.parse(window.localStorage.getItem(MOBILE_CONNECTIONS_STORAGE_KEY) || '[]');
@@ -868,7 +898,7 @@ export const upsertMobileConnection = async (
 ): Promise<MobileSavedConnection[]> => {
   const next = upsertConnectionInList(readConnections(), connection);
   writeConnections(next);
-  if (isCapacitorApp() && connection.clientToken) {
+  if (isNativeShellApp() && connection.clientToken) {
     await writeSecureToken(secureTokenKeyOf({ candidates: connection.candidates }), connection.clientToken);
   }
   return next;
@@ -879,7 +909,7 @@ export const deleteMobileConnection = async (id: string): Promise<MobileSavedCon
   const removed = connections.find((connection) => connection.id === id) ?? null;
   const next = connections.filter((connection) => connection.id !== id);
   writeConnections(next);
-  if (removed && isCapacitorApp()) await deleteSecureToken(secureTokenKeyOf(removed));
+  if (removed && isNativeShellApp()) await deleteSecureToken(secureTokenKeyOf(removed));
   return next;
 };
 
@@ -950,7 +980,7 @@ const probeConnectionCandidates = async (
       // and not auth-disabled) is not enough — the native runtime transport needs a
       // bearer token, so fall through to the password flow to mint one.
       const authDisabled = status?.disabled === true;
-      if (!token && isCapacitorApp() && !authDisabled && status?.scope !== 'client') return { status: 'needs-login' };
+      if (!token && isNativeShellApp() && !authDisabled && status?.scope !== 'client') return { status: 'needs-login' };
       return { status: 'ok', transport: { kind: 'direct', url } };
     }
     return { status: 'unreachable' };
@@ -1101,7 +1131,7 @@ export const autoConnectLastInstance = async (options?: {
   // falsely "succeed" into a black main shell. Skip auto-connect; user must
   // re-pair / enter a real LAN or relay candidate.
   if (
-    isCapacitorApp()
+    isNativeShellApp()
     && candidate.candidates.every((entry) => entry.kind === 'direct' && isLoopbackDirectUrl(entry.url))
   ) {
     return false;
@@ -1110,7 +1140,7 @@ export const autoConnectLastInstance = async (options?: {
   // Tokenless is valid when the server had auth disabled. Fail only when the
   // saved metadata says a token exists but its secure value cannot be read.
   let token: string | undefined;
-  if (isCapacitorApp()) {
+  if (isNativeShellApp()) {
     if (candidate.hasToken) {
       token = await readSecureToken(secureTokenKeyOf(candidate));
       if (isExpectedMobileTokenMissing(candidate.hasToken, token)) return false;
@@ -1131,7 +1161,7 @@ export const autoConnectLastInstance = async (options?: {
   // Refuse a "success" that landed on loopback from a native device — same
   // false-positive as above when a mixed candidate set somehow resolves local.
   if (
-    isCapacitorApp()
+    isNativeShellApp()
     && result.transport.kind === 'direct'
     && isLoopbackDirectUrl(result.transport.url)
   ) {
@@ -1198,7 +1228,7 @@ export const pairingCandidatesToMobile = (candidates: PairingEndpointCandidate[]
   // Mac. A false local /health used to win redeem and surface as
   // "Authentication required". Keep loopback only when it is the sole path
   // (USB `adb reverse` / emulator). Otherwise drop it entirely.
-  if (!isCapacitorApp()) return mapped;
+  if (!isNativeShellApp()) return mapped;
   const preferred = mapped.filter((c) => c.kind !== 'direct' || !isLoopbackDirectUrl(c.url));
   if (preferred.length > 0) return preferred;
   return mapped;
@@ -1269,13 +1299,13 @@ const establishLiveTransport = async (
     // http://127.0.0.1 hit without adb-reverse can look "healthy" while not
     // being the desktop. Require serverId match when we know the expected
     // host identity (pairing/reconnect with a relay candidate).
-    if (isCapacitorApp() && isLoopbackDirectUrl(url)) {
+    if (isNativeShellApp() && isLoopbackDirectUrl(url)) {
       logConnect('establish:direct:try-loopback', { url, expectedServerId });
     }
     const health = await requestWithTimeout(`${url}/health`, { method: 'GET' });
     logConnect('establish:direct:health', { ok: health?.ok === true, status: health?.status ?? null, url });
     if (!health?.ok) continue;
-    if (expectedServerId || (isCapacitorApp() && isLoopbackDirectUrl(url))) {
+    if (expectedServerId || (isNativeShellApp() && isLoopbackDirectUrl(url))) {
       const payload = await health.json().catch(() => null);
       const reported = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).serverId : null;
       if (expectedServerId) {
@@ -1283,7 +1313,7 @@ const establishLiveTransport = async (
           logConnect('establish:server-id-mismatch', { url, reported: reported ?? null, expectedServerId });
           continue;
         }
-      } else if (isCapacitorApp() && isLoopbackDirectUrl(url)) {
+      } else if (isNativeShellApp() && isLoopbackDirectUrl(url)) {
         // No expected id (URL-only connect): refuse Capacitor's own shell.
         if (typeof reported !== 'string' || !reported) {
           logConnect('establish:direct:reject-local-shell', { url });
@@ -1361,7 +1391,7 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
   if (!active) return 'no-connection';
 
   let token: string | undefined;
-  if (isCapacitorApp()) {
+  if (isNativeShellApp()) {
     token = active.hasToken ? await readSecureToken(secureTokenKeyOf(active)) : undefined;
   } else {
     token = active.clientToken;
@@ -1617,7 +1647,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       let token = input.clientToken?.trim() || undefined;
       const tokenIsNew = Boolean(token);
       if (!token) {
-        if (isCapacitorApp()) {
+        if (isNativeShellApp()) {
           if (saved?.hasToken) token = await readSecureToken(secureTokenKeyOf({ candidates }));
         } else {
           token = saved?.clientToken;
@@ -1647,7 +1677,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
 
       // Connected. Persist a user-supplied token before switching so a cold
       // restart won't re-prompt.
-      if (token && tokenIsNew && isCapacitorApp()) {
+      if (token && tokenIsNew && isNativeShellApp()) {
         await writeSecureToken(secureTokenKeyOf({ candidates }), token);
       }
       persistMetadata({ id: saved?.id, label, candidates, clientToken: token });
@@ -1733,7 +1763,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // 3. Persist the device with ALL its candidates + one token, then switch to
       // whichever transport answered. Reconnect re-probes the full set so the
       // device works at home (direct) and away (relay) with no re-pairing.
-      if (isCapacitorApp()) {
+      if (isNativeShellApp()) {
         const stored = await writeSecureToken(secureTokenKeyOf({ candidates: deviceCandidates }), issuedToken);
         if (!stored) {
           setFailure('storage-failed');
@@ -1809,7 +1839,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       // the native runtime transport; a cookie-only success is only enough for a
       // direct connection in a browser.
       if (!issuedToken) {
-        if (chosen.kind === 'direct' && !isCapacitorApp()) {
+        if (chosen.kind === 'direct' && !isNativeShellApp()) {
           persistMetadata({ id, label, candidates });
           setPendingConnection(null);
           switchToTransport({ kind: 'direct', url: chosen.url }, null, { runtimeKey: secureTokenKeyOf({ candidates }) });
@@ -1822,7 +1852,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       }
 
       // Persist the token BEFORE switching (no fire-and-forget).
-      if (isCapacitorApp()) {
+      if (isNativeShellApp()) {
         await writeSecureToken(secureTokenKeyOf({ candidates }), issuedToken);
       }
       persistMetadata({ id, label, candidates, clientToken: issuedToken });
@@ -1879,7 +1909,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     const clientToken = input.clientToken?.trim() || undefined;
     const label = input.label?.trim() || getConnectionLabel(connectionDisplayUrl({ candidates }));
     // Awaited token writes so "Save" truly persisted the secret before returning.
-    if (isCapacitorApp()) {
+    if (isNativeShellApp()) {
       const nextKey = secureTokenKeyOf({ candidates });
       if (clientToken) {
         await writeSecureToken(nextKey, clientToken);

@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "OpenChamber HarmonyOS shell"
+    },
+    {
+      "name": "ability_desc",
+      "value": "OpenChamber native shell"
+    },
+    {
+      "name": "camera_permission_reason",
+      "value": "Scan OpenChamber pairing QR codes"
+    }
+  ]
+}

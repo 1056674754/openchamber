@@ -32,7 +32,7 @@ import { cn } from '@/lib/utils';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 import { syncSessionSwitcherWithDrawer } from '@/components/layout/mobileLeftDrawerSync';
 import { BREAKPOINTS } from '@/lib/device';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeShellApp } from '@/lib/platform';
 import { useLastSessionRestore } from '@/hooks/useLastSessionRestore';
 import { MobileWorkspaceDrawerContent } from './MobileWorkspaceDrawerContent';
 
@@ -98,7 +98,7 @@ export const MainLayout: React.FC = () => {
     const useTabletSplitLayout = tabletLayout.enabled
       && (screenWidth >= BREAKPOINTS.md || tabletLayout.roomyForPanels);
     const useMobileDrawers = isMobile && !useTabletSplitLayout;
-    useLastSessionRestore(useMobileDrawers && isCapacitorApp());
+    useLastSessionRestore(useMobileDrawers && isNativeShellApp());
 
     React.useEffect(() => {
       if (useTabletSplitLayout) {
@@ -280,7 +280,7 @@ export const MainLayout: React.FC = () => {
                   // a large gap under the composer (unlike DeepSeek-style flush).
                   useMobileDrawers
                   && visualViewport.height > 0
-                  && !isCapacitorApp()
+                  && !isNativeShellApp()
                 ) ? { height: visualViewport.height } : undefined}
             >
                 <CommandPalette />

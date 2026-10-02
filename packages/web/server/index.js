@@ -1736,6 +1736,16 @@ function installLoopbackCors(app) {
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
+      // Chromium's Private Network Access: any request a browser sends from a
+      // local context to this server counts as a private-network request and is
+      // preflighted with Access-Control-Request-Private-Network. Without the
+      // matching grant header the preflight dies and the request never happens
+      // (observed on ArkWeb/HarmonyOS shells fetching the LAN server). This
+      // server is a LAN service by design — pairing exists precisely so only
+      // trusted devices may talk to it — so grant it.
+      if (req.headers['access-control-request-private-network'] === 'true') {
+        res.setHeader('Access-Control-Allow-Private-Network', 'true');
+      }
       res.setHeader('Vary', 'Origin');
     }
     if (req.method === 'OPTIONS') {

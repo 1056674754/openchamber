@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { UpdateInfo, UpdateProgress } from '@/lib/desktop';
 import { getDeviceInfo } from '@/lib/device';
-import { getClientPlatform, isCapacitorApp } from '@/lib/platform';
+import { getClientPlatform, isNativeShellApp } from '@/lib/platform';
 import { useUIStore } from './useUIStore';
 import {
   checkForDesktopUpdates,
@@ -64,10 +64,10 @@ function detectArch(): 'arm64' | 'x64' | 'unknown' {
   return 'unknown';
 }
 
-function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' | 'android' | 'ios' {
-  if (isCapacitorApp()) {
+function detectPlatform(): 'macos' | 'windows' | 'linux' | 'web' | 'android' | 'ios' | 'ohos' {
+  if (isNativeShellApp()) {
     const client = getClientPlatform();
-    if (client === 'android' || client === 'ios') return client;
+    if (client === 'android' || client === 'ios' || client === 'ohos') return client;
   }
   if (typeof navigator === 'undefined') return 'web';
   const platform = (navigator.platform || '').toLowerCase();
@@ -148,7 +148,7 @@ async function checkForWebUpdates(runtime: ClientRuntime, currentVersion?: strin
 }
 
 function detectRuntimeType(): 'desktop' | 'web' | 'vscode' | 'mobile' | null {
-  if (isCapacitorApp()) return 'mobile';
+  if (isNativeShellApp()) return 'mobile';
   if (isElectronShell()) {
     // Only use the desktop updater when we're on the local instance.
     // When viewing a remote host inside the desktop shell, treat update as web update.

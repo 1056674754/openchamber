@@ -33,6 +33,15 @@ describe('request security runtime', () => {
       },
       socket: {},
     })).resolves.toBe(true);
+
+    // HarmonyOS ArkWeb shell — intercepted virtual https domain (see request-security.js).
+    await expect(runtime.isRequestOriginAllowed({
+      headers: {
+        origin: 'https://app.openchamber.local',
+        host: '192.168.1.130:1202',
+      },
+      socket: {},
+    })).resolves.toBe(true);
   });
 
   test('rejects unknown origins', async () => {

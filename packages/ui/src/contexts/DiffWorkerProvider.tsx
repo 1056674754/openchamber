@@ -6,7 +6,7 @@ import { useOptionalThemeSystem } from './useThemeSystem';
 import { workerFactory } from '@/lib/diff/workerFactory';
 import { ensurePierreThemeRegistered } from '@/lib/shiki/appThemeRegistry';
 import { getDefaultTheme } from '@/lib/theme/themes';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeShellApp } from '@/lib/platform';
 // NOTE: keep provider lightweight; avoid main-thread diff parsing here.
 
 // Preload common languages for faster initial diff rendering
@@ -131,7 +131,7 @@ export const DiffWorkerProvider: React.FC<DiffWorkerProviderProps> = ({ children
   );
 
   // Capacitor: skip eager dual-pool warmup; first useWorkerPool() creates pools.
-  if (isCapacitorApp()) {
+  if (isNativeShellApp()) {
     return <>{children}</>;
   }
 

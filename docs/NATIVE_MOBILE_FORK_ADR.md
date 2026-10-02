@@ -26,7 +26,7 @@ Today’s phone path without a native shell remains: browser/PWA against a deskt
 1. First cut must ship a real Capacitor iOS + Android shell that can chat against a LAN/desktop host.
 2. Connection must register a fork `serverId` and keep `serverRegistry` authoritative; do not treat bare `switchRuntimeEndpoint` as a replacement for the registry.
 3. Shared UI components stay in `packages/ui`; the app shell entry may differ (`MobileApp` vs `main.tsx` → `App`).
-4. HarmonyOS is out of DoD: users may sideload the Android APK at their own risk; Oniro/ArkUI are separate future WIs if ever pursued.
+4. HarmonyOS is out of DoD: users may sideload the Android APK at their own risk; Oniro/ArkUI are separate future WIs if ever pursued. **Update (2026-09-19): the HarmonyOS track started as its own WI** — `packages/harmony`, a thin ArkTS/ArkWeb shell reusing the same `MobileApp` web build (no Capacitor/Oniro, per the "independent WI, not bound to Capacitor" decision below). See `packages/harmony/README.md`.
 5. Store distribution, Push, and mobile pairing wait until the shell exists and #16 desktop transport work progresses.
 
 ## Decision

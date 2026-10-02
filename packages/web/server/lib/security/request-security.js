@@ -2,10 +2,18 @@ export const createRequestSecurityRuntime = (deps) => {
   const { readSettingsFromDiskMigrated } = deps;
 
   // Packaged clients whose WebView Origin never matches the server host.
+  // `http://app.openchamber.localhost` is the HarmonyOS (ArkWeb) shell: the
+  // `.localhost` TLD is a potentially-trustworthy origin (secure context, so
+  // crypto.subtle exists for the relay E2EE handshake) while staying plain http,
+  // so the page can fetch http://LAN-IP servers without hitting mixed-content
+  // blocking. The older https://app.openchamber.local origin is kept for
+  // already-installed shells.
   const packagedClientOrigins = new Set([
     'openchamber-ui://app',
     'capacitor://localhost',
     'https://localhost',
+    'https://app.openchamber.local',
+    'http://app.openchamber.localhost',
   ]);
 
   const getUiSessionTokenFromRequest = (req) => {

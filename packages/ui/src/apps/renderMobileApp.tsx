@@ -16,8 +16,8 @@ import { startTypographyWatcher } from '@/lib/typographyWatcher';
 import { MobileApp } from '@/apps/MobileApp';
 import { markAppBootReady } from '@/apps/appBootReady';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
-import { applyCapacitorRootClass } from '@/hooks/nativeMobileChrome';
-import { isCapacitorApp } from '@/lib/platform';
+import { applyCapacitorRootClass, applyOhosRootClass } from '@/hooks/nativeMobileChrome';
+import { isNativeShellApp, isOhosApp } from '@/lib/platform';
 import { setContextPanelSessionIdProvider } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
@@ -52,9 +52,10 @@ export const renderMobileApp = (apis: RuntimeAPIs): void => {
     throw new Error('Mobile root element #root not found');
   }
 
-  // Ensure density/safe-area CSS hooks exist even if mobile.html pre-paint missed Capacitor.
+  // Ensure density/safe-area CSS hooks exist even if mobile.html pre-paint missed the shell.
   if (typeof document !== 'undefined') {
-    applyCapacitorRootClass(document.documentElement, isCapacitorApp());
+    applyCapacitorRootClass(document.documentElement, isNativeShellApp());
+    applyOhosRootClass(document.documentElement, isOhosApp());
   }
 
   initializeSharedPreferences();

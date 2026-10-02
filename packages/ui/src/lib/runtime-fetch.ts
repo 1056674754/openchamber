@@ -4,7 +4,8 @@ import { buildRuntimeAuthHeaders } from './runtime-auth';
 import { observeRuntimeAuthResponse } from './runtime-auth-expiry';
 import { getRuntimeKey } from './runtime-switch';
 import { getRuntimeUrlResolver, type RuntimeUrlQuery } from './runtime-url';
-import { isCapacitorApp } from './platform';
+import { isCapacitorApp, isOhosApp } from './platform';
+import { ohosHttpRequest } from '@/apps/nativeShell';
 
 export interface RuntimeFetchOptions extends RequestInit {
   query?: RuntimeUrlQuery;
@@ -403,11 +404,71 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
 
 let runtimeFetchBridgeInstalled = false;
 
+// ArkWeb (HarmonyOS shell) blocks every cors-mode cross-origin fetch a packaged
+// page makes to private/LAN IPs inside the renderer (Chromium Local Network
+// Access — the request never leaves the browser, so no server CORS header can
+// fix it). Route those through the ArkTS native-HTTP bridge, the CapacitorHttp
+// equivalent. Same-origin and https (relay/tunnel/public) stay on window.fetch.
+const ohosBridgeFetch = async (target: string, init?: RequestInit): Promise<Response | null> => {
+  if (!isOhosApp()) return null;
+  let url: URL;
+  try {
+    url = new URL(target, window.location.href);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:') return null;
+  if (url.origin === window.location.origin) return null;
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const headers: Record<string, string> = {};
+  const headerList = new Headers(init?.headers);
+  headerList.forEach((value, key) => {
+    headers[key] = value;
+  });
+  let body: string | null = null;
+  const rawBody = init?.body;
+  if (rawBody != null) {
+    if (typeof rawBody === 'string') {
+      body = rawBody;
+    } else if (rawBody instanceof URLSearchParams) {
+      body = rawBody.toString();
+    } else {
+      // Streams/FormData/Blob are not JSON-transportable over the port; leave
+      // them on window.fetch (which fails on LAN but callers handle failure).
+      return null;
+    }
+  }
+  const response = await ohosHttpRequest({
+    url: url.toString(),
+    method,
+    headers,
+    body,
+    timeoutMs: 60_000,
+  });
+  if (!response) return null;
+  const responseInit: ResponseInit = {
+    status: response.status >= 200 && response.status <= 599 ? response.status : 502,
+    headers: response.headers,
+  };
+  if (response.status === 204 || response.status === 304) {
+    return new Response(null, responseInit);
+  }
+  return new Response(response.text, responseInit);
+};
+
 export const installRuntimeFetchBridge = (): void => {
   if (runtimeFetchBridgeInstalled || typeof window === 'undefined') return;
   runtimeFetchBridgeInstalled = true;
 
-  const nativeFetch = window.fetch.bind(window);
+  const bareFetch = window.fetch.bind(window);
+  const nativeFetch: typeof window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    if (isOhosApp()) {
+      const target = input instanceof Request ? input.url : input instanceof URL ? input.toString() : input;
+      const bridged = await ohosBridgeFetch(target, init);
+      if (bridged) return bridged;
+    }
+    return bareFetch(input as RequestInfo, init);
+  };
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const requestRuntimeKey = getRuntimeKey();
     const rawInput = input instanceof Request ? input.url : input.toString();

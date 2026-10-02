@@ -1,0 +1,16 @@
+{
+  "name": "@openchamber/harmony",
+  "version": "1.22.0-sscity",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:assets": "node scripts/prepare-web-assets.mjs",
+    "build": "bun run --cwd ../web build && bun run build:assets",
+    "build:debug": "node scripts/with-harmony-env.mjs \"bun run build && hvigorw --mode module -p module=entry@default -p product=default assembleHap\"",
+    "install:debug": "node scripts/with-harmony-env.mjs \"node scripts/ohos-device.mjs install\"",
+    "launch": "node scripts/with-harmony-env.mjs \"node scripts/ohos-device.mjs launch\"",
+    "run:debug": "node scripts/with-harmony-env.mjs \"bun run build && hvigorw --mode module -p module=entry@default -p product=default assembleHap && node scripts/ohos-device.mjs run\"",
+    "log": "node scripts/with-harmony-env.mjs \"node scripts/ohos-device.mjs log\"",
+    "lint": "eslint \"scripts/**/*.mjs\" --config ../../eslint.config.js"
+  }
+}

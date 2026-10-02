@@ -2,10 +2,12 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   applyCapacitorRootClass,
+  applyOhosRootClass,
   CAPACITOR_ROOT_CLASS,
   clampKeyboardInsetPx,
   formatKeyboardInset,
   KEYBOARD_INSET_CSS_VAR,
+  OHOS_ROOT_CLASS,
   setKeyboardInsetCssVar,
 } from './nativeMobileChrome';
 
@@ -37,5 +39,19 @@ describe('nativeMobileChrome helpers', () => {
     expect(classes.has(CAPACITOR_ROOT_CLASS)).toBe(true);
     applyCapacitorRootClass(root, false);
     expect(classes.has(CAPACITOR_ROOT_CLASS)).toBe(false);
+  });
+
+  test('toggles the ohos root class', () => {
+    const classes = new Set<string>();
+    const root = {
+      classList: {
+        add: (value: string) => { classes.add(value); },
+        remove: (value: string) => { classes.delete(value); },
+      },
+    };
+    applyOhosRootClass(root, true);
+    expect(classes.has(OHOS_ROOT_CLASS)).toBe(true);
+    applyOhosRootClass(root, false);
+    expect(classes.has(OHOS_ROOT_CLASS)).toBe(false);
   });
 });

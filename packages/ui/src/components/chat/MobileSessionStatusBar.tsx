@@ -46,7 +46,7 @@ import { Icon } from "@/components/icon/Icon";
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useNotificationStore } from '@/sync/notification-store';
 import { useI18n } from '@/lib/i18n';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeShellApp } from '@/lib/platform';
 import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 
 interface MobileSessionStatusBarProps {
@@ -1651,7 +1651,7 @@ export const MobileSessionStatusBar: React.FC<MobileSessionStatusBarProps> = ({
   // Capacitor: never embed the expanded project/session switcher in the
   // composer (duplicates the drawer and looks like the draft welcome card).
   // Header tap opens the session drawer instead.
-  const capacitorShell = isCapacitorApp();
+  const capacitorShell = isNativeShellApp();
   React.useEffect(() => {
     if (capacitorShell && !isMobileSessionStatusBarCollapsed) {
       setIsMobileSessionStatusBarCollapsed(true);

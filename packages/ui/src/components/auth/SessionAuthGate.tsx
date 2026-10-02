@@ -5,7 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, loginDesktopRemotePassword } from '@/lib/desktop';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeShellApp } from '@/lib/platform';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -93,7 +93,7 @@ const LoadingScreen: React.FC = () => {
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-[var(--splash-background,var(--surface-background))] text-foreground">
       <OpenChamberLogo width={120} height={120} variant="splash" />
-      {isCapacitorApp() ? (
+      {isNativeShellApp() ? (
         <div className="flex items-center gap-2">
           <Icon name="loader-4" className="size-4 animate-spin text-muted-foreground" />
           <span className="typography-meta text-muted-foreground">{t('mobile.connect.connecting')}</span>
@@ -665,7 +665,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({ children }) =>
 
   return (
     <>
-      {skipAuth || isCapacitorApp() ? null : <AuthExpiredBanner />}
+      {skipAuth || isNativeShellApp() ? null : <AuthExpiredBanner />}
       {children}
     </>
   );

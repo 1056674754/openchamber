@@ -70,6 +70,14 @@ packages/web/server/built-in-extensions.previous-*/
 openchamber-linux
 /artifacts/
 
+# HarmonyOS shell build artifacts (web bundle + hvigor outputs, not tracked)
+packages/harmony/entry/src/main/resources/rawfile/
+packages/harmony/.hvigor/
+packages/harmony/entry/build/
+packages/harmony/build/
+packages/harmony/oh_modules/
+packages/harmony/local.properties
+
 # Local OpenCode temp build/cache dirs
 .tmp-oc*/
 /tmp/

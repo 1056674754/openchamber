@@ -241,7 +241,7 @@ button,
 }
 
 :root.vscode-runtime .composer-editor .cm-placeholder {
-  color: color-mix(in srgb, var(--vscode-input-placeholderForeground, var(--muted-foreground)) 65%, transparent);
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
 }
 
 /* Match chat footer background to input in WebKit to avoid dual-tone hover/focus */
@@ -266,7 +266,8 @@ button,
   mask-size: 100% 100%;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"][data-top-bottom-scroll="true"] {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -285,7 +286,7 @@ button,
   );
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-top-scroll="true"]:not(.chat-scroll) {
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
@@ -311,7 +312,8 @@ button,
   opacity: 1;
 }
 
-[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"] {
+[data-scroll-shadow="true"][data-orientation="vertical"][data-bottom-scroll="true"],
+.chat-scroll[data-scroll-shadow="true"][data-orientation="vertical"]:not([data-top-scroll="true"]):not([data-top-bottom-scroll="true"]) {
   mask-image: linear-gradient(
     to bottom,
     #000 0%,
@@ -1625,6 +1627,19 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   animation: oc-busy-pulse 1.2s ease-in-out infinite;
 }
 
+@keyframes oc-status-logo {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.animate-status-logo {
+  animation: oc-status-logo 4s steps(10, jump-none) infinite;
+}
+
 @keyframes navrail-dot-wave {
   0%, 100% {
     transform: scale(0.72);
@@ -1745,7 +1760,8 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
     display: none;
   }
 
-  .animate-busy-pulse {
+  .animate-busy-pulse,
+  .animate-status-logo {
     animation: none;
   }
 

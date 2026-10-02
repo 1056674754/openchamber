@@ -13,12 +13,19 @@ export const DESKTOP_ARCHIVED_VIRTUAL_OVERSCAN = 8;
 export const MOBILE_VIRTUAL_FLING_SPEED_PX_MS = 1.1;
 export const MOBILE_VIRTUAL_FLING_HOLD_MS = 320;
 
+import { isOhosApp } from '@/lib/platform';
+
 export function shouldVirtualizeSessionGroupUnpinned(args: {
   isArchivedBucket: boolean;
   mobileVariant: boolean;
   hasSessionSearchQuery: boolean;
   unpinnedCount: number;
 }): boolean {
+  // ArkWeb (HarmonyOS shell): the virtualizer mis-measures under ArkWeb scroll
+  // event delivery — totalSize inflates and rows unmount, leaving a growing
+  // blank spacer inside the group. Session counts on device are modest; render
+  // directly instead.
+  if (isOhosApp()) return false;
   if (args.hasSessionSearchQuery) return false;
   if (args.unpinnedCount <= 0) return false;
   if (args.isArchivedBucket) {

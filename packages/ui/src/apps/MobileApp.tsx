@@ -1,5 +1,4 @@
 import React from 'react';
-import { App as CapApp } from '@capacitor/app';
 
 import App from '@/App';
 import { MobileInstancesSheet } from '@/apps/MobileInstancesSheet';
@@ -26,8 +25,9 @@ import {
 import { MobileConnectionDebugPanel } from '@/apps/MobileConnectionDebugPanel';
 import { useDebugPanelLongPress } from '@/apps/mobileConnectionDebug';
 import { cancelActiveQrScan, scanConnectionQr } from '@/apps/mobileQrScan';
+import { subscribeShellLaunchUrls } from '@/apps/nativeShell';
 import { parsePairingConnectionPayload } from '@/lib/connectionPayload';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeShellApp } from '@/lib/platform';
 import { useCapacitorVoiceResume } from '@/hooks/useCapacitorVoiceResume';
 import { useMobileConnectionResume } from '@/hooks/useMobileConnectionResume';
 import { useNativeMobileChrome } from '@/hooks/useNativeMobileChrome';
@@ -131,7 +131,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   });
 
   React.useEffect(() => {
-    if (!isCapacitorApp()) return;
+    if (!isNativeShellApp()) return;
     return useAuthSessionStore.subscribe((store, previous) => {
       if (store.state !== 'expired' || previous.state === 'expired') return;
       useAuthSessionStore.getState().markAuthenticated(store.runtimeKey);
@@ -184,10 +184,9 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
   }, [autoConnectTried, runtimeUrl]);
 
   React.useEffect(() => {
-    if (!isCapacitorApp()) return;
-    let cancelled = false;
+    if (!isNativeShellApp()) return;
     const handleUrl = (raw: string | undefined) => {
-      if (!raw || cancelled) return;
+      if (!raw) return;
       const payload = parsePairingConnectionPayload(raw);
       if (!payload) {
         setFailureRef.current('invalid-payload');
@@ -195,16 +194,9 @@ export const MobileApp: React.FC<MobileAppProps> = ({ apis }) => {
       }
       void redeemRef.current(payload).catch(() => undefined);
     };
-    void CapApp.getLaunchUrl().then((result) => {
-      handleUrl(result?.url);
-    }).catch(() => undefined);
-    const sub = CapApp.addListener('appUrlOpen', (event) => {
-      handleUrl(event.url);
+    return subscribeShellLaunchUrls((url) => {
+      handleUrl(url);
     });
-    return () => {
-      cancelled = true;
-      void sub.then((handle) => handle.remove()).catch(() => undefined);
-    };
   }, []);
 
   const onSubmit = (event: React.FormEvent) => {

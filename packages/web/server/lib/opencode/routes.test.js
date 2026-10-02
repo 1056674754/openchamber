@@ -104,7 +104,7 @@ describe('opencode routes', () => {
       .expect(200);
 
     expect(response.body).toEqual({ autoSaveEnabled: false });
-    expect(persistSettings).toHaveBeenCalledWith({ autoSaveEnabled: false });
+    expect(persistSettings).toHaveBeenCalledWith({ autoSaveEnabled: false }, { surface: null });
     expect(markPendingConfigRestart).not.toHaveBeenCalled();
   });
 

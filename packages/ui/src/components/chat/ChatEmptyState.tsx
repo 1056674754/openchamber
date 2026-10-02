@@ -3,7 +3,7 @@ import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import { useI18n } from '@/lib/i18n';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeShellApp } from '@/lib/platform';
 
 interface ChatEmptyStateProps {
     isSubmitting?: boolean;
@@ -14,7 +14,7 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ isSubmitting, children 
     const { t } = useI18n();
     const { currentTheme } = useThemeSystem();
     const initError = useGlobalSyncStore((s) => s.error);
-    const dense = isCapacitorApp();
+    const dense = isNativeShellApp();
     const logoSize = dense ? 72 : 140;
 
     const textColor = currentTheme?.colors?.surface?.mutedForeground || 'var(--muted-foreground)';

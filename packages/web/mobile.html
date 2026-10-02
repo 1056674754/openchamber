@@ -73,7 +73,7 @@
           root.style.backgroundColor = bg;
           root.style.setProperty('--boot-logo-color', isDark ? '#ffffff' : '#000000');
 
-          // Mark Capacitor shell before React mounts so mobile.css density/safe-area
+          // Mark the packaged shell before React mounts so mobile.css density/safe-area
           // rules apply on first paint (useNativeMobileChrome runs too late otherwise).
           try {
             var cap = window.Capacitor;
@@ -81,6 +81,18 @@
               root.classList.add('capacitor');
             } else if (location.protocol === 'capacitor:') {
               root.classList.add('capacitor');
+            } else if (window.__OPENCHAMBER_OHOS__ === true
+              || location.host === 'app.openchamber.localhost'
+              || location.host === 'app.openchamber.local') {
+              // HarmonyOS ArkWeb shell: injected global or either virtual-origin
+              // spelling (the .local host appears via stale deep links / debug
+              // navigation; the interceptor serves it too). Heal to the canonical
+              // http://*.localhost origin — the page class hooks and the shell
+              // platform detection all key off it.
+              if (location.host !== 'app.openchamber.localhost' && window.__OPENCHAMBER_OHOS__ !== true) {
+                location.replace('http://app.openchamber.localhost' + location.pathname + location.search + location.hash);
+              }
+              root.classList.add('capacitor', 'ohos');
             }
           } catch (_e) { /* ignore */ }
         } catch (error) {

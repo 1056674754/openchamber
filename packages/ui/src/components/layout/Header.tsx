@@ -33,7 +33,7 @@ import { useContextPanelKey } from '@/hooks/useContextPanelKey';
 import { MobileActiveInstanceChip } from '@/apps/MobileActiveInstanceChip';
 import { openMobileInstancesSheet } from '@/apps/mobileInstancesUi';
 import { useDeviceInfo, useTabletStandalonePwaRuntime } from '@/lib/device';
-import { isCapacitorApp } from '@/lib/platform';
+import { isNativeShellApp } from '@/lib/platform';
 import { cn, hasModifier } from '@/lib/utils';
 import { McpDropdownContent } from '@/components/mcp/McpDropdown';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -2328,7 +2328,7 @@ export const Header: React.FC<HeaderProps> = ({
               />
             )}
 
-            {isCapacitorApp() ? (
+            {isNativeShellApp() ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
