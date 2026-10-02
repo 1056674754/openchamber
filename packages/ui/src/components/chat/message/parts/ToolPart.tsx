@@ -1377,6 +1377,19 @@ const stripTaskMetadataFromOutput = (output: string): string => {
     return output.replace(/\n*<task_metadata>[\s\S]*?<\/task_metadata>\s*$/i, '').trimEnd();
 };
 
+// OpenCode 2's subagent tool wraps a completed result in a <subagent ...>
+// envelope (OC2 spine S6, upstream a2297eb1b):
+//   <subagent sessionID="ses_…" state="completed">
+//   …result Markdown…
+//   </subagent>
+// Only an output that is exactly one such envelope is unwrapped; the v1 track
+// never produces this shape, so the check is additive for it.
+const SUBAGENT_ENVELOPE_PATTERN = /^\s*<subagent(?:\s[^>]*)?>\r?\n([\s\S]*?)\r?\n<\/subagent>\s*$/i;
+
+const unwrapSubagentEnvelope = (output: string): string => {
+    return output.match(SUBAGENT_ENVELOPE_PATTERN)?.[1] ?? output;
+};
+
 const normalizeTaskSummaryEntries = (value: unknown): TaskToolSummaryEntry[] => {
     if (!Array.isArray(value)) {
         return [];
@@ -1495,7 +1508,7 @@ const TaskToolSummary: React.FC<{
     const displayEntries = showDetails ? entries : [];
 
     const trimmedOutput = showDetails && typeof output === 'string'
-        ? stripTaskMetadataFromOutput(output)
+        ? stripTaskMetadataFromOutput(unwrapSubagentEnvelope(output))
         : '';
     const hasOutput = trimmedOutput.length > 0;
     const [isOutputExpanded, setIsOutputExpanded] = React.useState(false);

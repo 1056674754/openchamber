@@ -10,7 +10,7 @@ import type {
 } from "@opencode-ai/sdk/v2/client"
 import type { FormRequest } from "@/types/form"
 import { Binary } from "./binary"
-import type { FileDiff, FormEventFrame, GlobalState, State } from "./types"
+import type { DirectoryEventFrame, FileDiff, GlobalState, State } from "./types"
 import { dropSessionCaches } from "./session-cache"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { syncDebug } from "./debug"
@@ -199,7 +199,7 @@ export function applyGlobalProject(state: GlobalState, project: Project): Global
 
 export function applyDirectoryEvent(
   draft: State,
-  event: Event | FormEventFrame,
+  event: DirectoryEventFrame,
   callbacks?: {
     onRefresh?: (directory: string) => void
     onLoadLsp?: () => void
@@ -597,9 +597,249 @@ export function applyDirectoryEvent(
       return false
     }
 
+    // --- v2 bridge events (OC2 spine S6) -------------------------------------
+    // These event names are produced only by the wire bridge
+    // (`lib/opencode/wire-bridge.ts`) for servers whose protocol mode is v2.
+    // The v1 wire never emits them, so the v1 track can never reach these
+    // branches — same contract as the `form.*` cases above.
+
+    case "session.patched": {
+      // v2 patches fields; v1 replaced whole records. Merge into the stored
+      // session so a partial rename/usage/switch never clobbers the rest.
+      const props = event.properties as {
+        sessionID: string
+        patch: {
+          title?: string
+          directory?: string
+          projectID?: string
+          agent?: string
+          model?: { providerID: string; modelID: string; variant?: string }
+          cost?: number
+          tokens?: unknown
+          permissions?: unknown
+          revert?: Session["revert"] | null
+          time?: { created?: number; updated?: number; idle?: number }
+        }
+      }
+      if (!props.sessionID) return false
+      const sessions = draft.session
+      const result = Binary.search(sessions, props.sessionID, (s) => s.id)
+      if (!result.found) {
+        // Not loaded yet: the session list bootstrap (or a later
+        // session.created) carries the full record; a patch alone cannot.
+        return false
+      }
+      const existing = sessions[result.index]
+      const patch = props.patch
+      const nextTime = patch.time
+        ? { ...existing.time, ...compactDefined(patch.time as Record<string, unknown>) }
+        : existing.time
+      const merged = {
+        ...existing,
+        ...compactDefined(patch as Record<string, unknown>),
+        time: nextTime,
+      } as Session
+      if (existing === merged) return false
+      if (shouldSkipStaleSessionEvent(existing, merged)) return false
+      if (merged.time.archived && !existing.time.archived) {
+        if (callbacks?.isSessionDeleting?.(merged.id)) return false
+        sessions.splice(result.index, 1)
+        cleanupSessionCaches(draft, merged.id, callbacks?.onSetSessionTodo)
+        if (!merged.parentID) draft.sessionTotal = Math.max(0, draft.sessionTotal - 1)
+        return true
+      }
+      sessions[result.index] = merged
+      return true
+    }
+
+    case "message.patched": {
+      // v2 step events patch assistant messages; the reducer merges into the
+      // stored record, creating a minimal one when the step start beat the
+      // message list fetch.
+      const props = event.properties as {
+        sessionID: string
+        messageID: string
+        patch: Record<string, unknown> & {
+          time?: { created?: number; streamed?: number; completed?: number }
+          retry?: unknown
+        }
+      }
+      if (!props.sessionID || !props.messageID) return false
+      const messages = draft.message[props.sessionID]
+      const patch = props.patch
+      const patchRole = patch.role
+      if (!messages) {
+        if (patchRole !== "assistant") return false
+        draft.message[props.sessionID] = [createMinimalAssistantMessage(props.sessionID, props.messageID, patch)]
+        return true
+      }
+      const messageIndex = findMessageIndex(messages, props.messageID)
+      if (messageIndex < 0) {
+        if (patchRole !== "assistant") return false
+        const next = [...messages]
+        insertMessageChronologically(next, createMinimalAssistantMessage(props.sessionID, props.messageID, patch))
+        draft.message[props.sessionID] = next
+        return true
+      }
+      const existing = messages[messageIndex]
+      const patchTime = patch.time ?? undefined
+      const mergedTime = patchTime ? { ...existing.time, ...compactDefined(patchTime as Record<string, unknown>) } : existing.time
+      const merged = { ...existing, ...compactDefined(patch), time: mergedTime } as Record<string, unknown>
+      // `retry: null` clears a scheduled retry; an object replaces it (spread
+      // above already replaced it when set).
+      if (patch.retry === null) delete merged.retry
+      if (areJsonEquivalent(existing, merged)) return false
+      const mergedMessage = merged as unknown as Message
+      const next = [...messages]
+      if (compareMessagesChronologically(existing, mergedMessage) === 0) {
+        next[messageIndex] = mergedMessage
+      } else {
+        next.splice(messageIndex, 1)
+        insertMessageChronologically(next, mergedMessage)
+      }
+      draft.message[props.sessionID] = next
+      return true
+    }
+
+    case "message.tool.transition": {
+      // v2 tool events carry the next state of one tool call, not a full part;
+      // the reducer merges into the stored part's state. A transition for a
+      // part the store never saw materializes the session (same contract as a
+      // delta with no part).
+      const props = event.properties as {
+        sessionID?: string
+        messageID: string
+        partID: string
+        transition: {
+          kind: "input" | "called" | "progress" | "success" | "failed"
+          raw?: string
+          input?: Record<string, unknown>
+          executed?: boolean
+          start?: number
+          end?: number
+          output?: string
+          error?: string
+          attachments?: Part[]
+          metadata?: Record<string, unknown>
+        }
+      }
+      const parts = draft.part[props.messageID]
+      if (!parts) {
+        return {
+          changed: false,
+          materialization: {
+            type: "incomplete-session-snapshot",
+            sessionID: props.sessionID,
+            messageID: props.messageID,
+            partID: props.partID,
+          },
+        }
+      }
+      const partIndex = parts.findIndex((part) => part.id === props.partID)
+      if (partIndex < 0) {
+        return {
+          changed: false,
+          materialization: {
+            type: "incomplete-session-snapshot",
+            sessionID: props.sessionID,
+            messageID: props.messageID,
+            partID: props.partID,
+          },
+        }
+      }
+      const existing = parts[partIndex] as Record<string, unknown>
+      const transition = props.transition
+      const previousState = (existing.state ?? {}) as Record<string, unknown>
+      const previousInput = (previousState.input ?? {}) as Record<string, unknown>
+      const previousTime = (previousState.time ?? {}) as { start?: number; end?: number }
+      const state: Record<string, unknown> = { ...previousState }
+      switch (transition.kind) {
+        case "input":
+          state.status = "pending"
+          state.raw = transition.raw ?? ""
+          break
+        case "called":
+          state.status = "running"
+          state.input = transition.input ?? previousInput
+          state.time = { start: transition.start ?? previousTime.start ?? Date.now() }
+          break
+        case "progress":
+          state.status = previousState.status === "pending" ? "running" : previousState.status ?? "running"
+          if (transition.metadata) state.metadata = transition.metadata
+          break
+        case "success":
+          state.status = "completed"
+          state.input = transition.input ?? previousInput
+          state.output = transition.output ?? ""
+          state.title = typeof previousState.title === "string" ? previousState.title : ""
+          state.metadata = transition.metadata ?? previousState.metadata ?? {}
+          state.time = { start: previousTime.start ?? transition.end, end: transition.end }
+          if (transition.attachments && transition.attachments.length > 0) state.attachments = transition.attachments
+          break
+        case "failed":
+          state.status = "error"
+          state.input = transition.input ?? previousInput
+          state.error = transition.error ?? ""
+          if (transition.output) state.output = transition.output
+          if (transition.metadata) state.metadata = transition.metadata
+          state.time = { start: previousTime.start ?? transition.end, end: transition.end }
+          break
+      }
+      const next = [...parts]
+      next[partIndex] = { ...existing, state } as unknown as Part
+      draft.part[props.messageID] = next
+      if (props.sessionID) {
+        draft.session_activity[props.sessionID] = Date.now()
+      }
+      return true
+    }
+
     default:
       return false
   }
+}
+
+/** Drops `undefined` values so a patch merge never clears a field it omitted. */
+function compactDefined(source: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(source)) {
+    if (value !== undefined) result[key] = value
+  }
+  return result
+}
+
+/**
+ * A step patch may name an assistant message the store has not fetched yet
+ * (late join). Store the fields the patch carries; the parts-gap recovery on
+ * the next `message.updated` (or the session refetch) completes the record.
+ */
+function createMinimalAssistantMessage(
+  sessionID: string,
+  messageID: string,
+  patch: Record<string, unknown> & { time?: { created?: number; streamed?: number; completed?: number } },
+): Message {
+  const created = typeof patch.time?.created === "number" ? patch.time.created : Date.now()
+  const message: Record<string, unknown> = {
+    id: messageID,
+    sessionID,
+    role: "assistant",
+    parentID: sessionID,
+    modelID: typeof patch.modelID === "string" ? patch.modelID : "",
+    providerID: typeof patch.providerID === "string" ? patch.providerID : "",
+    mode: "",
+    agent: typeof patch.agent === "string" ? patch.agent : "",
+    path: { cwd: "", root: "" },
+    cost: typeof patch.cost === "number" ? patch.cost : 0,
+    tokens: patch.tokens ?? { total: 0, input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created },
+  }
+  if (typeof patch.time?.streamed === "number") (message.time as Record<string, unknown>).streamed = patch.time.streamed
+  if (typeof patch.time?.completed === "number") (message.time as Record<string, unknown>).completed = patch.time.completed
+  if (patch.finish !== undefined) message.finish = patch.finish
+  if (patch.error !== undefined) message.error = patch.error
+  if (patch.variant !== undefined) message.variant = patch.variant
+  if (patch.snapshot !== undefined) message.snapshot = patch.snapshot
+  return message as unknown as Message
 }
 
 // ---------------------------------------------------------------------------

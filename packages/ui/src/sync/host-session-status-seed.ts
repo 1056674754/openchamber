@@ -1,6 +1,8 @@
 import type { Event } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
-import type { HostPermissionRequest, HostFormRequest, HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
+import type { HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
+import type { PermissionRequest } from '@/types/permission';
+import type { FormRequest } from '@/types/form';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { applyGlobalSessionStatusEvents, useGlobalSessionStatusStore } from './global-session-status';
@@ -127,13 +129,27 @@ export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
     const pending: Array<{
       sessionId: string;
       directory: string;
-      permissions: readonly HostPermissionRequest[];
-      forms: readonly HostFormRequest[];
+      permissions: readonly PermissionRequest[];
+      forms: readonly FormRequest[];
     }> = [];
     for (const [sessionId, entry] of Object.entries(snapshot.pending ?? {})) {
       const directory = resolveDirectory(sessionId);
       if (!directory) continue;
-      pending.push({ sessionId, directory, permissions: entry.permissions, forms: entry.questions });
+      // `forms` is the v2 ask bucket the host tracks on a v2 upstream; the v1
+      // `questions` key keeps its wire contract. Both ride the same store.
+      // The v2 ask naming (`action`/`resources`/`save`) folds into the v1
+      // field names the store reads; the v1 fields win when present.
+      const permissions = entry.permissions.map((request): PermissionRequest => ({
+        id: request.id,
+        sessionID: request.sessionID,
+        permission: request.permission ?? request.action ?? '',
+        patterns: request.patterns ?? request.resources ?? [],
+        metadata: request.metadata ?? {},
+        always: request.always ?? request.save ?? [],
+        ...(request.tool ? { tool: request.tool } : {}),
+      }));
+      const forms = [...(entry.questions ?? []), ...(entry.forms ?? [])].map((form): FormRequest => form as unknown as FormRequest);
+      pending.push({ sessionId, directory, permissions, forms });
     }
     seedGlobalBlockingRequests(pending);
   })().finally(() => {

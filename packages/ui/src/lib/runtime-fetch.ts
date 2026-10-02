@@ -324,12 +324,16 @@ const normalizeCoalescibleReadPath = (url: string): string => {
   }
 };
 
-const coalesceReadKey = (method: string, url: string, hasSignal: boolean): string | null => {
+// OpenCode 2.x scopes these reads by the `x-opencode-directory` header, not
+// the URL (OC2 spine S6, upstream 654705f7d runtime-fetch slice), so two
+// projects asking for `/api/config` at once must not share one response. The
+// v1 track sends no such header, so its key space is unchanged.
+const coalesceReadKey = (method: string, url: string, hasSignal: boolean, scopeHeaders: Headers): string | null => {
   if (hasSignal) return null;
   if (method !== 'GET') return null;
   if (url.includes('/event')) return null;
   if (!COALESCE_READ_PATH.test(normalizeCoalescibleReadPath(url))) return null;
-  return `GET ${url}`;
+  return `GET ${url}\u0000${scopeHeaders.get('x-opencode-directory') ?? ''}`;
 };
 
 export const runtimeFetch = async (input: string | URL | Request, init: RuntimeFetchOptions = {}): Promise<Response> => {
@@ -344,6 +348,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   let doFetch: () => Promise<Response>;
   let url: string;
   let method: string;
+  let scopeHeaders: Headers;
   let observesRuntimeAuth = false;
   if (relay && relayPath !== null) {
     const inputHeaders = input instanceof Request ? input.headers : undefined;
@@ -351,6 +356,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
     doFetch = input instanceof Request
       ? () => relay.fetch(input, { ...requestInit, headers })
       : () => relay.fetch(relayPath, { ...requestInit, headers });
+    scopeHeaders = headers;
     url = relayPath;
     method = String(requestInit.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
     observesRuntimeAuth = true;
@@ -368,6 +374,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
     doFetch = resolvedInput instanceof Request
       ? () => fetch(new Request(resolvedInput, { ...requestInit, headers }))
       : () => fetch(resolvedInput, { ...requestInit, headers });
+    scopeHeaders = headers;
     url = resolvedUrl;
     method = String(
       requestInit.method ?? (resolvedInput instanceof Request ? resolvedInput.method : 'GET'),
@@ -387,7 +394,7 @@ export const runtimeFetch = async (input: string | URL | Request, init: RuntimeF
   // an explicit init.signal, as "has signal" and skip coalescing for safety.
   const hasSignal = requestInit.signal != null || input instanceof Request;
 
-  const key = coalesceReadKey(method, url, hasSignal);
+  const key = coalesceReadKey(method, url, hasSignal, scopeHeaders);
   if (!key) return doFetch();
 
   const existing = READ_COALESCE.get(key);

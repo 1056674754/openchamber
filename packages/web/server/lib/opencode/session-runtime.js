@@ -70,9 +70,10 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   const getOrCreatePendingRequests = (sessionId) => {
     let entry = pendingRequestsBySession.get(sessionId);
     if (!entry) {
-      entry = { permissions: new Map(), questions: new Map() };
+      entry = { permissions: new Map(), questions: new Map(), forms: new Map() };
       pendingRequestsBySession.set(sessionId, entry);
     }
+    if (!entry.forms) entry.forms = new Map();
     return entry;
   };
 
@@ -83,7 +84,9 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
     // pending request of that kind we can still vouch for.
     if (requestId) entry[kind].delete(requestId);
     else entry[kind].clear();
-    if (entry.permissions.size === 0 && entry.questions.size === 0) pendingRequestsBySession.delete(sessionId);
+    if (entry.permissions.size === 0 && entry.questions.size === 0 && (!entry.forms || entry.forms.size === 0)) {
+      pendingRequestsBySession.delete(sessionId);
+    }
   };
 
   const processBlockingRequestPayload = (payload) => {
@@ -94,6 +97,22 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       const requestId = readRequestId(properties.id);
       if (!sessionId || !requestId) return;
       getOrCreatePendingRequests(sessionId)[payload.type === 'permission.asked' ? 'permissions' : 'questions'].set(requestId, properties);
+      return;
+    }
+    // OC2 spine S6: on a v2 upstream the translated intake emits OpenCode 2's
+    // form frames (translate-v2 `form.created`/`form.settled`); the v1 wire
+    // never uses these names, so the v1 `questions` bucket is untouched. The
+    // form object itself is the pending entry the UI reads.
+    if (payload.type === 'form.created') {
+      const form = properties.form && typeof properties.form === 'object' ? properties.form : null;
+      const sessionId = readRequestId(properties.sessionID) || readRequestId(form?.sessionID);
+      const requestId = readRequestId(form?.id);
+      if (!sessionId || !requestId) return;
+      getOrCreatePendingRequests(sessionId).forms.set(requestId, form);
+      return;
+    }
+    if (payload.type === 'form.settled') {
+      settlePendingRequest('forms', readRequestId(properties.sessionID), readRequestId(properties.formID));
       return;
     }
     if (payload.type === 'permission.replied') {
@@ -114,10 +133,13 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
   const getPendingBlockingRequestsSnapshot = () => {
     const result = {};
     for (const [sessionId, entry] of pendingRequestsBySession) {
-      result[sessionId] = {
+      const item = {
         permissions: [...entry.permissions.values()],
         questions: [...entry.questions.values()],
       };
+      // Additive v2 bucket: a v1 host snapshot keeps its exact shape.
+      if (entry.forms && entry.forms.size > 0) item.forms = [...entry.forms.values()];
+      result[sessionId] = item;
     }
     return result;
   };

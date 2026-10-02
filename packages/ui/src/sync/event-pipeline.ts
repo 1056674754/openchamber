@@ -15,6 +15,7 @@
 import type { Event, OpencodeClient, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { useSessionMarkersStore, normalizeSessionMarkers } from "@/stores/useSessionMarkersStore"
 import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
+import { translateV2WireEvent } from "@/lib/opencode/wire-bridge"
 import { syncDebug } from "./debug"
 import { applyBoundedRetryJitter } from "./retry"
 import { z } from "zod"
@@ -71,6 +72,18 @@ export type EventPipelineInput = {
    * failure of the step that stopped it. (upstream 211a5e713)
    */
   onSpaceProgress?: (details: SpaceProgress) => void
+  /**
+   * OC2 spine S6 intake branch. Resolves whether the server that owns an
+   * incoming event speaks the OpenCode 2.x wire; when it does, raw wire
+   * payloads are translated into the fork's reducer vocabulary by the wire
+   * bridge BEFORE coalescing, so a v2 stream coalesces like a v1 one. The
+   * argument is the event's owning serverId when the transport tags one (WS
+   * frames), otherwise the pipeline's own server.
+   *
+   * v1 mode (the default for every server) never consults anything past this
+   * check — the code path below it is byte-identical to pre-S6.
+   */
+  wireMode?: (serverId: string | undefined) => boolean
   transport?: "auto" | "ws" | "sse"
   heartbeatTimeoutMs?: number
   reconnectDelayMs?: number
@@ -330,6 +343,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onDisconnect,
     onSpaceProgress,
     routeDirectory,
+    wireMode,
     transport = "auto",
     heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_MS,
     reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
@@ -584,6 +598,22 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       onSpaceProgress?.(spaceProgress.data.properties)
       return
     }
+    // OC2 S6: a v2-mode owner's raw wire payloads are translated into the
+    // fork's reducer vocabulary at intake, before coalescing. Each translated
+    // event re-enters the same queue path below, so coalescing keys, delta
+    // concat, and directory routing behave exactly as on the v1 track. The
+    // bridge's fork-adjacent names ride the queue as opaque events — the
+    // same contract as the v2 `form.*` frames already in the stream.
+    if (wireMode && wireMode(serverId)) {
+      for (const translated of translateV2WireEvent(payload)) {
+        enqueueTranslated(directory, translated as Event, serverId)
+      }
+      return
+    }
+    enqueueTranslated(directory, payload, serverId)
+  }
+
+  const enqueueTranslated = (directory: string, payload: Event, serverId?: string) => {
     const normalizedPayload = normalizeEventType(payload)
     const routedDirectory = serverId ? directory : (routeDirectory?.(directory, normalizedPayload) || directory)
     const d = getOrCreateDir(routedDirectory)

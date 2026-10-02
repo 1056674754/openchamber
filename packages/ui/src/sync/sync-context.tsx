@@ -7,6 +7,9 @@ import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
+import { translateV2WireEvent, type CatalogBridgeKind } from "@/lib/opencode/wire-bridge"
+import { getProtocolMode } from "@/lib/opencode/protocolMode"
+import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { isOhosApp } from "@/lib/platform"
 import { reduceGlobalEvent, applyGlobalProject, applyDirectoryEvent } from "./event-reducer"
@@ -733,6 +736,10 @@ const getSessionIdFromPayload = (event: Event): string | null => {
     || (event.type as string) === "form.created"
     || (event.type as string) === "form.settled"
     || event.type === "session.deleted"
+    // OC2 bridge-only names (v2 wire never reaches the reducer in v1 form).
+    || (event.type as string) === "session.patched"
+    || (event.type as string) === "message.patched"
+    || (event.type as string) === "message.tool.transition"
   ) {
     const sessionID = props.sessionID
     return typeof sessionID === "string" && sessionID.length > 0 ? sessionID : null
@@ -786,7 +793,14 @@ const getMessageIdFromPayload = (event: Event): string | null => {
     return typeof id === "string" && id.length > 0 ? id : null
   }
 
-  if (event.type === "message.removed" || event.type === "message.part.delta" || event.type === "message.part.removed") {
+  if (
+    event.type === "message.removed"
+    || event.type === "message.part.delta"
+    || event.type === "message.part.removed"
+    // OC2 bridge-only names (v2 wire never reaches the reducer in v1 form).
+    || (event.type as string) === "message.patched"
+    || (event.type as string) === "message.tool.transition"
+  ) {
     const messageID = props.messageID
     return typeof messageID === "string" && messageID.length > 0 ? messageID : null
   }
@@ -1762,6 +1776,19 @@ function handleEvent(
     draft.nativeForm = { ...current.nativeForm }
   }
 
+  // OC2 bridge-only names (v2 wire): copy exactly the slices the merge touches,
+  // same discipline as the switch below. These names are outside the v1 event
+  // union, so they cannot be switch cases over `payload.type`.
+  const payloadType = payload.type as string
+  if (payloadType === "session.patched") {
+    draft.session = [...current.session]
+  } else if (payloadType === "message.patched") {
+    draft.message = { ...current.message }
+  } else if (payloadType === "message.tool.transition") {
+    draft.part = { ...current.part }
+    draft.session_activity = { ...(current.session_activity ?? {}) }
+  }
+
   switch (payload.type) {
     case "session.created":
     case "session.updated":
@@ -2346,10 +2373,31 @@ export function SyncProvider(props: {
     }
 
     const applyIncomingEvent = (directory: string, payload: Event) => {
+      // OC2 S6: a v2-mode server's fan-in (remote event bus) delivers raw wire
+      // payloads; translate into the fork's reducer vocabulary at intake. The
+      // pipeline path does the same inside event-pipeline (pre-coalescing).
+      const incomingEvents: Event[] = getProtocolMode(serverId) === "v2"
+        ? (translateV2WireEvent(payload) as Event[])
+        : [payload]
+      for (const event of incomingEvents) {
+        applyIncomingV1Event(directory, event)
+      }
+    }
+
+    const applyIncomingV1Event = (directory: string, payload: Event) => {
       dispatchVSCodeRuntimeNotificationEvent(directory, payload, serverId)
       dispatchOpenchamberEventEnvelope(payload as { type?: unknown; properties?: unknown }, serverId)
       if ((payload as { type?: unknown }).type === "openchamber:message-queue.updated") {
         applyMessageQueueUpdatedEvent(payload)
+        return
+      }
+      if ((payload as { type?: unknown }).type === "catalog.updated") {
+        // Bridge-only carrier (v2 wire catalog announcements): refresh the
+        // Settings/composer stores at a rate the events arrive; never reduced.
+        const kind = (payload.properties as { kind?: unknown })?.kind
+        if (typeof kind === "string") {
+          void refreshStoresForCatalogKind(kind as CatalogBridgeKind).catch(() => undefined)
+        }
         return
       }
       if (payload.type === "installation.update-available") {
@@ -2393,6 +2441,13 @@ export function SyncProvider(props: {
       routeDirectory: (directory, payload) => {
         return resolveDirectoryFromRoutingIndex(routingIndex, directory, payload, childStores)
       },
+      // OC2 S6 intake branch: only events OWNED by this provider's server are
+      // translated here. Frames tagged for another server must stay raw —
+      // they are forwarded to that server's provider, whose intake applies
+      // that server's own mode. v1 (the default) resolves false and never
+      // touches the bridge.
+      wireMode: (eventServerId) =>
+        (eventServerId === undefined || eventServerId === serverId) && getProtocolMode(serverId) === "v2",
       onEvent: (directory, payload, meta) => {
         const eventServerId = meta?.serverId
         if (eventServerId && eventServerId !== serverId) {

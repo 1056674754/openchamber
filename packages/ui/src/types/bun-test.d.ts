@@ -37,6 +37,7 @@ declare module "bun:test" {
   export function expect(value: unknown): ExpectResult;
   export function beforeEach(fn: () => void | Promise<void>): void;
   export function afterEach(fn: () => void | Promise<void>): void;
+  export function beforeAll(fn: () => void | Promise<void>): void;
   export function afterAll(fn: () => void | Promise<void>): void;
   export function setDefaultTimeout(timeoutMs: number): void;
   // Mock<T> matches the bun:test runtime mock: T (callable) plus spy methods.

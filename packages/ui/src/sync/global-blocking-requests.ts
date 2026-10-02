@@ -115,7 +115,9 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
   const reducer = new Reducer(useGlobalBlockingRequestsStore.getState());
 
   for (const payload of payloads) {
-    switch (payload.type) {
+    // `form.created`/`form.settled` are OC2 bridge-only names outside the v1
+    // event union, so the switch runs on the string form.
+    switch (payload.type as string) {
       case 'permission.asked': {
         // SAFETY: the ask event carries the full permission request as its properties, the same contract the directory reducer relies on.
         const request = payload.properties as PermissionRequest;
@@ -135,6 +137,26 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
         const props = payload.properties as { sessionID?: string; requestID?: string };
         if (props.sessionID) {
           reducer.settle(payload.type === 'permission.replied' ? 'permissions' : 'forms', props.sessionID, props.requestID);
+        }
+        continue;
+      }
+      case 'form.created':
+      case 'form.settled': {
+        // OC2 bridge-only names (v2 wire; the v1 track emits `question.*`).
+        // The wire bridge carries the v2 form object with its own `id`/`sessionID`,
+        // so the same opaque upsert/settle applies.
+        if ((payload.type as string) === 'form.created') {
+          const request = payload.properties as { sessionID?: unknown; form?: { id?: unknown; sessionID?: unknown } };
+          const form = request?.form;
+          const sessionID = typeof request?.sessionID === 'string' ? request.sessionID : (typeof form?.sessionID === 'string' ? form.sessionID : undefined);
+          if (sessionID && form && typeof form.id === 'string') {
+            reducer.ask(directory, sessionID, null, form as unknown as FormRequest);
+          }
+          continue;
+        }
+        const props = payload.properties as { sessionID?: string; formID?: string };
+        if (props.sessionID) {
+          reducer.settle('forms', props.sessionID, props.formID);
         }
         continue;
       }

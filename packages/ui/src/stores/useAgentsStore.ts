@@ -79,7 +79,7 @@ const getAgentsCacheKey = (directory: string | null, serverKey?: string | null):
   return `${serverKey?.trim() || '__local__'}::${directory?.trim() || DEFAULT_AGENTS_CACHE_KEY}`;
 };
 
-const invalidateAgentsLoadCache = (directory: string | null = getConfigDirectory(), serverKey?: string | null) => {
+export const invalidateAgentsLoadCache = (directory: string | null = getConfigDirectory(), serverKey?: string | null) => {
   agentsLastLoadedAt.delete(getAgentsCacheKey(directory, serverKey));
 };
 

@@ -1063,7 +1063,14 @@ const contextObligatoryRuntime = createContextObligatoryRuntime({
 const linearSessionStatusRuntime = createLinearSessionStatusRuntime();
 
 console.log('[session-goal] listening for local OpenCode session events');
-globalMessageStreamHub.subscribeEvent((event) => {
+// Translated intake (spine OC2-S6): these runtimes speak the v1 vocabulary, so
+// on a v2 upstream the hub hands them the translate-v2 output instead of raw
+// wire payloads. Hubs without the method (tests) keep the direct subscription;
+// on v1 the two subscriptions deliver identical events.
+const subscribeSessionConsumerEvents = globalMessageStreamHub.subscribeTranslatedEvent
+  ? globalMessageStreamHub.subscribeTranslatedEvent.bind(globalMessageStreamHub)
+  : globalMessageStreamHub.subscribeEvent.bind(globalMessageStreamHub);
+subscribeSessionConsumerEvents((event) => {
   const raw = event?.payload;
   const payload = raw?.payload && typeof raw.payload === 'object' ? raw.payload : raw;
   if (!payload || typeof payload !== 'object') return;

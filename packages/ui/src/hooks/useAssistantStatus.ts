@@ -195,6 +195,18 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         ? (currentSessionStatus as { type: 'retry'; next?: number }).next
         : undefined;
 
+    // OpenCode 2.x reports a scheduled retry on the assistant message it will
+    // retry, not as a session status (OC2 spine S6, upstream b504deb88); the
+    // next attempt's step start clears it. v1 messages never carry `retry`,
+    // so this is a no-op on the v1 track.
+    const assistantRetry = React.useMemo((): { attempt?: number; at?: number } | null => {
+        if (!lastAssistantId) return null;
+        const message = rawSessionMessages.find((candidate) => candidate.id === lastAssistantId);
+        if (message?.role !== 'assistant') return null;
+        const retry = (message as { retry?: { attempt?: number; at?: number } | null }).retry;
+        return retry ?? null;
+    }, [rawSessionMessages, lastAssistantId]);
+
     type ParsedStatusResult = {
         activePartType: 'text' | 'tool' | 'reasoning' | 'editing' | undefined;
         activeToolName: string | undefined;
@@ -380,7 +392,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         const isWorking = isPhaseWorking;
         const isStreaming = activityPhase === 'busy';
         const isCooldown = false;
-        const isRetry = activityPhase === 'retry';
+        const isRetry = activityPhase === 'retry' || (isWorking && assistantRetry !== null);
 
         let activity: AssistantActivity = 'idle';
         if (isWorking) {
@@ -392,7 +404,10 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
         }
 
         const retryInfo = isRetry
-            ? { attempt: sessionRetryAttempt, next: sessionRetryNext }
+            ? {
+                attempt: sessionRetryAttempt ?? assistantRetry?.attempt,
+                next: sessionRetryNext ?? assistantRetry?.at,
+            }
             : null;
 
         return {
@@ -416,7 +431,7 @@ export function useAssistantStatus(): AssistantStatusSnapshot {
             isComplete: false,
             retryInfo,
         };
-    }, [activityPhase, isPhaseWorking, parsedStatus, abortState, sessionRetryAttempt, sessionRetryNext]);
+    }, [activityPhase, isPhaseWorking, parsedStatus, abortState, sessionRetryAttempt, sessionRetryNext, assistantRetry]);
 
     const forming = React.useMemo<FormingSummary>(() => {
 

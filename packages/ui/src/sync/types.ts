@@ -2,6 +2,7 @@ import type { FormInfo } from "@opencode/client"
 import type {
   Agent,
   Config,
+  Event,
   LspStatus,
   Message,
   Part,
@@ -110,6 +111,23 @@ export type InitError = {
 export type FormEventFrame =
   | { type: "form.created"; properties: { sessionID: string; form: FormInfo } }
   | { type: "form.settled"; properties: { sessionID: string; formID: string } }
+
+/**
+ * OC2 bridge-only frames (spine S6): the wire bridge emits these names for
+ * v2-mode servers; the v1 wire never produces them, so they ride the same
+ * adjacent channel the `form.*` frames established. Carrying them here lets
+ * the reducer switch over `Event | FormEventFrame` exhaustively without
+ * widening the v1 `Event` union.
+ */
+export type BridgeEventFrame =
+  | { type: "session.patched"; properties: { sessionID: string; patch: Record<string, unknown> } }
+  | { type: "message.patched"; properties: { sessionID: string; messageID: string; patch: Record<string, unknown> } }
+  | {
+      type: "message.tool.transition"
+      properties: { sessionID?: string; messageID: string; partID: string; transition: Record<string, unknown> }
+    }
+
+export type DirectoryEventFrame = Event | FormEventFrame | BridgeEventFrame
 
 export type DirState = {
   lastAccessAt: number
