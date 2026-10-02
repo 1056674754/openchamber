@@ -12,6 +12,10 @@ import { OpenCodeStatusDialog } from '../ui/OpenCodeStatusDialog';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
 import { AppLinkConfirmDialog } from '@/components/chat/AppLinkConfirmDialog';
 import { SessionDialogs } from '@/components/session/SessionDialogs';
+import { SpaceAccessDialog } from '@/components/session/spaces/SpaceAccessDialog';
+import { SpaceActionsSheet, SpaceDeleteDialog } from '@/components/session/spaces/SpaceActions';
+import { SpaceApplyDialog } from '@/components/session/spaces/SpaceApplyDialog';
+import { SpaceSetupOutputDialog } from '@/components/session/spaces/SpaceSetupOutput';
 import { SessionWorktreeMoveConfirmDialog } from '@/components/session/sidebar/SessionWorktreeMoveConfirmDialog';
 import {
   cancelSessionTreeMove,
@@ -49,6 +53,7 @@ const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/Sett
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 const ArchiveView = lazyWithChunkRecovery(() => import('@/components/views/ArchiveView').then(m => ({ default: m.ArchiveView })));
 const WorktreesView = lazyWithChunkRecovery(() => import('@/components/views/WorktreesView').then(m => ({ default: m.WorktreesView })));
+const SpacesView = lazyWithChunkRecovery(() => import('@/components/views/SpacesView').then(m => ({ default: m.SpacesView })));
 const ScheduledTasksView = lazyWithChunkRecovery(() => import('@/components/session/ScheduledTasksDialog').then(m => ({ default: m.ScheduledTasksDialog })));
 
 // Mobile drawer width as screen percentage
@@ -73,6 +78,10 @@ export const MainLayout: React.FC = () => {
     const isScheduledTasksViewOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
     const isArchivePageOpen = useUIStore((state) => state.isArchivePageOpen);
     const worktreesPageProjectId = useUIStore((state) => state.worktreesPageProjectId);
+    // The grant dialogs and the spaces page exist only while the feature's switch is on.
+    const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
+    const spacesPageProjectId = useUIStore((state) => state.spacesPageProjectId);
+    const isSpacesPageOpen = isolatedSpacesEnabled && spacesPageProjectId !== null;
     const closeMainSurfaces = useUIStore((state) => state.closeMainSurfaces);
     const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
     const previousSessionIdRef = React.useRef(currentSessionId);
@@ -259,6 +268,7 @@ export const MainLayout: React.FC = () => {
       || isScheduledTasksViewOpen
       || isArchivePageOpen
       || worktreesPageProjectId !== null
+      || isSpacesPageOpen
     );
     const visibleSidebarWidth = React.useMemo(() => {
         const rawWidth = sidebarWidth || SIDEBAR_CONTENT_WIDTH;
@@ -287,6 +297,7 @@ export const MainLayout: React.FC = () => {
                 <HelpDialog />
                 <OpenCodeStatusDialog />
                 <SessionDialogs />
+                {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}
                 <SessionWorktreeMoveConfirmDialog
                     value={sessionTreeMoveConfirmation}
                     onMoveSessionOnly={() => confirmSessionTreeMove(false)}
@@ -457,6 +468,11 @@ export const MainLayout: React.FC = () => {
                                     <React.Suspense fallback={null}><WorktreesView /></React.Suspense>
                                 </ErrorBoundary>
                             )}
+                            {isSpacesPageOpen && (
+                                <ErrorBoundary>
+                                    <React.Suspense fallback={null}><SpacesView /></React.Suspense>
+                                </ErrorBoundary>
+                            )}
                         </main>
                     </div>
 
@@ -552,6 +568,11 @@ export const MainLayout: React.FC = () => {
                                             {worktreesPageProjectId !== null && (
                                                 <ErrorBoundary>
                                                     <React.Suspense fallback={null}><WorktreesView /></React.Suspense>
+                                                </ErrorBoundary>
+                                            )}
+                                            {isSpacesPageOpen && (
+                                                <ErrorBoundary>
+                                                    <React.Suspense fallback={null}><SpacesView /></React.Suspense>
                                                 </ErrorBoundary>
                                             )}
                                         </main>

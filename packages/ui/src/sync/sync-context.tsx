@@ -56,7 +56,10 @@ import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingSt
 import { applyMessageQueueUpdatedEvent, useMessageQueueStore } from "@/stores/messageQueueStore"
 import { useConfigStore, type ConfigConnectionState } from "@/stores/useConfigStore"
 import { useTodosPersistStore } from "@/stores/useTodosPersistStore"
-import { useGlobalSessionsStore } from "@/stores/useGlobalSessionsStore"
+import { useGlobalSessionsStore, refreshGlobalSessionsForDirectories } from "@/stores/useGlobalSessionsStore"
+import { useSpacesStore, refreshSpacesJourney } from "@/lib/spaces/spaces-store"
+import { spaceIdOfDirectory } from "@/lib/spaces/space-route"
+import { useUIStore } from "@/stores/useUIStore"
 import { markRemoteInstanceTransportStatus } from "@/stores/useRemoteInstancesStore"
 import { hasTerminalMessageSignal, type TerminalMessageSignalInfo } from "@/lib/messageCompletion"
 import { dispatchOpenchamberEventEnvelope } from "@/lib/openchamberEvents"
@@ -2485,6 +2488,12 @@ export function SyncProvider(props: {
           pendingMessagesRecoveredRef.current = true
           void recoverPendingMessages()
         }
+        // The first connection and every one after a gap: spaces being made or whose making
+        // failed are known only to the journey list, and a step announced during the gap was
+        // missed (upstream 211a5e713). VS Code never gets the feature (decision 16).
+        if (useUIStore.getState().isolatedSpacesEnabled && !isVSCodeRuntime()) {
+          void refreshSpacesJourney().catch(() => undefined)
+        }
       },
       onDisconnect: (reason) => {
         if (!pipelineHasConnectedRef.current) {
@@ -2505,6 +2514,35 @@ export function SyncProvider(props: {
           if (!streamDisconnected) return
           applyDisconnectedState(reason)
         }, TRANSIENT_DISCONNECT_UI_DELAY_MS)
+      },
+      // The isolated-spaces intakes (upstream d67dcca2d, 211a5e713, 688c31477). A space's
+      // stream going marks its sessions stale; back, the space's directories re-read. A
+      // creation step moves the group at once, and a gap may have swallowed steps, so a
+      // reconnect reads the journey list again — only while the switch is on, because with
+      // it off the feature has no routes.
+      onSpaceStream: ({ spaceId, status }) => {
+        if (serverId !== DEFAULT_SERVER_ID) return
+        useSpacesStore.getState().noteStream(spaceId, status)
+        if (status !== "connected") return
+        const spaceDirectory = useSpacesStore.getState().spaces.get(spaceId)?.directory
+        const directories = new Set<string>()
+        if (spaceDirectory) directories.add(spaceDirectory)
+        for (const directory of useGlobalSessionsStore.getState().sessionsByDirectory.keys()) {
+          if (spaceIdOfDirectory(directory) === spaceId) directories.add(directory)
+        }
+        if (directories.size > 0) {
+          void refreshGlobalSessionsForDirectories(directories).catch(() => undefined)
+        }
+      },
+      onSpaceProgress: (progress) => {
+        if (serverId !== DEFAULT_SERVER_ID) return
+        const known = useSpacesStore.getState().noteProgress(progress)
+        if (known && progress.step !== "ready" && progress.step !== "failed") return
+        void refreshSpacesJourney().catch(() => undefined)
+      },
+      onSpaceSetup: () => {
+        if (serverId !== DEFAULT_SERVER_ID) return
+        void refreshSpacesJourney().catch(() => undefined)
       },
     })
     return () => {

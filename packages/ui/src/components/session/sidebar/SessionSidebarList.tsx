@@ -13,6 +13,8 @@ import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { formatDirectoryName, formatPathForDisplay, cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useSessionDisplayStore, type ProjectSortOrder } from '@/stores/useSessionDisplayStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { isVSCodeRuntime } from '@/lib/desktop';
 import { Icon } from '@/components/icon/Icon';
 import {
   DropdownMenu,
@@ -421,6 +423,9 @@ export function SessionSidebarList(props: SessionSidebarListProps): React.ReactN
 
   // ---- Row rendering -------------------------------------------------------
   const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
+    // The project's isolated-spaces page opens from its menu, next to worktrees, while the
+    // feature's switch is on; VS Code never gets the feature (decision 16).
+    const spacesPageAvailable = useUIStore.getState().isolatedSpacesEnabled && !isVSCodeRuntime();
     if (row.kind === 'project-header') {
       const project: ProjectSection['project'] = projectById.get(row.section.project.id) ?? (row.section.project as ProjectSection['project']);
       const projectKey = project.id;
@@ -479,6 +484,7 @@ export function SessionSidebarList(props: SessionSidebarListProps): React.ReactN
             props.openNewWorktreeDialog();
           }}
           onManageWorktrees={() => props.openWorktreesPage(projectKey)}
+          onManageSpaces={spacesPageAvailable ? () => useUIStore.getState().setSpacesPageProjectId(projectKey) : undefined}
           onRenameStart={() => props.openProjectEditDialog(projectKey)}
           onClose={() => props.removeProject(projectKey)}
           sentinelRef={(el) => { props.projectHeaderSentinelRefs.current.set(projectKey, el); }}

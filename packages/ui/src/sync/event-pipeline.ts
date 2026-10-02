@@ -58,6 +58,24 @@ const openchamberSpaceProgressSchema = z.object({
 
 export type SpaceProgress = z.infer<typeof openchamberSpaceProgressSchema>["properties"]
 
+// The host announces a space's own event stream going and coming back (upstream d67dcca2d).
+const openchamberSpaceStreamSchema = z.object({
+  type: z.literal("openchamber:space-stream"),
+  properties: z.object({
+    spaceId: z.string().regex(/^[0-9a-f]{12}$/),
+    status: z.enum(["connected", "disconnected"]),
+    wasReady: z.boolean(),
+  }),
+})
+
+export type SpaceStreamNotice = z.infer<typeof openchamberSpaceStreamSchema>["properties"]
+
+// The setup commands of a space moved on: the list says how (upstream 688c31477).
+const openchamberSpaceSetupSchema = z.object({
+  type: z.literal("openchamber:space-setup"),
+  properties: z.object({ spaceId: z.string().regex(/^[0-9a-f]{12}$/) }),
+})
+
 export type EventPipelineInput = {
   sdk: OpencodeClient
   baseUrl?: string
@@ -72,6 +90,10 @@ export type EventPipelineInput = {
    * failure of the step that stopped it. (upstream 211a5e713)
    */
   onSpaceProgress?: (details: SpaceProgress) => void
+  /** Called when the host announces a space's own event stream going or coming back. */
+  onSpaceStream?: (details: SpaceStreamNotice) => void
+  /** Called when the setup commands of an isolated space moved on: began, the next one, or ended. */
+  onSpaceSetup?: (spaceId: string) => void
   /**
    * OC2 spine S6 intake branch. Resolves whether the server that owns an
    * incoming event speaks the OpenCode 2.x wire; when it does, raw wire
@@ -342,6 +364,8 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     onReconnect,
     onDisconnect,
     onSpaceProgress,
+    onSpaceStream,
+    onSpaceSetup,
     routeDirectory,
     wireMode,
     transport = "auto",
@@ -593,9 +617,19 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   }
 
   const enqueueEvent = (directory: string, payload: Event, serverId?: string) => {
+    const spaceStream = openchamberSpaceStreamSchema.safeParse(payload)
+    if (spaceStream.success) {
+      onSpaceStream?.(spaceStream.data.properties)
+      return
+    }
     const spaceProgress = openchamberSpaceProgressSchema.safeParse(payload)
     if (spaceProgress.success) {
       onSpaceProgress?.(spaceProgress.data.properties)
+      return
+    }
+    const spaceSetup = openchamberSpaceSetupSchema.safeParse(payload)
+    if (spaceSetup.success) {
+      onSpaceSetup?.(spaceSetup.data.properties.spaceId)
       return
     }
     // OC2 S6: a v2-mode owner's raw wire payloads are translated into the

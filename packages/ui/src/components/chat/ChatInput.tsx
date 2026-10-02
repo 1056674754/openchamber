@@ -114,6 +114,11 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
+import { isDraftSendWaiting, subscribeDraftSendWaiting } from '@/lib/worktrees/pendingDraftWorktree';
+import { isSpaceCreationRequest } from '@/lib/spaces/space-creation';
+import { spaceModelRefusal } from '@/lib/spaces/space-model-access';
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
+import { NewSpaceDialog } from '@/components/session/spaces/NewSpaceDialog';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { getWorktreesForProject } from '@/lib/worktrees/worktreeKeys';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -2385,6 +2390,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
             return;
         }
 
+        // A message to an isolated space goes only on a model the space holds a key for;
+        // otherwise it stops here with the grant action at hand (upstream 117e45456).
+        const spaceRefusal = currentSessionId
+            ? spaceModelRefusal({ requestId: null, directory: currentSessionDirectoryForSync ?? currentDirectory ?? null }, providerIdToSend)
+            : spaceModelRefusal({ requestId: newSessionDraft?.pendingWorktreeRequestId ?? null, directory: newSessionDraft?.directoryOverride ?? null }, providerIdToSend);
+        if (spaceRefusal) {
+            const provider = useConfigStore.getState().providers.find((entry) => entry.id === spaceRefusal.providerId)?.name ?? spaceRefusal.providerId;
+            toast.error(spaceRefusal.reason === 'needs_again'
+                ? t('spaces.draft.modelNeedsKeyAgain', { provider })
+                : t('spaces.draft.modelNotGranted', { provider }), {
+                action: { label: t('spaces.group.access.give'), onClick: () => useSpacesStore.getState().openAccessDialog(spaceRefusal.spaceId, spaceRefusal.providerId) },
+            });
+            return;
+        }
+
         if (queuedOnly && autoReviewRunning) {
             return;
         }
@@ -4212,6 +4232,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         return projects[0] ?? null;
     }, [activeProjectId, availableWorktreesByProject, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.directoryOverride, newSessionDraft?.preserveDirectoryOverride, newSessionDraft?.selectedProjectId, newSessionDraft?.target, projects]);
 
+    // The one entry to an isolated space: while the feature's switch is on, for a project the
+    // branch selector serves, never in VS Code (decision 16). The dialog keeps the project it
+    // was opened for, whatever the draft picks after (upstream 211a5e713).
+    const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
+    const [newSpaceProject, setNewSpaceProject] = React.useState<{ id: string; path: string } | null>(null);
+    // A message sent while the space is still being made waits for it; the composer is empty
+    // then, so this line is the only sign that the message was not lost.
+    const draftRequestId = newSessionDraft?.pendingWorktreeRequestId ?? null;
+    const messageWaitsForSpace = React.useSyncExternalStore(
+        subscribeDraftSendWaiting,
+        () => isDraftSendWaiting(draftRequestId) && isSpaceCreationRequest(draftRequestId),
+    );
+    const handleCreateSpace = React.useMemo(() => {
+        if (!isolatedSpacesEnabled || isVSCode || !selectedDraftProject) return undefined;
+        const project = { id: selectedDraftProject.id, path: selectedDraftProject.path };
+        return () => setNewSpaceProject(project);
+    }, [isVSCode, isolatedSpacesEnabled, selectedDraftProject]);
+
     const selectedDraftProjectPath = React.useMemo(
         () => normalizePath(selectedDraftProject?.path ?? null),
         [selectedDraftProject?.path],
@@ -4659,6 +4697,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     showTodos
                     leftAccessory={newSessionDraftOpen || !hasPendingChanges ? null : <PendingChangesBar />}
                 />
+                {showDraftTargetSelectors && messageWaitsForSpace ? (
+                    <p className="mb-1.5 flex items-center gap-1.5 px-0.5 typography-meta text-muted-foreground" role="status">
+                        <Icon name="time" className="size-3.5 shrink-0" />
+                        {t('spaces.draft.queued')}
+                    </p>
+                ) : null}
                 {showDraftTargetSelectors && (selectedDraftProject || newSessionDraft?.target === 'chat') ? (
                     <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
                         <Select
@@ -4735,6 +4779,21 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                                             </SelectItem>
                                         ))}
                                     </SelectGroup>
+                                    {handleCreateSpace ? (
+                                        <div className="px-2 pb-1 pt-2">
+                                            <button
+                                                type="button"
+                                                className="cursor-pointer text-muted-foreground typography-meta hover:text-foreground"
+                                                onClick={(e) => {
+                                                    e.preventDefault();
+                                                    e.stopPropagation();
+                                                    handleCreateSpace();
+                                                }}
+                                            >
+                                                {t('spaces.picker.new')}
+                                            </button>
+                                        </div>
+                                    ) : null}
                                     {selectedDraftDirectory && !selectedDraftBranchIsKnown ? (
                                         <SelectItem value={selectedDraftDirectory} className="max-w-[24rem] truncate">
                                             {selectedDraftBranchLabel}
@@ -5313,6 +5372,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
                     }}
                 />
             </React.Suspense>
+        ) : null}
+        {newSpaceProject ? (
+            <NewSpaceDialog open onOpenChange={(open) => { if (!open) setNewSpaceProject(null); }} project={newSpaceProject} />
         ) : null}
         <LinearIssuePickerDialog
             open={linearPickerOpen}

@@ -49,6 +49,8 @@ export interface SortableProjectItemProps {
   onNewSession: () => void;
   onNewWorktreeSession?: () => void;
   onManageWorktrees?: () => void;
+  /** The project's isolated spaces page; absent while the feature is off, and always in VS Code. */
+  onManageSpaces?: () => void;
   onRenameStart: () => void;
   onClose: () => void;
   sentinelRef: (el: HTMLDivElement | null) => void;
@@ -402,6 +404,7 @@ const ProjectItemInner: React.FC<SortableProjectItemProps> = ({
   onNewSession,
   onNewWorktreeSession,
   onManageWorktrees,
+  onManageSpaces,
   onRenameStart,
   onClose,
   sentinelRef,
@@ -654,6 +657,12 @@ const ProjectItemInner: React.FC<SortableProjectItemProps> = ({
                   <DropdownMenuItem onClick={onManageWorktrees}>
                     <Icon name="node-tree" className="mr-1.5 h-4 w-4" />
                     {t('sessions.sidebar.project.actions.manageWorktrees')}
+                  </DropdownMenuItem>
+                ) : null}
+                {isRepo && onManageSpaces ? (
+                  <DropdownMenuItem onClick={onManageSpaces}>
+                    <Icon name="box-3" className="mr-1.5 h-4 w-4" />
+                    {t('spaces.page.menuItem')}
                   </DropdownMenuItem>
                 ) : null}
                 <DropdownMenuItem

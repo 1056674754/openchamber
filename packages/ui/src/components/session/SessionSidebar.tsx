@@ -104,6 +104,7 @@ import {
   partitionSessionIdsByRunningStatus,
 } from './sidebar/utils';
 import { buildSidebarSessionPrefetchOrder } from './sidebar/prefetchOrder';
+import { useSidebarSpaces, refreshSpacesJourney, type SpaceMark } from '@/lib/spaces/spaces-store';
 import {
   ensureGlobalSessionsLoaded,
   mergeLiveSessionWithGlobalSession,
@@ -1019,6 +1020,28 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     [isVSCode, pinnedSessionIds],
   );
 
+  // The isolated spaces of each registered project, by normalized root, for the sidebar's
+  // space groups (upstream 1290fd121). The journey list is read once per mount while the
+  // feature's switch is on — with it off the feature has no routes and shows no groups.
+  // Progress events and journey reads elsewhere keep it current afterwards.
+  const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
+  const spaceList = useSidebarSpaces();
+  React.useEffect(() => {
+    if (!isolatedSpacesEnabled || isVSCode) return;
+    void refreshSpacesJourney().catch(() => undefined);
+  }, [isolatedSpacesEnabled, isVSCode]);
+  const spacesByProject = React.useMemo(() => {
+    const byProject = new Map<string, SpaceMark[]>();
+    for (const space of spaceList) {
+      const projectRoot = normalizePath(space.projectDirectory);
+      if (!projectRoot) continue;
+      const list = byProject.get(projectRoot);
+      if (list) list.push(space);
+      else byProject.set(projectRoot, [space]);
+    }
+    return byProject;
+  }, [spaceList]);
+
   const {
     buildGroupSearchText,
     filterSessionNodesForSearch,
@@ -1032,6 +1055,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     sessionSortMode,
     gitBranches,
     isVSCode,
+    spacesByProject,
   });
 
   const { scheduleCollapsedProjectsPersist, markProjectCollapseUserTouched } = useSidebarPersistence({

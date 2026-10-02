@@ -257,9 +257,9 @@ export const SETTINGS_REGISTRY: { readonly [K in keyof DesktopSettings]-?: Setti
   browserProvider: field({ scope: 'instance', parse: parseNonEmptyString, ui: uiStore('browserProvider', (v) => useUIStore.getState().setBrowserProvider(v)) }),
   agentNotifyToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentNotifyToolEnabled', (v) => useUIStore.getState().setAgentNotifyToolEnabled(v)) }),
   agentMemoryToolEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('agentMemoryToolEnabled', (v) => useUIStore.getState().setAgentMemoryToolEnabled(v)) }),
-  // The isolated-spaces switch. The server reads it once at start; a change takes effect at the
-  // next start. No live copy in the UI yet: the settings screen for it is a later stage.
-  isolatedSpacesEnabled: field({ scope: 'instance', parse: parseBoolean }),
+  // The isolated-spaces switch (upstream 1290fd121). Read at start; changed live through the
+  // spaces route, which stops the spaces first. Every entry point gates on the live copy.
+  isolatedSpacesEnabled: field({ scope: 'instance', parse: parseBoolean, ui: uiStore('isolatedSpacesEnabled', (v) => useUIStore.getState().setIsolatedSpacesEnabled(v)) }),
   // The idle stop of isolated spaces (decision 11). Written and read through the spaces route,
   // which also tells the running spaces, so no store keeps a copy.
   isolatedSpacesIdleStop: field({

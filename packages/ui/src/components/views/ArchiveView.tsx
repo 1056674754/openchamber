@@ -14,11 +14,14 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useShallow } from 'zustand/react/shallow';
+import { refreshSpaceArchives, useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 
 type DirectoryBucket = {
   directory: string;
   label: string;
   sessions: Session[];
+  // The chats of a deleted isolated space: named after the space, with no way to restore them.
+  fromDeletedSpace: boolean;
 };
 
 const PAGE_SIZE = 100;
@@ -39,6 +42,19 @@ export function ArchiveView(): React.ReactNode {
   const [query, setQuery] = React.useState('');
   const [selectedDirectory, setSelectedDirectory] = React.useState<string | null>(null);
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
+  const spaceArchives = useSpaceArchivesStore((state) => state.byDirectory);
+
+  // The chats of deleted spaces are read-only and named after their space; read which they are
+  // each time the page opens, since a space may have been deleted from another window.
+  React.useEffect(() => {
+    if (open) void refreshSpaceArchives().catch(() => {});
+  }, [open]);
+
+  const labelOf = React.useCallback((directory: string): string => {
+    const archive = spaceArchives?.get(directory);
+    if (archive) return archive.name;
+    return directory ? (formatDirectoryName(directory, homeDirectory) || directory) : t('sessions.archivePage.otherProjects');
+  }, [homeDirectory, spaceArchives, t]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -73,14 +89,13 @@ export function ArchiveView(): React.ReactNode {
       }
       byDirectory.set(directory, {
         directory,
-        label: directory
-          ? (formatDirectoryName(directory, homeDirectory) || directory)
-          : t('sessions.archivePage.otherProjects'),
+        label: labelOf(directory),
         sessions: [session],
+        fromDeletedSpace: spaceArchives?.has(directory) ?? false,
       });
     }
     return [...byDirectory.values()].sort((left, right) => right.sessions.length - left.sessions.length);
-  }, [homeDirectory, sortedSessions, t]);
+  }, [labelOf, sortedSessions, spaceArchives]);
 
   const filteredSessions = React.useMemo(() => {
     if (normalizedQuery) {
@@ -157,7 +172,7 @@ export function ArchiveView(): React.ReactNode {
             <div key={bucket.directory || '__none__'} className="group/dir relative">
               <button
                 type="button"
-                title={bucket.directory || undefined}
+                title={bucket.fromDeletedSpace ? t('spaces.archive.groupTitle', { name: bucket.label }) : (bucket.directory || undefined)}
                 onClick={() => {
                   setSelectedDirectory(bucket.directory);
                   setVisibleCount(PAGE_SIZE);
@@ -169,6 +184,7 @@ export function ArchiveView(): React.ReactNode {
                     : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
                 )}
               >
+                {bucket.fromDeletedSpace ? <Icon name="box-3" className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 <span className="min-w-0 flex-1 truncate">{bucket.label}</span>
                 <span className="typography-micro text-muted-foreground/70">{bucket.sessions.length}</span>
               </button>
@@ -218,7 +234,11 @@ export function ArchiveView(): React.ReactNode {
                   ? t('sessions.archivePage.empty.noMatches')
                   : t('sessions.archivePage.empty.noArchived')}
               </p>
-            ) : visibleSessions.map((session) => (
+            ) : visibleSessions.map((session) => {
+              // A deleted space's chat has nowhere to be restored to.
+              const sessionDirectory = normalizePath(resolveGlobalSessionDirectory(session)) ?? '';
+              const restorable = !(spaceArchives?.has(sessionDirectory) ?? false);
+              return (
               <div key={session.id} className="group/session relative">                <button
                   type="button"
                   onClick={() => openSession(session)}
@@ -231,7 +251,7 @@ export function ArchiveView(): React.ReactNode {
                     {formatSessionDateLabel(session.time?.archived ?? session.time?.updated ?? session.time?.created ?? Date.now())}
                   </span>
                 </button>
-                <button
+                {restorable ? <button
                   type="button"
                   onClick={() => restoreSession(session)}
                   className="absolute right-7 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:text-foreground group-hover/session:opacity-100 focus-visible:opacity-100"
@@ -240,7 +260,7 @@ export function ArchiveView(): React.ReactNode {
                   })}
                 >
                   <Icon name="inbox-unarchive" className="h-3.5 w-3.5" />
-                </button>
+                </button> : null}
                 <button
                   type="button"
                   onClick={() => sessionEvents.requestDelete({ sessions: [session], mode: 'session' })}
@@ -252,7 +272,8 @@ export function ArchiveView(): React.ReactNode {
                   <Icon name="delete-bin" className="h-3.5 w-3.5" />
                 </button>
               </div>
-            ))}
+              );
+            })}
             {remainingCount > 0 ? (
               <button
                 type="button"

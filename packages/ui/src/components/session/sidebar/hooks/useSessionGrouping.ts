@@ -3,6 +3,7 @@ import type { Session } from '@opencode-ai/sdk/v2';
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { SessionGroup, SessionNode } from '../types';
 import type { SessionSortMode } from '@/stores/useUIStore';
+import type { SpaceMark } from '@/lib/spaces/spaces-store';
 import {
   compareSessions,
   dedupeSessionsById,
@@ -22,6 +23,8 @@ type Args = {
   sessionSortMode: SessionSortMode;
   gitBranches: Map<string, string | null>;
   isVSCode: boolean;
+  /** The isolated spaces of each project, by the project's normalized root (upstream 1290fd121). */
+  spacesByProject?: ReadonlyMap<string, readonly SpaceMark[]>;
 };
 
 const isArchivedSession = (session: Session): boolean => Boolean(session.time?.archived);
@@ -152,6 +155,17 @@ export const useSessionGrouping = (args: Args) => {
         }
       });
 
+      // A space's group is keyed by the project's path inside the space, as its sessions are
+      // owned (upstream 1290fd121). VS Code never gets the feature (decision 16).
+      const projectSpaces = (normalizedProjectRoot && !args.isVSCode
+        ? args.spacesByProject?.get(normalizedProjectRoot)
+        : undefined) ?? [];
+      const spaceByDirectory = new Map<string, SpaceMark>();
+      for (const space of projectSpaces) {
+        const directory = normalizePath(space.directory);
+        if (directory) spaceByDirectory.set(directory, space);
+      }
+
       const getSessionWorktree = (session: Session): WorktreeMetadata | null => {
         const sessionDirectory = normalizePath((session as Session & { directory?: string | null }).directory ?? null);
         const sessionWorktreeMeta = args.worktreeMetadata.get(session.id) ?? null;
@@ -191,6 +205,7 @@ export const useSessionGrouping = (args: Args) => {
         const normalizedDir = metadataPath ?? sessionDirectory ?? fallbackDirectory;
         if (!normalizedDir) return archivedKey;
         if (normalizedDir !== normalizedProjectRoot && worktreeByPath.has(normalizedDir)) return normalizedDir;
+        if (spaceByDirectory.has(normalizedDir)) return normalizedDir;
         if (normalizedDir === normalizedProjectRoot) return normalizedProjectRoot ?? '__project_root__';
         return archivedKey;
       };
@@ -290,6 +305,24 @@ export const useSessionGrouping = (args: Args) => {
         });
       });
 
+      // One group per space, after the worktrees, in the host's order; a space with no session
+      // yet is still a group, so the user sees it is there (upstream 1290fd121).
+      for (const [directory, space] of spaceByDirectory) {
+        groups.push({
+          id: `space:${space.id}`,
+          label: space.name || t('sessions.sidebar.grouping.spaceUnnamed'),
+          branch: null,
+          description: null,
+          isMain: false,
+          isArchivedBucket: false,
+          worktree: null,
+          space,
+          directory,
+          folderScopeKey: directory,
+          sessions: groupedNodes.get(directory) ?? [],
+        });
+      }
+
       const archivedSessions = groupedNodes.get(archivedKey) ?? [];
       groups.push({
         id: 'archived',
@@ -306,7 +339,7 @@ export const useSessionGrouping = (args: Args) => {
 
       return groups;
     },
-    [args.homeDirectory, args.worktreeMetadata, args.globalPinnedSessionIds, args.pinnedSessionIdsByProject, args.pinnedOrderByProject, args.sessionSortMode, args.gitBranches, args.isVSCode, t],
+    [args.homeDirectory, args.worktreeMetadata, args.globalPinnedSessionIds, args.pinnedSessionIdsByProject, args.pinnedOrderByProject, args.sessionSortMode, args.gitBranches, args.isVSCode, args.spacesByProject, t],
   );
 
   return {

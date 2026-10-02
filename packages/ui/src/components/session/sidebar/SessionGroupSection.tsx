@@ -30,6 +30,9 @@ import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { SpaceActionsMenu } from '@/components/session/spaces/SpaceActions';
+import { SpaceGroupStatus } from '@/components/session/spaces/SpaceGroupStatus';
+import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import {
   buildSessionNodeRenderExtras,
   type SessionNodeChildRenderExtras,
@@ -101,7 +104,7 @@ type Props = {
   setActiveProjectIdOnly: (id: string) => void;
   setActiveMainTab: (tab: MainTab) => void;
   setSessionSwitcherOpen: (open: boolean) => void;
-  openNewSessionDraft: (options?: { directoryOverride?: string | null; targetFolderId?: string; selectedProjectId?: string | null; target?: 'chat' | 'project'; chatServerId?: string | null }) => void;
+  openNewSessionDraft: (options?: { directoryOverride?: string | null; targetFolderId?: string; selectedProjectId?: string | null; target?: 'chat' | 'project'; chatServerId?: string | null; preserveDirectoryOverride?: boolean }) => void;
   addSessionToFolder: (scopeKey: string, folderId: string, sessionId: string) => void;
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   renamingFolderId: string | null;
@@ -830,13 +833,31 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
 
   const renderFolderItems = () => rootFolders.map((entry) => renderOneFolderItem(entry, 0));
   const hasWorktreeDeleteAction = Boolean(!group.isMain && group.worktree);
+  // The space did not answer the host's last read: its last known sessions stand in, and the
+  // user should know they may be old (upstream 1290fd121).
+  const spaceStaleIndicator = group.space && group.space.state !== 'complete' ? (
+    <span
+      className="inline-flex flex-shrink-0 items-center text-status-warning"
+      title={t('sessions.sidebar.group.spaceStale')}
+      aria-label={t('sessions.sidebar.group.spaceStale')}
+    >
+      <Icon name="alert" className="h-3 w-3" />
+    </span>
+  ) : null;
+  // A space's group carries the grant dialog's key and its actions menu beside its new-draft button.
+  const hasSecondHeaderAction = hasWorktreeDeleteAction || Boolean(group.space);
+  const hasThirdHeaderAction = Boolean(group.space);
   const groupHeaderRightPadding = alwaysShowActions
-    ? (hasWorktreeDeleteAction ? 'pr-14' : 'pr-7')
+    ? (hasThirdHeaderAction ? 'pr-20' : hasSecondHeaderAction ? 'pr-14' : 'pr-7')
     : isMinimalMode
-      ? (hasWorktreeDeleteAction
+      ? (hasThirdHeaderAction
+          ? 'pr-2 group-hover/gh:pr-20 group-focus-within/gh:pr-20'
+          : hasSecondHeaderAction
           ? 'pr-2 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
           : 'pr-2')
-      : (hasWorktreeDeleteAction
+      : (hasThirdHeaderAction
+          ? 'pr-5 group-hover/gh:pr-20 group-focus-within/gh:pr-20'
+          : hasSecondHeaderAction
           ? 'pr-5 group-hover/gh:pr-14 group-focus-within/gh:pr-14'
           : 'pr-5');
 
@@ -1051,9 +1072,10 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
               ) : (
                 <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                   <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-                    <Icon name="git-branch"
+                    <Icon name={group.space ? 'box-3' : 'git-branch'}
                       className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground', alwaysShowActions ? 'hidden' : 'group-hover/gh:hidden')}
                       style={branchIconColor ? { color: branchIconColor } : undefined}
+                      aria-label={group.space ? t('sessions.sidebar.group.space') : undefined}
                     />
                     <span className={cn(
                       'text-muted-foreground h-3.5 w-3.5 items-center justify-center',
@@ -1063,6 +1085,7 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
                     </span>
                   </span>
                   <span className="min-w-0 flex-1 truncate">{renderHighlightedText(group.label, normalizedSessionSearchQuery)}</span>
+                  {spaceStaleIndicator}
                 </span>
               )}
               {groupActivityState ? (
@@ -1181,6 +1204,31 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
             </Tooltip>
           </div>
         ) : null}
+        {group.space ? (
+          <div className={cn('absolute right-7 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (group.space) useSpacesStore.getState().openAccessDialog(group.space.id);
+                  }}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  aria-label={t('spaces.group.access.giveAria', { label: group.label })}
+                >
+                  <Icon name="key" className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('spaces.group.access.give')}</p></TooltipContent>
+            </Tooltip>
+          </div>
+        ) : null}
+        {group.space ? (
+          <div className={cn('absolute right-[3.25rem] top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100 has-[[data-popup-open]]:opacity-100')}>
+            <SpaceActionsMenu spaceId={group.space.id} label={group.label} />
+          </div>
+        ) : null}
         {group.directory ? (
           <div className={cn('absolute right-0.5 top-1/2 -translate-y-1/2 z-10 transition-opacity', alwaysShowActions ? 'opacity-100' : 'opacity-0 group-hover/gh:opacity-100 group-focus-within/gh:opacity-100')}>
             <Tooltip>
@@ -1192,11 +1240,14 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
                     if (projectId && projectId !== activeProjectId) setActiveProjectIdOnly(projectId);
                     setActiveMainTab('chat');
                     if (mobileVariant) setSessionSwitcherOpen(false);
+                    // A space's directory exists inside the space only; the host's directory
+                    // probe would call it missing and move the draft to the project.
                     openNewSessionDraft({
                       directoryOverride: group.directory,
                       selectedProjectId: projectId,
                       target: group.draftTarget,
                       chatServerId: group.draftTarget === 'chat' ? serverId : null,
+                      preserveDirectoryOverride: Boolean(group.space),
                     });
                   }}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-interactive-hover/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
@@ -1210,6 +1261,8 @@ function SessionGroupSectionImpl(props: Props): React.ReactNode {
            </div>
          ) : null}
       </div>
+      {/* Outside the header, which is a button of its own: the status line can hold one. */}
+      {group.space ? <SpaceGroupStatus spaceId={group.space.id} className="pb-1 pl-5" /> : null}
       {renderBody !== false && !isCollapsed ? <div className={cn('oc-group-body', groupBodyPaddingClass)}>{body}</div> : null}
     </div>
   );
