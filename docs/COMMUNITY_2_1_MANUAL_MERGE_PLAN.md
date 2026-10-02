@@ -79,16 +79,16 @@
 
 | # | 决策 | 默认/建议 | 状态 |
 | --- | --- | --- | --- |
-| D1 | OC2 脊柱（~450 文件）拆 6-8 子批"代码先行、运行时门控" | 执行 | 待确认 |
-| D2 | Spaces 隔离空间（~24k 行，跨三段 + Docker 依赖） | 单独末批或延后 | 待拍板 |
-| D3 | Enterprise 模式（6c：策略文件/扩展白名单/断网） | 待拍板（单机自用大概率不做） | 待拍板 |
+| D1 | OC2 脊柱（~450 文件）拆 6-8 子批"代码先行、运行时门控" | 执行 | ✅ 现在拆批并行推（2026-10-01） |
+| D2 | Spaces 隔离空间（~24k 行，跨三段 + Docker 依赖） | 单独末批或延后 | ✅ 立项，排末批（B8） |
+| D3 | Enterprise 模式（6c） | 待拍板 | ✅ 做（随权限批次） |
 | D4 | nl 第 12 locale | 随 i18n 收尾批补齐 | 默认执行 |
 | D5 | 触鸿蒙未提交文件的 8 个 commit | 与鸿蒙落地时间协调排序 | 协调项 |
 | D6 | Excalidraw 只按 #192 扩展终态移植（跳过中间态） | 按分类建议 | 默认执行 |
-| D7 | 评论模式块（SegA 5c） | 整块引入 | 待确认 |
+| D7 | 评论模式块（SegA 5c） | 整块引入 | 默认执行 |
 | D8 | #88 会话历史逐出 vs fork 自有 retention | 先做等价核实 | 默认执行 |
 | D9 | dictation ×2、上游 markdownCore 修复、浏览器标注 | 不做（fork 自研/无表面） | 按分类建议 |
-| D10 | PR 家族对齐上游 vs 保留 fork 自研 pr-status | 待核对后定 | 待确认 |
+| D10 | PR 家族对齐上游 vs 保留 fork 自研 pr-status | 待核对后定 | 执行到对应批次核对 |
 
 ## 批次计划（按依赖序，执行前细化）
 
@@ -105,6 +105,16 @@
 | B8 | Spaces（若 D2 立项） | SegA 基础 + SegB 5a-5d + Docker |
 | B9 | Enterprise（若 D3 做） | B2 |
 | B10 | i18n nl + 杂项 + signature token 全量验证 + 三绿 + 台账 | 全部 |
+
+## 执行挂账（滚动记录）
+
+- **B1 完成**（2026-10-01，45 上游 commit / 14 git commit，HEAD 57e8f75e2）：quota/stats、服务器健壮性、主题/models、agents/settings/skills、chat 小修、worktree/玻璃、windows/vscode/control、dev-tunnel/fs、ui 收尾。跳过 24 项有因（鸿蒙 foreign 6、OC2/基建 7、fork 无表面 8、已等价 4）。type-check 8 包 0 错、web 1917 过。
+- **OC2 脊柱 6/8 批完成**（2026-10-01/02）：S1 e7232d293（双栈+探测基座）、S2 1b333c5a2（translate-v2 24 事件+凭据+托管配置+hub mode 分支）、S3 e89cd32e8（config-v2+迁移链+routes 双轨）、S4 afa9f4f52（small-model 双轨+会话元数据/归档存储）、S5 a1811aaaf（UI SDK 双轨句柄+projection trio）、S7 cf334f00c（Question→Form 改名 94 文件+FormDock 家族+nl 起步）。**S6（sync 接线）与 S8（最终接线）挂起等鸿蒙让位**（触及 server/index.js、runtime-fetch.ts、Header、MainLayout 等 7 个 foreign 文件）。
+- **B3 完成**（2026-10-02，2 commits：d84bf8b88 权限三模式 68 文件、1e5441ba0 Enterprise 52 文件 + v2 plugin shape 280272412）。fork 语义保全：v1 请求路径保留、client 仅 auto 会话代答、schedule-task 布尔兼容、vscode on/off 视图保留。
+- **B5 进行中**：files/editor + CodeMirror 三连 + multirun composer。
+- **待鸿蒙让位后补**：MERGE_V1.12.md 台账证据（B1 14 条 + 脊柱各批 + B3）；index.js 侧接线（shutdown/guests 3 行、B3 四处权限/断网/relay、S2 一处 subscribeTranslatedEvent、S4 两处 store 注入、S8 final wiring）；VS Code enterprise-policy 桥路由；MobileApp 2 行。
+- **等价核实挂账**：启动族 3 项（367e5c926/2832c9254/b3760852e）；perf 3 项（40a17b11a/7a5568769/32d0b4de0）；#88 retention 等价核实；PR 家族对齐核对（D10）。
+- **stash 遗留**：事故副本 stash@{2}（f305b975b WIP 重复件）仍待用户审后清理。
 
 ## 验证计划
 
