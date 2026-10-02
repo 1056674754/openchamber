@@ -1,6 +1,7 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { cn, getModifierLabel } from '@/lib/utils';
+import { useJevBlockedByEnterprise } from '@/stores/useEnterprisePolicyStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSettingsProjectTarget } from '@/hooks/useSettingsProjectTarget';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -159,10 +160,10 @@ const pageOrder: SettingsPageSlug[] = [
   'pairing',
 ];
 
-function buildRuntimeContext(isDesktop: boolean, routingAvailable: boolean): SettingsRuntimeContext {
+function buildRuntimeContext(isDesktop: boolean, routingAvailable: boolean, jevBlockedByEnterprise: boolean): SettingsRuntimeContext {
   const isVSCode = isVSCodeRuntime();
   const isWeb = !isDesktop && isWebRuntime();
-  return { isVSCode, isWeb, isDesktop, isDesktopServer: isDesktop, routingAvailable };
+  return { isVSCode, isWeb, isDesktop, isDesktopServer: isDesktop, routingAvailable, jevBlockedByEnterprise };
 }
 
 function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
@@ -327,13 +328,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, []);
 
   const routingAvailable = useUIStore((state) => state.routingFeatureAvailable);
+  // Enterprise mode leaves nothing to set up, so pages that only configure Jev hide.
+  const jevBlockedByEnterprise = useJevBlockedByEnterprise();
   const [runtimeCtx, setRuntimeCtx] = React.useState<SettingsRuntimeContext>(
-    () => buildRuntimeContext(isDesktopApp, routingAvailable),
+    () => buildRuntimeContext(isDesktopApp, routingAvailable, jevBlockedByEnterprise),
   );
   // The routing flag arrives through the settings snapshot after mount.
   React.useEffect(() => {
-    setRuntimeCtx((prev) => (prev.routingAvailable === routingAvailable ? prev : { ...prev, routingAvailable }));
-  }, [routingAvailable]);
+    setRuntimeCtx((prev) => (
+      prev.routingAvailable === routingAvailable && prev.jevBlockedByEnterprise === jevBlockedByEnterprise
+        ? prev
+        : { ...prev, routingAvailable, jevBlockedByEnterprise }
+    ));
+  }, [routingAvailable, jevBlockedByEnterprise]);
 
   React.useEffect(() => {
     if (isDesktopApp) return;

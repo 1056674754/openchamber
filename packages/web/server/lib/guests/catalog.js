@@ -9,6 +9,8 @@ import { effectiveGrants, guestGrantScope } from './grant-scope.js';
 import { onExtensionStoreWrite, readExtensionStore } from './persist.js';
 import { buildPublicSocketBindings } from './sockets.js';
 import { isReservedBuiltInId, readBuiltInRegistry } from './builtins.js';
+import { enterpriseBlockedCapabilities } from './enterprise.js';
+import { readEnterprisePolicy } from '../enterprise-mode.js';
 
 const builtInsByStore = new Map();
 
@@ -318,6 +320,9 @@ export const toPublicGuest = (guest) => {
   if (attach === 'dialog' && typeof guest.attachEntry === 'string' && guest.attachEntry) {
     row.attachEntry = guest.attachEntry;
   }
+  if (guest.enterpriseBlocked?.length) {
+    row.enterpriseBlocked = [...guest.enterpriseBlocked];
+  }
   if (guest.integration) {
     row.integration = toPublicIntegration(guest.integration);
   }
@@ -383,17 +388,38 @@ export const invalidateGuestCatalog = (persistPath) => {
 };
 onExtensionStoreWrite(invalidateGuestCatalog);
 
+/**
+ * Enterprise mode, applied on every read after the cache so a policy change
+ * counts at once: a package whose gated capabilities the policy refuses keeps
+ * none of them, and `enterpriseBlocked` names them for Settings. Every route
+ * and proxy takes grants from this row, so none of them can use the refused
+ * capabilities.
+ */
+const withEnterprisePolicy = (guests) => {
+  const policy = readEnterprisePolicy();
+  if (!policy.enterpriseMode) return guests;
+  return guests.map((guest) => {
+    const blocked = enterpriseBlockedCapabilities(guest, { source: guest.source, gitUrl: guest.gitOrigin?.url }, policy);
+    if (blocked.length === 0) return guest;
+    return {
+      ...guest,
+      capabilityGrants: guest.capabilityGrants.filter((capability) => !blocked.includes(capability)),
+      enterpriseBlocked: blocked,
+    };
+  });
+};
+
 export const listInstalledGuests = async ({ persistPath } = {}) => {
   const cached = persistPath ? catalogCache.get(persistPath) : undefined;
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.guests;
+    return withEnterprisePolicy(cached.guests);
   }
   const version = persistPath ? catalogVersionOf(persistPath) : 0;
   const guests = await listInstalledGuestsUncached({ persistPath });
   if (persistPath && catalogVersionOf(persistPath) === version) {
     catalogCache.set(persistPath, { guests, expiresAt: Date.now() + CATALOG_CACHE_TTL_MS });
   }
-  return guests;
+  return withEnterprisePolicy(guests);
 };
 
 const listInstalledGuestsUncached = async ({ persistPath } = {}) => {

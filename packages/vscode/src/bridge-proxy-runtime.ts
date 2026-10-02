@@ -3,6 +3,7 @@ import { waitForApiUrl } from './opencode-ready';
 import { getConfiguredProviderIds } from './opencodeConfig';
 import { readSettings } from './bridge-settings-runtime';
 import { projectProviderCatalogResponse, providerPrefixOf, collectReferencedProviderIds } from './provider-catalog-filter';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, isProviderConnectRequest } from '../../web/server/lib/enterprise-mode.js';
 
 type BridgeMessageInput = {
   id: string;
@@ -145,6 +146,16 @@ export async function handleProxyBridgeMessage(
       const localFsResponse = await deps.tryHandleLocalFsProxy(normalizedMethod, normalizedPath);
       if (localFsResponse) {
         return { id, type, success: true, data: localFsResponse };
+      }
+
+      // Enterprise mode: the same provider-connect routes the web server refuses.
+      if (isProviderConnectRequest(normalizedMethod, normalizedPath) && isEnterpriseMode()) {
+        const data: ApiProxyResponsePayload = {
+          status: 403,
+          headers: { 'content-type': 'application/json' },
+          bodyText: JSON.stringify({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' }),
+        };
+        return { id, type, success: true, data };
       }
 
       const apiUrl = await waitForApiUrl(ctx?.manager);

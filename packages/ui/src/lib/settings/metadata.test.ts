@@ -87,6 +87,7 @@ describe('settings page instance visibility', () => {
         isDesktop: true,
         isDesktopServer: true,
         routingAvailable: false,
+        jevBlockedByEnterprise: false,
       })).toBe(false);
     }
   });
@@ -100,6 +101,7 @@ describe('settings page instance visibility', () => {
       isDesktop: true,
       isDesktopServer: true,
       routingAvailable: false,
+      jevBlockedByEnterprise: false,
     })).toBe(false);
   });
 });

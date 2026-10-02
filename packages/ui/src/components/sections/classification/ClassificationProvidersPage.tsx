@@ -18,6 +18,7 @@ import { useRoutingStore } from '@/stores/useRoutingStore';
 import { openExternalUrl } from '@/lib/url';
 import { useClassifierSourceName } from './classifierSources';
 import { SettingsInlineLink } from './JevAccessNote';
+import { CustomEndpointFields } from './CustomEndpointFields';
 
 // The docs keep the list of features Jev answers for, so this page never goes stale.
 const CLASSIFICATION_DOCS_URL = 'https://docs.openchamber.dev/classification-providers/';
@@ -60,6 +61,9 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
   const loadError = useRoutingStore((state) => state.loadError);
   const classifier = useRoutingStore((state) => state.classifier);
   const tokenPresent = useRoutingStore((state) => state.tokenPresent);
+  const customEndpoint = useRoutingStore((state) => state.customEndpoint);
+  // Enterprise mode leaves Off, or the administrator's pinned endpoint, as the only choices.
+  const locked = useRoutingStore((state) => state.enterpriseMode);
   const load = useRoutingStore((state) => state.load);
   const setClassifierSource = useRoutingStore((state) => state.setClassifierSource);
   const setToken = useRoutingStore((state) => state.setToken);
@@ -113,16 +117,19 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
     }
   };
 
-  const status = !classifier || classifier.selected === 'off'
-    ? null
-    : classifier.effective === null
-      ? t('settings.classification.status.none')
-      : classifier.effective !== classifier.selected && effectiveName
-        ? t('settings.classification.status.fallback', { provider: effectiveName })
-        : null;
+  const status = locked
+    ? (customEndpoint?.pinned ? t('settings.classification.status.enterprisePinned') : t('settings.classification.status.enterprise'))
+    : !classifier || classifier.selected === 'off'
+      ? null
+      : classifier.effective === null
+        ? t('settings.classification.status.none')
+        : classifier.effective !== classifier.selected && effectiveName
+          ? t('settings.classification.status.fallback', { provider: effectiveName })
+          : null;
 
   const promoUsable = usable('zen-promo');
   const zenKeyUsable = usable('zen-key');
+  const customUsable = usable('custom');
   const missingKeyFor = (text: string, provider: string): React.ReactNode => (
     onOpenProvider
       ? (
@@ -153,6 +160,7 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
       {!loaded ? null : !available || !classifier ? (
         <p className={SETTINGS_DESCRIPTION_CLASS}>{t('settings.classification.unavailable')}</p>
       ) : (
+        <>
         <SettingsSection
           title={t('settings.classification.jev.title')}
           info={t('settings.classification.jev.info')}
@@ -168,38 +176,55 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                 label={t('settings.classification.source.off.name')}
                 description={t('settings.classification.source.off.description')}
               />
-              {/* The promotion is offered only while it runs; after that it is not a choice. */}
-              {promoUsable || classifier.selected === 'zen-promo' ? (
+              {/* Enterprise mode leaves Off as the only choice. */}
+              {locked ? null : (
+                <>
+                  {/* The promotion is offered only while it runs; after that it is not a choice. */}
+                  {promoUsable || classifier.selected === 'zen-promo' ? (
+                    <SettingsRadioOption
+                      selected={classifier.selected === 'zen-promo'}
+                      onSelect={() => void pick('zen-promo')}
+                      disabled={!promoUsable}
+                      label={t('settings.classification.source.zenPromo.name')}
+                      description={promoUsable
+                        ? t('settings.classification.source.zenPromo.description')
+                        : t('settings.classification.source.zenPromo.ended')}
+                    />
+                  ) : null}
+                  <SettingsRadioOption
+                    selected={classifier.selected === 'zen-key'}
+                    onSelect={() => void pick('zen-key')}
+                    disabled={!zenKeyUsable}
+                    label={t('settings.classification.source.zenKey.name')}
+                    description={zenKeyUsable
+                      ? t('settings.classification.source.zenKey.description')
+                      : missingKeyFor(t('settings.classification.source.zenKey.missing'), 'OpenCode Zen')}
+                  />
+                  <SettingsRadioOption
+                    selected={classifier.selected === 'typesafe'}
+                    onSelect={() => void pick('typesafe')}
+                    disabled={!tokenPresent}
+                    label={t('settings.classification.source.typesafe.name')}
+                    description={tokenPresent
+                      ? t('settings.classification.source.typesafe.description')
+                      : t('settings.classification.source.typesafe.missing')}
+                  />
+                </>
+              )}
+              {!locked || customEndpoint?.pinned ? (
                 <SettingsRadioOption
-                  selected={classifier.selected === 'zen-promo'}
-                  onSelect={() => void pick('zen-promo')}
-                  disabled={!promoUsable}
-                  label={t('settings.classification.source.zenPromo.name')}
-                  description={promoUsable
-                    ? t('settings.classification.source.zenPromo.description')
-                    : t('settings.classification.source.zenPromo.ended')}
+                  selected={classifier.selected === 'custom'}
+                  onSelect={() => void pick('custom')}
+                  disabled={!customUsable}
+                  label={t('settings.classification.source.custom.name')}
+                  description={customEndpoint && customUsable
+                    ? t('settings.classification.source.custom.description', { url: customEndpoint.url })
+                    : t('settings.classification.source.custom.missing')}
                 />
               ) : null}
-              <SettingsRadioOption
-                selected={classifier.selected === 'zen-key'}
-                onSelect={() => void pick('zen-key')}
-                disabled={!zenKeyUsable}
-                label={t('settings.classification.source.zenKey.name')}
-                description={zenKeyUsable
-                  ? t('settings.classification.source.zenKey.description')
-                  : missingKeyFor(t('settings.classification.source.zenKey.missing'), 'OpenCode Zen')}
-              />
-              <SettingsRadioOption
-                selected={classifier.selected === 'typesafe'}
-                onSelect={() => void pick('typesafe')}
-                disabled={!tokenPresent}
-                label={t('settings.classification.source.typesafe.name')}
-                description={tokenPresent
-                  ? t('settings.classification.source.typesafe.description')
-                  : t('settings.classification.source.typesafe.missing')}
-              />
             </SettingsRadioGroup>
 
+            {locked ? null : (
             <SettingsFieldRow
               label={t('settings.routing.token.label')}
               info={t('settings.routing.token.info')}
@@ -226,9 +251,12 @@ export const ClassificationProvidersPage: React.FC<ClassificationProvidersPagePr
                 ) : null}
               </div>
             </SettingsFieldRow>
+            )}
             {tokenError ? <p className={SETTINGS_DESCRIPTION_CLASS}>{tokenError}</p> : null}
           </div>
         </SettingsSection>
+        {!locked || customEndpoint?.pinned ? <CustomEndpointFields /> : null}
+        </>
       )}
     </SettingsPageLayout>
   );

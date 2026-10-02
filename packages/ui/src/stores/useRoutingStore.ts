@@ -10,10 +10,13 @@ import {
   clearRoutingToken,
   fetchRoutingState,
   ROUTING_UNAVAILABLE,
+  clearCustomEndpoint,
   saveClassifierSource,
+  saveCustomEndpoint,
   saveRoutingConfig,
   saveRoutingToken,
   type ClassifierSource,
+  type CustomEndpointInput,
   type RoutingConfig,
   type RoutingHeldPermission,
   type RoutingState,
@@ -48,6 +51,8 @@ interface RoutingStoreState extends RoutingState {
   setToken: (token: string) => Promise<void>;
   clearToken: () => Promise<void>;
   setClassifierSource: (source: ClassifierSource) => Promise<void>;
+  setCustomEndpoint: (endpoint: CustomEndpointInput) => Promise<void>;
+  clearCustomEndpoint: () => Promise<void>;
 }
 
 /** Bumped on every load and every runtime switch; a response from an older generation is dropped. */
@@ -131,6 +136,18 @@ export const useRoutingStore = create<RoutingStoreState>()((set, get) => ({
   setClassifierSource: async (source) => {
     const generation = loadGeneration;
     const state = await saveClassifierSource(source);
+    if (generation === loadGeneration) get().applyState(state);
+  },
+
+  setCustomEndpoint: async (endpoint) => {
+    const generation = loadGeneration;
+    const state = await saveCustomEndpoint(endpoint);
+    if (generation === loadGeneration) get().applyState(state);
+  },
+
+  clearCustomEndpoint: async () => {
+    const generation = loadGeneration;
+    const state = await clearCustomEndpoint();
     if (generation === loadGeneration) get().applyState(state);
   },
 }));

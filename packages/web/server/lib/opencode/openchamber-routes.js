@@ -6,6 +6,7 @@ import {
   SessionMarkersValidationError,
 } from './session-markers-store.js';
 import { getPluginStatus } from './plugin-bootstrap.js';
+import { publicEnterprisePolicy } from '../enterprise-mode.js';
 
 export const registerOpenChamberRoutes = (app, dependencies) => {
   const {
@@ -26,6 +27,12 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
 
   let cachedModelsMetadata = null;
   let cachedModelsMetadataTimestamp = 0;
+
+  // Whether an administrator turned on enterprise mode, and by which source.
+  // Pinned endpoints and keys never leave the server.
+  app.get('/api/openchamber/enterprise-policy', (_req, res) => {
+    res.json(publicEnterprisePolicy());
+  });
 
   app.get('/api/openchamber/update-check', async (req, res) => {
     try {

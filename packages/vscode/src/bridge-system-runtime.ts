@@ -17,6 +17,7 @@ import { normalizeWindowsDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { reconstructOriginalContentFromPatch } from './patchReconstruction';
 import type { BridgeContext, BridgeResponse } from './bridge';
+import { isEnterpriseMode } from '../../web/server/lib/enterprise-mode.js';
 
 type BridgeMessageInput = {
   id: string;
@@ -351,7 +352,9 @@ export async function handleSystemBridgeMessage(
         const archRaw = typeof body.arch === 'string' && body.arch.trim().length > 0
           ? body.arch.trim()
           : os.arch();
-        const reportUsage = body.reportUsage !== false;
+        // Enterprise mode keeps the check (security fixes must reach the
+        // machine) but never reports usage.
+        const reportUsage = body.reportUsage !== false && !isEnterpriseMode();
 
         const installId = getOrCreateInstallId('vscode');
         const requestBody = {

@@ -193,6 +193,7 @@ export const VoiceSettings: React.FC = () => {
     const [previewAudio, setPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
     const [isOpenAIAvailable, setIsOpenAIAvailable] = useState(false);
+    const [voiceEnterpriseMode, setVoiceEnterpriseMode] = useState(false);
     const [isOpenAIPreviewPlaying, setIsOpenAIPreviewPlaying] = useState(false);
     const [openaiPreviewAudio, setOpenaiPreviewAudio] = useState<HTMLAudioElement | null>(null);
 
@@ -286,7 +287,9 @@ export const VoiceSettings: React.FC = () => {
                 const data = await response.json();
                 const hasServerKey = data.available;
                 const hasSettingsKey = openaiApiKey.trim().length > 0;
-                setIsOpenAIAvailable(hasServerKey || hasSettingsKey);
+                // The server refuses cloud speech and remote custom servers; this only explains why.
+                setVoiceEnterpriseMode(data.enterpriseMode === true);
+                setIsOpenAIAvailable(!data.enterpriseMode && (hasServerKey || hasSettingsKey));
             } catch {
                 setIsOpenAIAvailable(openaiApiKey.trim().length > 0);
             }
@@ -584,6 +587,10 @@ export const VoiceSettings: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
+
+                            {voiceEnterpriseMode && (voiceProvider === 'openai' || voiceProvider === 'openai-compatible') && (
+                                <p className="typography-meta py-1 text-muted-foreground">{t('settings.voice.page.enterpriseMode')}</p>
+                            )}
 
                             {/* OpenAI API Key */}
                             {voiceProvider === 'openai' && (

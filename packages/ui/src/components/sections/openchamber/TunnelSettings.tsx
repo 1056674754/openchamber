@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { openExternalUrl } from '@/lib/url';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
+import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 
 type TunnelState =
   | 'checking'
@@ -345,6 +346,8 @@ const createPresetId = (): string => {
 
 export const TunnelSettings: React.FC = () => {
   const { t } = useI18n();
+  // The server refuses every tunnel; this page only explains why while none is active.
+  const enterpriseLocked = useEnterprisePolicyStore((st) => st.enterpriseMode);
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const tUnsafe = React.useCallback((key: string) => t(key as Parameters<typeof t>[0]), [t]);
   const [state, setState] = React.useState<TunnelState>('checking');
@@ -1220,6 +1223,18 @@ export const TunnelSettings: React.FC = () => {
     return (
       <div className="flex items-center justify-center py-12">
         <span className="h-1.5 w-1.5 rounded-full bg-current animate-busy-pulse" aria-label={t('settings.openchamber.tunnel.state.loading')} />
+      </div>
+    );
+  }
+
+  // Enterprise mode: the server refuses every tunnel, so there is nothing to offer.
+  if (enterpriseLocked && state !== 'active') {
+    return (
+      <div className="mb-6">
+        <div className="mb-0.5 px-1">
+          <h3 className="typography-ui-header font-medium text-foreground">{t('settings.openchamber.tunnel.title')}</h3>
+        </div>
+        <p className="typography-meta text-muted-foreground px-1">{t('settings.openchamber.tunnel.enterpriseMode')}</p>
       </div>
     );
   }

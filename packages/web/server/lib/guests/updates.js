@@ -10,6 +10,7 @@ import { cloneGitRepository, prepareGuestGitNetwork, runGit } from './clone.js';
 import { unwrapGuestRoot } from './extract-zip.js';
 import { guestCopiesDir, isCopiedGuestRoot } from './persist.js';
 import { stopGuestService } from './service.js';
+import { enterpriseBlockedCapabilities } from './enterprise.js';
 
 /** A remote check runs at most this often per guest unless the user forces it. */
 export const UPDATE_CHECK_TTL_MS = 60 * 60 * 1000;
@@ -249,6 +250,12 @@ export const updateGuest = async ({ guest, origin, persistPath, openchamberVersi
     if (inspected.guest.id !== guest.id) {
       await removeDir(staging);
       return { ok: false, code: 'invalid-manifest' };
+    }
+    // A version that starts asking for what enterprise mode refuses from this
+    // repository stays uninstalled; the current one keeps working.
+    if (enterpriseBlockedCapabilities(inspected.guest, { source: 'git', gitUrl: origin.url }).length > 0) {
+      await removeDir(staging);
+      return { ok: false, code: 'enterprise-mode' };
     }
   } catch {
     await removeDir(staging);

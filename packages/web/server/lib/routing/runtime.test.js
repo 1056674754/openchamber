@@ -18,7 +18,7 @@ const readyConfig = () => {
   return config;
 };
 
-const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError, flag = '1', classifierSource = null, providerKeys = { zenKey: null } } = {}) => {
+const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError, flag = '1', classifierSource = null, customEndpoint = null, providerKeys = { zenKey: null }, enterprise = false, pinned = null } = {}) => {
   process.env.OPENCHAMBER_ROUTING_ENABLE = flag;
   const events = [];
   const store = {
@@ -29,6 +29,9 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError,
     clearToken: vi.fn(async () => undefined),
     readClassifierSource: vi.fn(async () => classifierSource),
     writeClassifierSource: vi.fn(async (source) => source),
+    readCustomEndpoint: vi.fn(async () => customEndpoint),
+    writeCustomEndpoint: vi.fn(async () => undefined),
+    clearCustomEndpoint: vi.fn(async () => undefined),
   };
   const jev = { ask: vi.fn(async () => { if (askError) throw askError; return { answers, ms: 12 }; }) };
   const runtime = createRoutingRuntime({
@@ -39,6 +42,8 @@ const makeRuntime = ({ config = readyConfig(), token = 'key', answers, askError,
     store,
     jev,
     readProviderKeys: () => providerKeys,
+    enterpriseMode: () => enterprise,
+    readPinnedEndpoint: () => pinned,
   });
   return { runtime, store, jev, events };
 };
@@ -246,5 +251,108 @@ describe('describe', () => {
     const off = readyConfig();
     off.safetyNet.enabled = false;
     await expect(makeRuntime({ config: off, answers: {} }).runtime.legacySafetyNetEnabled()).resolves.toBe(false);
+  });
+});
+
+describe('custom classification endpoint', () => {
+  const endpointUrl = 'https://jev.example.com/v1/systemone';
+
+  it('normalizes the full System One URL, an OpenAI-style /v1 base, or an API root', async () => {
+    const { normalizeCustomEndpointUrl } = await import('./classifier.js');
+    expect(normalizeCustomEndpointUrl(' https://jev.example.com/v1/systemone/ ')).toBe(endpointUrl);
+    expect(normalizeCustomEndpointUrl('https://jev.example.com/api/v1')).toBe('https://jev.example.com/api/v1/systemone');
+    expect(normalizeCustomEndpointUrl('https://api.typesafe.ai')).toBe('https://api.typesafe.ai/v1/systemone');
+    expect(normalizeCustomEndpointUrl('http://127.0.0.1:8080/jev/')).toBe('http://127.0.0.1:8080/jev/v1/systemone');
+    expect(() => normalizeCustomEndpointUrl('ftp://example.com')).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => normalizeCustomEndpointUrl('file:///etc/passwd')).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => normalizeCustomEndpointUrl('https://user:secret@example.com/v1')).toThrow(expect.objectContaining({ status: 400 }));
+    expect(() => normalizeCustomEndpointUrl('example.com/v1')).toThrow(expect.objectContaining({ status: 400 }));
+  });
+
+  it('sends a custom endpoint its own URL and model, with the key as a bearer only when one is saved', async () => {
+    const { classifierEndpoint } = await import('./classifier.js');
+    const keyed = classifierEndpoint('custom', { customEndpoint: { url: endpointUrl, model: 'jev-1.13', key: 'own-secret' } });
+    expect(keyed.url).toBe(endpointUrl);
+    expect(keyed.model).toBe('jev-1.13');
+    expect(keyed.headers.authorization).toBe('Bearer own-secret');
+    expect(keyed.headers['x-opencode-client']).toBeUndefined();
+    const keyless = classifierEndpoint('custom', { customEndpoint: { url: endpointUrl, model: 'jev-latest' } });
+    expect(keyless.headers.authorization).toBeUndefined();
+  });
+
+  it('falls back to a usable custom endpoint after TypeSafe and before OpenCode keys', async () => {
+    const { resolveClassifier } = await import('./classifier.js');
+    const customEndpoint = { url: endpointUrl, model: 'jev-latest' };
+    expect(resolveClassifier({ selected: 'custom', customEndpoint, zenPromotionActive: true }).effective).toBe('custom');
+    expect(resolveClassifier({ selected: 'custom', customEndpoint: null, zenPromotionActive: true }).effective).toBeNull();
+    expect(resolveClassifier({ selected: 'zen-key', typesafeKey: 'k', customEndpoint, zenPromotionActive: true }).effective).toBe('typesafe');
+    expect(resolveClassifier({ selected: 'off', customEndpoint, zenPromotionActive: true }).effective).toBeNull();
+  });
+
+  it('saves, picks and removes a custom endpoint without ever returning its key', async () => {
+    let saved = null;
+    const { runtime, store } = makeRuntime({ answers: {} });
+    store.readCustomEndpoint.mockImplementation(async () => saved);
+    store.writeCustomEndpoint.mockImplementation(async (endpoint) => { saved = endpoint; });
+    store.clearCustomEndpoint.mockImplementation(async () => { saved = null; });
+
+    await runtime.setCustomEndpoint({ url: 'https://jev.example.com', model: 'jev-1.13', key: 'own-secret' });
+    expect(saved).toEqual({ url: endpointUrl, model: 'jev-1.13', key: 'own-secret' });
+    expect(store.writeClassifierSource).toHaveBeenCalledWith('custom');
+    const state = await runtime.describe();
+    expect(state.customEndpoint).toEqual({ url: endpointUrl, model: 'jev-1.13', keyPresent: true, pinned: false });
+    expect(JSON.stringify(state)).not.toContain('own-secret');
+
+    // An empty key field keeps the saved one (and saving still picks it);
+    // removing only the key (null) keeps the URL and model without a key.
+    await runtime.setCustomEndpoint({ url: endpointUrl, model: 'jev-1.13', key: '' });
+    expect(saved.key).toBe('own-secret');
+    store.writeClassifierSource.mockClear();
+    await runtime.setCustomEndpoint({ url: endpointUrl, model: 'jev-1.13', key: null });
+    expect(saved).toEqual({ url: endpointUrl, model: 'jev-1.13' });
+    expect(store.writeClassifierSource).not.toHaveBeenCalled();
+
+    await runtime.clearCustomEndpoint();
+    expect(saved).toBeNull();
+    await expect(runtime.setCustomEndpoint({ url: 'https://jev.example.com', model: '' })).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe('enterprise mode routing', () => {
+  it('keeps Jev off in enterprise mode, whatever is picked or saved', async () => {
+    const { runtime, store, jev } = makeRuntime({ enterprise: true, classifierSource: 'typesafe', answers: { ask: { noul: 0.1 } } });
+    expect(await runtime.describe()).toMatchObject({ enterpriseMode: true, jevAvailable: false, autoReady: false, classification: { selected: 'off', effective: null } });
+    expect(await runtime.classifierEndpoint()).toBeNull();
+    await expect(runtime.setClassifierSource('zen-promo')).rejects.toMatchObject({ status: 403 });
+    await expect(runtime.setToken('secret')).rejects.toMatchObject({ status: 403 });
+    await runtime.setClassifierSource('off');
+    expect(store.writeClassifierSource).toHaveBeenCalledTimes(1);
+    expect(store.writeToken).not.toHaveBeenCalled();
+    expect(jev.ask).not.toHaveBeenCalled();
+  });
+
+  describe('an endpoint pinned by the administrator', () => {
+    const pinned = { url: 'https://jev.company.test/v1/systemone', model: 'jev-latest', key: 'org-secret' };
+    const saved = { url: 'https://mine.example.com/v1/systemone', model: 'jev-latest' };
+
+    it('replaces the saved one, cannot be edited, and never shows its key', async () => {
+      const { runtime, store } = makeRuntime({ pinned, customEndpoint: saved, classifierSource: 'custom', answers: {} });
+      const state = await runtime.describe();
+      expect(state.customEndpoint).toEqual({ url: pinned.url, model: 'jev-latest', keyPresent: true, pinned: true });
+      expect(JSON.stringify(state)).not.toContain('org-secret');
+      expect(await runtime.classifierEndpoint()).toMatchObject({ url: pinned.url, headers: { authorization: 'Bearer org-secret' } });
+      await expect(runtime.setCustomEndpoint({ url: saved.url, model: 'x' })).rejects.toMatchObject({ status: 409 });
+      await expect(runtime.clearCustomEndpoint()).rejects.toMatchObject({ status: 409 });
+      expect(store.writeCustomEndpoint).not.toHaveBeenCalled();
+    });
+
+    it('is the enterprise default, with Off as the only other choice', async () => {
+      const { runtime, store } = makeRuntime({ enterprise: true, pinned, classifierSource: 'typesafe', answers: {} });
+      expect(await runtime.describe()).toMatchObject({ jevAvailable: true, classification: { selected: 'custom', effective: 'custom' } });
+      await runtime.setClassifierSource('custom');
+      await runtime.setClassifierSource('off');
+      await expect(runtime.setClassifierSource('typesafe')).rejects.toMatchObject({ status: 403 });
+      expect(store.writeClassifierSource.mock.calls.map(([source]) => source)).toEqual(['custom', 'off']);
+    });
   });
 });

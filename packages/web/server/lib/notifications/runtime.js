@@ -1,3 +1,14 @@
+import { isEnterpriseMode } from '../enterprise-mode.js';
+
+const pushPayloadForEnterpriseMode = (payload) => {
+  if (!isEnterpriseMode()) return payload;
+  // Push leaves through the browser vendor's push service. It is encrypted,
+  // but enterprise mode keeps conversation content off every channel it does
+  // not control: the title and the deep link only.
+  const { body: _body, ...rest } = payload ?? {};
+  return { ...rest, body: '' };
+};
+
 export const createNotificationTriggerRuntime = (deps) => {
   const {
     readSettingsFromDisk,
@@ -17,6 +28,11 @@ export const createNotificationTriggerRuntime = (deps) => {
   let getIsWindowFocused = typeof deps.getIsWindowFocused === 'function'
     ? deps.getIsWindowFocused
     : null;
+  // Enterprise-gated push fanout: conversation-derived text stays off the wire.
+  const pushToUiSessions = (payload, options) => (
+    sendPushToAllUiSessions?.(pushPayloadForEnterpriseMode(payload), options)
+  );
+
   let getIsSessionAutoAccepting = typeof deps.getIsSessionAutoAccepting === 'function'
     ? deps.getIsSessionAutoAccepting
     : null;
@@ -325,7 +341,7 @@ export const createNotificationTriggerRuntime = (deps) => {
       broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
     }
 
-    await sendPushToAllUiSessions(
+    await pushToUiSessions(
       {
         title,
         body,
@@ -482,7 +498,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        await sendPushToAllUiSessions(
+        await pushToUiSessions(
           {
             title,
             body,
@@ -552,7 +568,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        await sendPushToAllUiSessions(
+        await pushToUiSessions(
           {
             title,
             body,
@@ -627,7 +643,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           broadcastUiNotification(notificationPayload, { desktopNotificationDelivered });
         }
 
-        void sendPushToAllUiSessions(
+        void pushToUiSessions(
           {
             title,
             body,
@@ -753,7 +769,7 @@ export const createNotificationTriggerRuntime = (deps) => {
           notifiedPermissionRequests.add(requestKey);
         }
 
-        void sendPushToAllUiSessions(
+        void pushToUiSessions(
           {
             title,
             body,

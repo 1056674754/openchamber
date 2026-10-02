@@ -1,3 +1,9 @@
+import { isEnterpriseMode } from '../enterprise-mode.js';
+
+// Tunnel providers terminate TLS at their edge and see every request in plain
+// text, so enterprise mode refuses them outright.
+const TUNNEL_BLOCKED_ERROR = 'External tunnels are not available in enterprise mode. Pair devices on your network or through your own relay instead.';
+
 export const createTunnelRoutesRuntime = (dependencies) => {
   const {
     crypto,
@@ -74,6 +80,10 @@ export const createTunnelRoutesRuntime = (dependencies) => {
     selectedPresetId,
     selectedPresetName,
   }) => {
+    // Every tunnel start passes here: the Settings button and `--tunnel` at startup.
+    if (isEnterpriseMode()) {
+      throw Object.assign(new Error(TUNNEL_BLOCKED_ERROR), { code: 'enterprise_mode' });
+    }
     if (provider === TUNNEL_PROVIDER_CLOUDFLARE && mode === TUNNEL_MODE_MANAGED_REMOTE) {
       setRuntimeManagedRemoteTunnelHostname(hostname);
       setRuntimeManagedRemoteTunnelToken(token);

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { AgentManagerView } from '@/components/views/agent-manager';
 import { FireworksProvider } from '@/contexts/FireworksContext';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
@@ -48,6 +49,8 @@ export function VSCodeApp({ apis }: VSCodeAppProps) {
   const panelType = typeof window !== 'undefined'
     ? window.__OPENCHAMBER_PANEL_TYPE__
     : 'chat';
+
+  useEnterprisePolicySync();
 
   React.useEffect(() => {
     window.__openchamberBootTrace?.('vscodeapp-mounted');

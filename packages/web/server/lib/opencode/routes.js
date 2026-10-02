@@ -12,6 +12,7 @@ import { buildAppliedResponse, buildDeferredRestartResponse } from './config-mut
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { settingsSurfaceOf } from './settings-files.js';
 import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -774,7 +775,19 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
     }
   });
 
-  app.put('/api/provider', async (req, res) => {
+  // Enterprise mode: model providers come from the OpenCode config the
+  // administrator controls, so nothing in the app may connect a new one or
+  // add a key. These OpenCode routes otherwise reach it through the generic
+  // proxy; removing or switching an existing account stays allowed, it only
+  // narrows access. The real lock is OpenCode's `provider.use` policy.
+  const refuseInEnterpriseMode = (_req, res, next) => (
+    isEnterpriseMode() ? res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' }) : next()
+  );
+  app.post('/api/integration/:integrationID/connect', refuseInEnterpriseMode);
+  app.post('/api/integration/:integrationID/oauth/:methodID/connect', refuseInEnterpriseMode);
+  app.post('/api/integration/:integrationID/oauth/:attemptID/complete', refuseInEnterpriseMode);
+
+  app.put('/api/provider', refuseInEnterpriseMode, async (req, res) => {
     try {
       const providerID = typeof req.body?.providerID === 'string'
         ? req.body.providerID.trim()

@@ -4,6 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { isEnterpriseMode } from './enterprise-mode.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -153,7 +154,9 @@ async function checkForUpdatesFromApi(currentVersion, options = {}) {
       currentVersion,
       installId: getOrCreateInstallId(appType),
       instanceMode: options.instanceMode || 'unknown',
-      reportUsage: options.reportUsage !== false,
+      // Enterprise mode keeps the update check (security fixes must reach the
+      // company) but never reports usage, whatever the client asked for.
+      reportUsage: options.reportUsage !== false && !isEnterpriseMode(),
     };
 
     const response = await fetch(UPDATE_CHECK_URL, {

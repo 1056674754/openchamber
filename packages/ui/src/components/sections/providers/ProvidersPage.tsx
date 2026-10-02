@@ -25,6 +25,7 @@ import { useSettingsProviders } from './useSettingsProviders';
 import { CustomProviderForm } from './CustomProviderForm';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { useUIStore } from '@/stores/useUIStore';
+import { useRoutingStore } from '@/stores/useRoutingStore';
 import { ProviderOAuthMethods, type ProviderOAuthMethod } from './ProviderOAuthMethods';
 import {
   getOAuthAuthMethods,
@@ -185,6 +186,9 @@ export const ProvidersPage: React.FC = () => {
   const [customAuthFailure, setCustomAuthFailure] = React.useState<string | null>(null);
   // Not an OpenCode provider id: OpenChamber's own classification providers (Jev).
   const [showClassification, setShowClassification] = React.useState(false);
+  // Enterprise mode: providers come from the OpenCode config, and the server
+  // refuses new ones and new keys (upstream enterprise 14f529c6c).
+  const enterpriseLocked = useRoutingStore((state) => state.enterpriseMode);
 
   React.useEffect(() => {
     if (!selectedProviderId && providers.length > 0) {
@@ -588,6 +592,20 @@ export const ProvidersPage: React.FC = () => {
           <p className="typography-meta mt-1 opacity-75">{t('settings.providers.page.empty.checkOpenCodeConfiguration')}</p>
         </div>
       </div>
+    );
+  }
+
+  // The server refuses new providers and keys; this only explains why.
+  if (isAddMode && enterpriseLocked) {
+    return (
+      <ScrollableOverlay outerClassName="h-full" className="w-full">
+        <div className="mx-auto w-full max-w-3xl p-3 sm:p-6 sm:pt-8">
+          <div className="mb-4 rounded-lg border border-[var(--status-info-border)] bg-[var(--status-info-background)]/30 p-3">
+            <p className="typography-ui-label font-medium text-foreground">{t('settings.providers.enterpriseTitle')}</p>
+            <p className="typography-meta mt-1 text-muted-foreground">{t('settings.providers.enterpriseMode')}</p>
+          </div>
+        </div>
+      </ScrollableOverlay>
     );
   }
 
