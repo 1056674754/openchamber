@@ -51,10 +51,13 @@ import { shouldAllowFileDraftSave, shouldScheduleFileAutosave } from '@/lib/file
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
+import { highlightSelectionMatches } from '@codemirror/search';
+import { codeFolding } from '@/lib/codemirror/codeFolding';
+import { gitChangeGutter, setGitChangeBaseline } from '@/lib/codemirror/gitChangeGutter';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { useGitStatus } from '@/stores/useGitStore';
+import { useGitStatus, useGitStore } from '@/stores/useGitStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { buildCodeMirrorCommentWidgets, normalizeLineRange, useInlineCommentController } from '@/components/comments';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -417,7 +420,8 @@ interface FileRowProps {
   downloadFile?: (path: string) => Promise<void>;
   contextMenuPath: string | null;
   setContextMenuPath: (path: string | null) => void;
-  onSelect: (node: FileNode) => void;
+  /** A plain click opens a preview tab; `pin` (double-click) keeps it. */
+  onSelect: (node: FileNode, options?: { pin?: boolean }) => void;
   onToggle: (path: string) => void;
   onRevealPath: (path: string) => void;
   onOpenDialog: (type: 'createFile' | 'createFolder' | 'rename' | 'delete', data: { path: string; name?: string; type?: 'file' | 'directory' }) => void;
@@ -465,6 +469,10 @@ const FileRow: React.FC<FileRowProps> = ({
     }
   }, [isDir, node, onSelect, onToggle]);
 
+  const handleDoubleClick = React.useCallback(() => {
+    if (!isDir) onSelect(node, { pin: true });
+  }, [isDir, node, onSelect]);
+
   const handleMenuButtonClick = React.useCallback((event: React.MouseEvent) => {
     event.stopPropagation();
     setContextMenuPath(node.path);
@@ -484,6 +492,7 @@ const FileRow: React.FC<FileRowProps> = ({
       <button
         type="button"
         onClick={handleInteraction}
+        onDoubleClick={handleDoubleClick}
         onContextMenu={!isMobile ? handleContextMenu : undefined}
         className={cn(
           'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors pr-8 select-none',
@@ -694,7 +703,7 @@ interface FilesViewProps {
 
 export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = true, directory }) => {
   const { t } = useI18n();
-  const { files, runtime } = useRuntimeAPIs();
+  const { files, runtime, git } = useRuntimeAPIs();
   const activeServerId = useActiveServerId();
   const serverBaseUrl = useActiveServerBaseUrl();
   const { currentTheme, availableThemes, lightThemeId, darkThemeId } = useThemeSystem();
@@ -784,9 +793,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
   const EMPTY_PATHS: string[] = React.useMemo(() => [], []);
   const openPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.openPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
+  const previewPath = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.previewPath ?? null) : null));
   const selectedPath = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.selectedPath ?? null) : null));
   const expandedPaths = useFilesViewTabsStore((state) => (root ? (state.byRoot[root]?.expandedPaths ?? EMPTY_PATHS) : EMPTY_PATHS));
   const addOpenPath = useFilesViewTabsStore((state) => state.addOpenPath);
+  const pinOpenPath = useFilesViewTabsStore((state) => state.pinOpenPath);
   const removeOpenPath = useFilesViewTabsStore((state) => state.removeOpenPath);
   const removeOpenPathsByPrefix = useFilesViewTabsStore((state) => state.removeOpenPathsByPrefix);
   const removeExpandedPathsByPrefix = useFilesViewTabsStore((state) => state.removeExpandedPathsByPrefix);
@@ -1702,6 +1713,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       selectedFilePath: selectedFile?.path,
       loadedFilePath,
       isNonEditableBinary: selectedIsBinary,
+      wouldEmptyFile: draftContent === '' && fileContent !== '',
     })) {
       return;
     }
@@ -1753,7 +1765,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
         autoSaveTimerRef.current = null;
       }
     };
-  }, [autoSaveEnabled, contentDetectedBinary, draftContent, fileLoading, isDirty, loadedFilePath, selectedFile, files.writeFile, isSaving, saveDraft, readFileStat, selectedFileReadOptions, t]);
+  }, [autoSaveEnabled, contentDetectedBinary, draftContent, fileContent, fileLoading, isDirty, loadedFilePath, selectedFile, files.writeFile, isSaving, saveDraft, readFileStat, selectedFileReadOptions, t]);
 
   // Reset auto-save status when switching files
   React.useEffect(() => {
@@ -1937,7 +1949,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     return filesList[index + 1] ?? filesList[index - 1] ?? null;
   }, []);
 
-  const handleSelectFile = React.useCallback(async (node: FileNode) => {
+  const handleSelectFile = React.useCallback(async (node: FileNode, options?: { pin?: boolean }) => {
     if (skipDirtyOnceRef.current) {
       skipDirtyOnceRef.current = false;
     } else if (isDirty) {
@@ -1948,7 +1960,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
     if (root) {
       setSelectedPath(root, node.path);
-      addOpenPath(root, node.path);
+      // A plain click opens a preview tab the next click replaces; touch has
+      // no double-click, so it opens tabs outright.
+      addOpenPath(root, node.path, { preview: !options?.pin && !isMobile });
       void ensurePathVisible(node.path, false);
     }
 
@@ -1961,6 +1975,11 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       setShowMobilePageContent(true);
     }
   }, [addOpenPath, ensurePathVisible, isDirty, isMobile, root, setSelectedPath]);
+
+  const handlePinFile = React.useCallback((path: string) => {
+    if (!root) return;
+    pinOpenPath(root, path);
+  }, [pinOpenPath, root]);
 
   const handleHtmlPreviewOpenFile = React.useCallback((path: string) => {
     if (!root || !isPathWithinRoot(path, root)) return;
@@ -2953,6 +2972,78 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
 
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
+  // Git change markers compare the open file with its HEAD version. The
+  // server answers an empty original both for a new file and for one git does
+  // not track at all (ignored, outside the repo's HEAD), so an empty baseline
+  // counts only when git status lists the file as new.
+  const selectedRelativePath = selectedFile?.path && root && selectedFile.path.startsWith(`${root}/`)
+    ? selectedFile.path.slice(root.length + 1)
+    : null;
+  // Refetch when the file's own status or the branch changes (a commit,
+  // checkout or stash moves its HEAD version), not on every status refresh:
+  // the selector returns a string, so unrelated refreshes do not re-render.
+  const gitBaselineKey = useGitStore((state) => {
+    if (!selectedRelativePath || !root) return null;
+    const status = state.directories.get(currentDirectory)?.status;
+    const entry = status?.files.find((file) => file.path === selectedRelativePath) ?? null;
+    return JSON.stringify([selectedRelativePath, status?.current ?? null, entry]);
+  });
+  const [gitBaseline, setGitBaseline] = React.useState<{ path: string; text: string | null } | null>(null);
+  React.useEffect(() => {
+    if (!selectedRelativePath || !root || !gitBaselineKey) {
+      setGitBaseline(null);
+      return;
+    }
+    let cancelled = false;
+    git.getGitFileDiff(root, { path: selectedRelativePath })
+      .then((diff) => {
+        if (cancelled) return;
+        const entry = useGitStore.getState().directories.get(currentDirectory)?.status?.files
+          .find((file) => file.path === selectedRelativePath);
+        const isNewInGit = entry !== undefined
+          && (entry.index === '?' || entry.index === 'A' || entry.working_dir === '?');
+        const usable = !diff.isBinary && (diff.original !== '' || isNewInGit);
+        setGitBaseline({ path: selectedRelativePath, text: usable ? diff.original : null });
+      })
+      .catch(() => {
+        if (!cancelled) setGitBaseline({ path: selectedRelativePath, text: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // gitBaselineKey carries the status fields that decide a refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentDirectory, git, gitBaselineKey, root]);
+  const gitBaselineRef = React.useRef(gitBaseline);
+  gitBaselineRef.current = gitBaseline;
+  const applyGitBaseline = React.useCallback((view: EditorView | null) => {
+    if (!view) return;
+    const baseline = gitBaselineRef.current;
+    setGitChangeBaseline(view, baseline && baseline.path === selectedRelativePath ? baseline.text : null);
+  }, [selectedRelativePath]);
+  React.useEffect(() => {
+    applyGitBaseline(editorViewRef.current);
+  }, [applyGitBaseline, gitBaseline]);
+
+  // Typing into a file opened as a preview keeps its tab, as in VS Code. Only
+  // user edits count: loading or syncing a file also changes the document.
+  const pinPreviewOnEditRef = React.useRef<() => void>(() => {});
+  pinPreviewOnEditRef.current = () => {
+    if (!selectedFile?.path || !root) return;
+    const state = useFilesViewTabsStore.getState();
+    if (state.byRoot[root]?.previewPath === selectedFile.path) {
+      state.pinOpenPath(root, selectedFile.path);
+    }
+  };
+  const pinPreviewOnEditExtension = React.useMemo(() => EditorView.updateListener.of((update) => {
+    if (!update.docChanged) return;
+    const edited = update.transactions.some((transaction) => (
+      transaction.isUserEvent('input') || transaction.isUserEvent('delete')
+      || transaction.isUserEvent('undo') || transaction.isUserEvent('redo') || transaction.isUserEvent('move')
+    ));
+    if (edited) pinPreviewOnEditRef.current();
+  }), []);
+
   const editorExtensions = React.useMemo(() => {
     if (!selectedFile?.path) {
       return [createFlexokiCodeMirrorTheme(currentTheme, { fontSize: editorFontSize })];
@@ -2965,6 +3056,19 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     }
     if (wrapLines) {
       extensions.push(EditorView.lineWrapping);
+    }
+    const diffColors = currentTheme.colors.syntax.highlights;
+    extensions.push(
+      gitChangeGutter({
+        added: diffColors?.diffAdded ?? currentTheme.colors.status.success,
+        modified: diffColors?.diffModified ?? currentTheme.colors.status.info,
+        removed: diffColors?.diffRemoved ?? currentTheme.colors.status.error,
+      }),
+      highlightSelectionMatches({ highlightWordAroundCursor: true, minSelectionLength: 2 }),
+      pinPreviewOnEditExtension,
+    );
+    if (!isMobile) {
+      extensions.push(codeFolding());
     }
     if (isMobile) {
       extensions.push(EditorView.updateListener.of((update) => {
@@ -2981,7 +3085,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       }));
     }
     return extensions;
-  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize]);
+  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension]);
 
   const pierreTheme = React.useMemo(
     () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),
@@ -3640,6 +3744,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
                 >
                   {openFiles.map((file) => {
                     const isActive = selectedFile?.path === file.path;
+                    const isPreview = previewPath === file.path;
                     return (
                       <div
                         key={file.path}
@@ -3659,7 +3764,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
                               void handleSelectFile(file);
                             }
                           }}
-                          className="max-w-[12rem] truncate text-left"
+                          onDoubleClick={() => handlePinFile(file.path)}
+                          className={cn('max-w-[12rem] truncate text-left', isPreview && 'italic')}
                         >
                           {file.name}
                         </button>
@@ -3864,6 +3970,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
                   blockWidgets={blockWidgets}
                   onViewReady={(view) => {
                     editorViewRef.current = view;
+                    applyGitBaseline(view);
                     setEditorViewReadyNonce((value) => value + 1);
                     window.requestAnimationFrame(() => {
                       nudgeEditorSelectionAboveKeyboard(view);
@@ -4036,6 +4143,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
                   <button
                     type="button"
                     onClick={() => void handleSelectFile(node)}
+                    onDoubleClick={() => void handleSelectFile(node, { pin: true })}
                     className={cn(
                       'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left text-foreground transition-colors',
                       isActive ? 'bg-interactive-selection/70' : 'hover:bg-interactive-hover/40'
@@ -4174,6 +4282,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
                 className="h-full"
                 onViewReady={(view) => {
                   editorViewRef.current = view;
+                  applyGitBaseline(view);
                   window.requestAnimationFrame(() => {
                     nudgeEditorSelectionAboveKeyboard(view);
                   });

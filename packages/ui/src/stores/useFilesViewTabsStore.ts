@@ -5,6 +5,10 @@ import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
 type RootTabsState = {
   openPaths: string[];
+  /** The file a single tree click opened as a preview; the next such click
+      replaces it. Double-clicking it, editing it, or opening it any other way
+      keeps it (clears this). */
+  previewPath: string | null;
   selectedPath: string | null;
   expandedPaths: string[];
   touchedAt: number;
@@ -15,7 +19,11 @@ type FilesViewTabsState = {
 };
 
 type FilesViewTabsActions = {
-  addOpenPath: (root: string, path: string) => void;
+  /** `preview` opens the path as the replaceable preview tab (a files-tree
+      click); without it the path is pinned. */
+  addOpenPath: (root: string, path: string, options?: { preview?: boolean }) => void;
+  /** Turns a preview tab into a regular one. */
+  pinOpenPath: (root: string, path: string) => void;
   removeOpenPath: (root: string, path: string) => void;
   removeOpenPathsByPrefix: (root: string, prefixPath: string) => void;
   removeExpandedPathsByPrefix: (root: string, prefixPath: string) => void;
@@ -91,6 +99,7 @@ const sanitizeByRoot = (input: unknown): Record<string, RootTabsState> => {
 
     const state = rawState as {
       openPaths?: unknown;
+      previewPath?: unknown;
       selectedPath?: unknown;
       expandedPaths?: unknown;
       touchedAt?: unknown;
@@ -103,12 +112,13 @@ const sanitizeByRoot = (input: unknown): Record<string, RootTabsState> => {
         .filter((value) => isPathWithinRoot(value, root))))
       : [];
 
-    const expandedPaths = Array.isArray(state.expandedPaths)
-      ? Array.from(new Set(state.expandedPaths
-        .filter((value): value is string => typeof value === 'string')
-        .map((value) => normalizePath(value))
-        .filter((value) => isPathWithinRoot(value, root))))
-      : [];
+    const previewPathCandidate = typeof state.previewPath === 'string'
+      ? normalizePath(state.previewPath)
+      : null;
+    // A preview only exists while its tab does.
+    const previewPath = previewPathCandidate && openPaths.some((p) => toComparablePath(p) === toComparablePath(previewPathCandidate))
+      ? previewPathCandidate
+      : null;
 
     const selectedPathCandidate = typeof state.selectedPath === 'string'
       ? normalizePath(state.selectedPath)
@@ -117,6 +127,13 @@ const sanitizeByRoot = (input: unknown): Record<string, RootTabsState> => {
     const selectedPath = selectedPathCandidate && isPathWithinRoot(selectedPathCandidate, root)
       ? selectedPathCandidate
       : (openPaths[0] ?? null);
+
+    const expandedPaths = Array.isArray(state.expandedPaths)
+      ? Array.from(new Set(state.expandedPaths
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => normalizePath(value))
+        .filter((value) => isPathWithinRoot(value, root))))
+      : [];
 
     const touchedAt = typeof state.touchedAt === 'number' && Number.isFinite(state.touchedAt)
       ? state.touchedAt
@@ -127,8 +144,14 @@ const sanitizeByRoot = (input: unknown): Record<string, RootTabsState> => {
       const mergedOpenPaths = Array.from(new Set([...existing.openPaths, ...openPaths]));
       const mergedExpandedPaths = Array.from(new Set([...existing.expandedPaths, ...expandedPaths]));
       const mergedSelectedPath = existing.selectedPath ?? selectedPath ?? (mergedOpenPaths[0] ?? null);
+      const existingPreview = existing.previewPath;
+      const mergedPreviewPath = previewPath
+        ?? (existingPreview && mergedOpenPaths.some((p) => toComparablePath(p) === toComparablePath(existingPreview))
+          ? existingPreview
+          : null);
       next[root] = {
         openPaths: mergedOpenPaths,
+        previewPath: mergedPreviewPath,
         selectedPath: mergedSelectedPath,
         expandedPaths: mergedExpandedPaths,
         touchedAt: Math.max(existing.touchedAt, touchedAt),
@@ -138,6 +161,7 @@ const sanitizeByRoot = (input: unknown): Record<string, RootTabsState> => {
 
     next[root] = {
       openPaths,
+      previewPath,
       selectedPath,
       expandedPaths,
       touchedAt,
@@ -165,7 +189,7 @@ const touchRoot = (prev: RootTabsState | undefined): RootTabsState => {
   if (prev) {
     return { ...prev, touchedAt: Date.now() };
   }
-  return { openPaths: [], selectedPath: null, expandedPaths: [], touchedAt: Date.now() };
+  return { openPaths: [], previewPath: null, selectedPath: null, expandedPaths: [], touchedAt: Date.now() };
 };
 
 export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
@@ -174,7 +198,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
       (set, get) => ({
         byRoot: {},
 
-        addOpenPath: (root, path) => {
+        addOpenPath: (root, path, options) => {
           const normalizedRoot = normalizePath((root || '').trim());
           const normalizedPath = normalizePath((path || '').trim());
           if (!normalizedRoot || !normalizedPath || !isPathWithinRoot(normalizedPath, normalizedRoot)) {
@@ -184,11 +208,29 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
           set((state) => {
             const prev = state.byRoot[normalizedRoot];
             const current = touchRoot(prev);
+            const preview = options?.preview === true;
             const exists = current.openPaths.includes(normalizedPath);
-            const nextOpenPaths = exists ? current.openPaths : [...current.openPaths, normalizedPath];
+            // A new preview takes the slot of the current preview, if any;
+            // opening an already-open file leaves the tabs alone.
+            const replacedPreviewPath = preview && !exists && current.previewPath
+              && toComparablePath(current.previewPath) !== toComparablePath(normalizedPath)
+              ? current.previewPath
+              : null;
+            const openPathsWithoutReplaced = replacedPreviewPath
+              ? current.openPaths.filter((p) => toComparablePath(p) !== toComparablePath(replacedPreviewPath))
+              : current.openPaths;
+            const nextOpenPaths = exists ? openPathsWithoutReplaced : [...openPathsWithoutReplaced, normalizedPath];
+            // Reopening a preview as a preview keeps it one; any other open pins it.
+            const nextPreviewPath = preview
+              ? (exists ? current.previewPath : normalizedPath)
+              : null;
             const nextSelectedPath = current.selectedPath ?? normalizedPath;
 
-            if (prev && exists && prev.selectedPath === nextSelectedPath) {
+            if (prev
+              && exists
+              && prev.selectedPath === nextSelectedPath
+              && prev.previewPath === nextPreviewPath
+              && nextOpenPaths === prev.openPaths) {
               return state;
             }
             const byRoot = {
@@ -196,7 +238,32 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               [normalizedRoot]: {
                 ...current,
                 openPaths: nextOpenPaths,
+                previewPath: nextPreviewPath,
                 selectedPath: nextSelectedPath,
+              },
+            };
+            return { byRoot: clampRoots(byRoot, 20) };
+          });
+        },
+
+        pinOpenPath: (root, path) => {
+          const normalizedRoot = normalizePath((root || '').trim());
+          const normalizedPath = normalizePath((path || '').trim());
+          if (!normalizedRoot || !normalizedPath) {
+            return;
+          }
+
+          set((state) => {
+            const prev = state.byRoot[normalizedRoot];
+            if (!prev?.previewPath || toComparablePath(prev.previewPath) !== toComparablePath(normalizedPath)) {
+              return state;
+            }
+            const byRoot = {
+              ...state.byRoot,
+              [normalizedRoot]: {
+                ...prev,
+                previewPath: null,
+                touchedAt: Date.now(),
               },
             };
             return { byRoot: clampRoots(byRoot, 20) };
@@ -219,6 +286,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
             const comparablePath = toComparablePath(normalizedPath);
             const isMatchingPath = (candidate: string) => toComparablePath(candidate) === comparablePath;
             const selectedPathMatches = current.selectedPath ? isMatchingPath(current.selectedPath) : false;
+            const previewMatches = current.previewPath ? isMatchingPath(current.previewPath) : false;
             if (!current.openPaths.some(isMatchingPath) && !selectedPathMatches) {
               return state;
             }
@@ -231,6 +299,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               [normalizedRoot]: {
                 ...current,
                 openPaths,
+                previewPath: previewMatches ? null : current.previewPath,
                 selectedPath,
                 touchedAt: Date.now(),
               },
@@ -260,7 +329,8 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
             };
             const openPaths = current.openPaths.filter((p) => !isWithinPrefix(p));
             const expandedPaths = current.expandedPaths.filter((p) => !isWithinPrefix(p));
-            if (openPaths.length === current.openPaths.length && expandedPaths.length === current.expandedPaths.length) {
+            const previewPath = current.previewPath && isWithinPrefix(current.previewPath) ? null : current.previewPath;
+            if (openPaths.length === current.openPaths.length && expandedPaths.length === current.expandedPaths.length && previewPath === current.previewPath) {
               return state;
             }
 
@@ -273,6 +343,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
               [normalizedRoot]: {
                 ...current,
                 openPaths,
+                previewPath,
                 expandedPaths,
                 selectedPath,
                 touchedAt: Date.now(),
@@ -462,7 +533,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
       }),
       {
         name: 'files-view-tabs-store',
-        version: 2,
+        version: 3,
         storage: createDeferredSafeJSONStorage(),
         migrate: (persistedState) => {
           if (!persistedState || typeof persistedState !== 'object') {

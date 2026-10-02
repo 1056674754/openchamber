@@ -11,6 +11,7 @@ const readyAutosave = {
   selectedFilePath: '/repo/a.txt',
   loadedFilePath: '/repo/a.txt',
   isNonEditableBinary: false,
+  wouldEmptyFile: false,
 };
 
 const readySave = {
@@ -33,6 +34,10 @@ describe('file editor autosave gates', () => {
     expect(shouldScheduleFileAutosave({ ...readyAutosave, isNonEditableBinary: true })).toBe(false);
     expect(shouldScheduleFileAutosave({ ...readyAutosave, canWrite: false })).toBe(false);
     expect(shouldScheduleFileAutosave({ ...readyAutosave, autoSaveEnabled: false })).toBe(false);
+  });
+
+  test('never empties a non-empty file on its own', () => {
+    expect(shouldScheduleFileAutosave({ ...readyAutosave, wouldEmptyFile: true })).toBe(false);
   });
 
   test('allows only fully loaded dirty text drafts and treats clean drafts as success', () => {

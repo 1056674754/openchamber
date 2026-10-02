@@ -7,13 +7,18 @@ export type FileEditorAutosaveGate = {
   readonly selectedFilePath: string | null | undefined;
   readonly loadedFilePath: string | null;
   readonly isNonEditableBinary: boolean;
+  /** The draft is empty while the loaded file is not. */
+  readonly wouldEmptyFile: boolean;
 };
 
 export const shouldScheduleFileAutosave = (gate: FileEditorAutosaveGate): boolean => {
   if (!gate.autoSaveEnabled || !gate.isDirty || !gate.canWrite || gate.isSaving) {
     return false;
   }
-  if (gate.fileLoading || gate.isNonEditableBinary) {
+  // An empty draft over a non-empty file means an editor that lost its
+  // document; autosave must not erase the file unattended. An explicit save
+  // still writes it.
+  if (gate.fileLoading || gate.isNonEditableBinary || gate.wouldEmptyFile) {
     return false;
   }
   return Boolean(gate.selectedFilePath && gate.loadedFilePath === gate.selectedFilePath);
