@@ -159,7 +159,8 @@ const writeOpenCodeRuntime = ({ runtimeRoot, opencodeRoot, opencodeVersion }) =>
   fs.mkdirSync(opencodeDir, { recursive: true });
 
   const bootstrapPath = path.join(opencodeDir, 'bootstrap.mjs');
-  fs.writeFileSync(bootstrapPath, `import path from 'node:path';
+  fs.writeFileSync(bootstrapPath, `import fs from 'node:fs';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const sourceRoot = process.env.OPENCHAMBER_OPENCODE_SOURCE_ROOT;
@@ -174,7 +175,13 @@ Object.assign(globalThis, {
   OPENCODE_CHANNEL: channel,
 });
 
-const packageRoot = path.join(sourceRoot, 'packages', 'opencode');
+// v1-line trees keep the entry at packages/opencode; v2 moved it to packages/cli.
+const packageRoot = ['packages/opencode', 'packages/cli']
+  .map((candidate) => path.join(sourceRoot, candidate))
+  .find((candidate) => fs.existsSync(path.join(candidate, 'src', 'index.ts')));
+if (!packageRoot) {
+  throw new Error('OpenCode source entry (packages/*/src/index.ts) not found under ' + sourceRoot);
+}
 process.chdir(packageRoot);
 await import(pathToFileURL(path.join(packageRoot, 'src', 'index.ts')).href);
 `);
@@ -186,7 +193,14 @@ set -eu
 : "\${OPENCHAMBER_RUNTIME_ROOT:?missing OpenChamber runtime root}"
 : "\${OPENCHAMBER_OPENCODE_SOURCE_ROOT:?missing OpenCode source root}"
 : "\${OPENCHAMBER_OPENCODE_VERSION:?missing OpenCode version}"
-exec "$OPENCHAMBER_BUN_ENGINE" "$OPENCHAMBER_RUNTIME_ROOT/opencode/bootstrap.mjs" "$@"
+: "\${OPENCHAMBER_OPENCODE_CHANNEL:?missing OpenCode channel}"
+# v2 reads version/channel from build-time defines; v1 reads the globalThis
+# assignments made by the bootstrap. Defines are harmless for v1 sources.
+exec "$OPENCHAMBER_BUN_ENGINE" \\
+  -d "OPENCODE_VERSION:\\"\$OPENCHAMBER_OPENCODE_VERSION\\"" \\
+  -d "OPENCODE_CHANNEL:\\"\$OPENCHAMBER_OPENCODE_CHANNEL\\"" \\
+  -d "OPENCODE_ARTIFACT:'cli'" \\
+  "$OPENCHAMBER_RUNTIME_ROOT/opencode/bootstrap.mjs" "$@"
 `);
   fs.chmodSync(launcherPath, 0o755);
 
@@ -315,8 +329,16 @@ const buildRuntime = (options) => {
     copyTree(path.join(resources, 'web-dist'), path.join(temporaryRoot, 'web-dist'));
     copyTree(path.join(resources, 'icons'), path.join(temporaryRoot, 'icons'));
 
-    const opencodePackage = readJson(path.join(opencodeRoot, 'packages', 'opencode', 'package.json'));
-    const opencodeVersion = String(opencodePackage.version || '');
+    // OpenCode v1-line trees keep the package at packages/opencode; the v2
+    // architecture moved the CLI package to packages/cli.
+    const readOpencodePackageVersion = () => {
+      for (const candidate of ['packages/opencode', 'packages/cli']) {
+        const packagePath = path.join(opencodeRoot, candidate, 'package.json');
+        if (fs.existsSync(packagePath)) return String(readJson(packagePath).version || '');
+      }
+      throw new Error(`OpenCode package.json not found under ${opencodeRoot}`);
+    };
+    const opencodeVersion = readOpencodePackageVersion();
     if (!/^\d+\.\d+\.\d+-sscity(?:[.+-].*)?$/.test(opencodeVersion)) {
       throw new Error(`OpenCode source version must identify the custom -sscity build: ${opencodeVersion || '(empty)'}`);
     }
