@@ -1,7 +1,9 @@
 import React from 'react';
 import { useDirectoryStore, useSession, useSessionStatus } from '@/sync/sync-context';
 import { serverRegistry } from '@/lib/opencode/server-registry';
-import { getSessionAssist, type SessionAssistPayload } from '@/lib/sessionAssistMetadata';
+import { opencodeClient } from '@/lib/opencode/client';
+import { getSessionAssist, getCurrentSessionAssist, type SessionAssistPayload } from '@/lib/sessionAssistMetadata';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useUIStore } from '@/stores/useUIStore';
 
 // How long the chat must sit untouched before the recap becomes visible.
@@ -84,20 +86,42 @@ export function useSessionAssistState(sessionId: string, directory?: string): Se
   const sessionRecapEnabled = useUIStore((state) => state.sessionRecapEnabled);
   const sessionSuggestionEnabled = useUIStore((state) => state.sessionSuggestionEnabled);
 
+  // OC2 spine S6 (upstream cb7400923): the freshness rule is per protocol
+  // track. Resolved through the dual-track SDK handle (plan §2 — the only
+  // sanctioned mode source); any resolution failure keeps the v1 rule.
+  const serverId = useServerIdForSession(sessionId);
+  const protocolMode = React.useMemo((): 'v1' | 'v2' => {
+    if (!sessionId) return 'v1';
+    try {
+      const resolvedDirectory = directory
+        ?? useSessionUIStore.getState().getDirectoryForSession(sessionId)
+        ?? '';
+      if (!resolvedDirectory) return 'v1';
+      return opencodeClient.resolveSdkHandle(resolvedDirectory, sessionId, serverId).mode;
+    } catch {
+      return 'v1';
+    }
+  }, [sessionId, directory, serverId]);
+
   const isIdle = !status || status.type === 'idle';
   const payload = getSessionAssist(session);
 
-  // Fresh = the payload's target message is still the session's last message.
-  const assist = payload
-    && lastMessage
-    && lastMessage.role === 'assistant'
-    && lastMessage.id === payload.forMessageID
-    && isIdle
-    ? payload
-    : null;
+  // v1: fresh = the payload's target message is still the session's last message.
+  // v2: freshness comes from the session record alone (see getCurrentSessionAssist).
+  const assist = protocolMode === 'v2'
+    ? (isIdle ? getCurrentSessionAssist(session) : null)
+    : payload
+      && lastMessage
+      && lastMessage.role === 'assistant'
+      && lastMessage.id === payload.forMessageID
+      && isIdle
+      ? payload
+      : null;
 
   // Recap waits out the quiet window; re-render once when the boundary passes.
-  const lastTimestamp = lastMessage?.timestamp ?? 0;
+  const lastTimestamp = protocolMode === 'v2'
+    ? ((session as { time?: { idle?: number } | null })?.time?.idle ?? 0) || lastMessage?.timestamp || 0
+    : lastMessage?.timestamp ?? 0;
   const [, forceTick] = React.useReducer((tick: number) => tick + 1, 0);
   const quietElapsed = assist ? Date.now() - lastTimestamp >= RECAP_VISIBILITY_DELAY_MS : false;
 

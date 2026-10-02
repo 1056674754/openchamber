@@ -18,6 +18,7 @@ import type { AttachedFile, SessionContextUsage, SessionWorktreeAttachment } fro
 import type { WorktreeMetadata } from "@/types/worktree"
 import type { ProjectEntry } from "@/lib/api/types"
 import { opencodeClient } from "@/lib/opencode/client"
+import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
 import { useConfigStore } from "@/stores/useConfigStore"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useDirectoryStore } from "@/stores/useDirectoryStore"
@@ -183,6 +184,10 @@ export async function routeMessage(params: {
     serverRegistry.indexSession(params.sessionId, targetServerId)
   }
 
+  // Skills routed to the prompt on the v2 track (SegB #4); v1 keeps the
+  // skill-as-command route, so this stays empty there.
+  let skillNames: string[] | null = null
+
   if (params.inputMode === "shell") {
     const shellAgent = typeof params.agent === "string" && params.agent.trim().length > 0
       ? params.agent.trim()
@@ -235,6 +240,18 @@ export async function routeMessage(params: {
     const storeCommands = useCommandsStore.getState().commands
     const storeSkills = useSkillsStore.getState().skills
 
+    // OC2 spine S6 (SegB #4): OpenCode 2 only resolves commands on
+    // session.command, so a leading /skill sent as one fails with 404. On a
+    // v2 server a matched SKILL routes as a normal prompt with the skill
+    // attached instead; a command with the same name still wins. The v1
+    // track keeps the skill-as-command behavior unchanged.
+    let protocolMode: 'v1' | 'v2' = 'v1'
+    try {
+      protocolMode = opencodeClient.resolveSdkHandle(sessionDirectory, params.sessionId, targetServerId ?? undefined).mode
+    } catch {
+      // Unresolvable (e.g. unregistered remote): keep the v1 routing.
+    }
+
     // The command list is no longer pre-warmed at bootstrap (it initializes
     // the directory's whole MCP fleet), so a name matched by neither store
     // gets one live lookup before the input falls through to a plain prompt.
@@ -256,7 +273,8 @@ export async function routeMessage(params: {
     const target = resolveSlashRouteTarget(params.content, [
       matchedCommand ? [matchedCommand] : [],
       storeCommands,
-      storeSkills,
+      // v2: skills are not command-route candidates (#4).
+      protocolMode === 'v2' ? [] : storeSkills,
     ])
 
     if (target) {
@@ -285,6 +303,12 @@ export async function routeMessage(params: {
         }).then(() => {}),
       })
     }
+
+    // v2 (#4): a store-matched skill falls through to the prompt route with
+    // the skill attached; unresolvable names keep the plain prompt.
+    if (protocolMode === 'v2' && matchedSkill && !matchedCommand) {
+      skillNames = [...new Set([matchedSkill.name, ...(skillNames ?? [])])]
+    }
   }
 
   // Normal prompt — optimistic insert so message appears instantly
@@ -312,6 +336,10 @@ export async function routeMessage(params: {
       directory: sessionDirectory,
       serverId: targetServerId,
       deliveryMode: params.deliveryMode === "steer" ? "steer" : "normal",
+      // OC2 S6 (#4): attached on the v2 track; the v1 track ignores it.
+      skills: skillNames && skillNames.length > 0
+        ? { names: skillNames, instructionFor: buildSkillMentionInstruction }
+        : undefined,
     }).then(() => {}),
   })
 }

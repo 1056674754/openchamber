@@ -1,4 +1,5 @@
 import { createOpencodeClient, OpencodeClient } from "@opencode-ai/sdk/v2";
+import type { OpenCodeClient } from "@opencode/client";
 import type { FilesAPI, RuntimeAPIs } from "../api/types";
 import { getDesktopHomeDirectory } from "../desktop";
 import type {
@@ -33,6 +34,15 @@ import {
   resolveProtocolSdkHandleForDirectory,
   type ProtocolSdkHandle,
 } from './protocol-handle';
+import { sendWithProviderCircuit } from './protocol-handle';
+import {
+  applySendSelection,
+  isV2SkillNotFound,
+  resolveSkillMentions,
+  toV2SendError,
+  toV2PromptFile,
+  type SkillMentions,
+} from './v2-send';
 
 // Use relative path by default (works with both dev and nginx proxy server)
 // Can be overridden with VITE_OPENCODE_URL for absolute URLs in special deployments
@@ -793,6 +803,8 @@ class OpencodeService {
       retryCount?: number;
     };
     deliveryMode?: 'normal' | 'steer';
+    /** Skills named inline (OC2 S6, SegB #4): attached on the v2 track, hinted on v1. */
+    skills?: SkillMentions;
   }): Promise<string> {
     const messageId = params.messageId ?? ascendingId("msg");
 
@@ -868,6 +880,14 @@ class OpencodeService {
     const remoteBaseUrl = resolveBaseUrlForSession(params.id, requestDirectory, params.serverId ?? undefined)
     const effectiveBase = remoteBaseUrl ?? this.baseUrl
 
+    // OC2 spine S6: a v2-mode owner takes the `@opencode/client` send path —
+    // session.prompt with delivery, through the shared provider circuit. The
+    // v1 path below is byte-identical to pre-S6.
+    const handle = this.resolveSdkHandle(requestDirectory ?? '', params.id, params.serverId ?? undefined);
+    if (handle.mode === 'v2') {
+      return this.sendV2Message(handle.client, params, parts, messageId, params.deliveryMode === 'steer' ? 'steer' : undefined);
+    }
+
     if (params.deliveryMode === 'steer') {
       return this.sendSteer(params, parts, messageId, requestDirectory, effectiveBase);
     }
@@ -929,6 +949,140 @@ class OpencodeService {
     Object.defineProperty(error, 'status', { value: response.status, enumerable: true });
     recordProviderError(params.providerID, response.status);
     throw error;
+  }
+
+  /**
+   * The v2-track send (OC2 spine S6): model/agent selection from the queued
+   * config is applied to the session record first, unresolved skill names go
+   * out as a synthetic hint, and the prompt itself is `session.prompt` with
+   * the client-generated id through the shared provider circuit. Mirrors
+   * upstream's client rewrite (654705f7d) including the skill-attachment
+   * retry (SegB #4 base): a skill removed between list and prompt retries
+   * once without the attachment.
+   */
+  private async sendV2Message(
+    client: OpenCodeClient,
+    params: {
+      id: string;
+      providerID: string;
+      modelID: string;
+      text: string;
+      prefaceText?: string;
+      prefaceTextSynthetic?: boolean;
+      agent?: string;
+      variant?: string;
+      files?: Array<FileInputLite>;
+      additionalParts?: Array<{
+        text: string;
+        synthetic?: boolean;
+        files?: Array<FileInputLite>;
+      }>;
+      messageId?: string;
+      directory?: string | null;
+      agentMentions?: Array<{ name: string; source?: { value: string; start: number; end: number } }>;
+      format?: {
+        type: 'json_schema';
+        schema: Record<string, unknown>;
+        retryCount?: number;
+      };
+      skills?: SkillMentions;
+    },
+    v1Parts: Array<TextPartInput | FilePartInput | { type: 'agent'; name: string; source?: { value: string; start: number; end: number } }>,
+    messageId: string,
+    delivery: 'steer' | undefined,
+  ): Promise<string> {
+    if (params.format) {
+      // Honest failure: structured output has no v2 prompt surface yet. A
+      // silent drop would let a git-generation send run unstructured.
+      throw new Error('Structured output sends are not supported on an OpenCode 2.x server yet');
+    }
+
+    const files = v1Parts
+      .filter((part): part is FilePartInput => part.type === 'file')
+      .map((part) => toV2PromptFile(part as unknown as { mime: string; filename?: string; url: string }));
+    const agents = v1Parts
+      .filter((part): part is { type: 'agent'; name: string; source?: { value: string; start: number; end: number } } => part.type === 'agent')
+      .map((part) => ({
+        name: part.name,
+        ...(part.source ? { mention: { start: part.source.start, end: part.source.end, text: part.source.value } } : {}),
+      }));
+
+    // The fork batches queued messages into additionalParts of one prompt.
+    // v2 prompts carry one text, so the batch becomes the turn's text; a
+    // synthetic batch member is admitted as a synthetic message instead, the
+    // same contract upstream uses for context carriers.
+    const syntheticTexts: string[] = [];
+    let batchText = '';
+    if (params.additionalParts && params.additionalParts.length > 0) {
+      for (const additional of params.additionalParts) {
+        const text = additional.text?.trim() ?? '';
+        if (!text) continue;
+        if (additional.synthetic) syntheticTexts.push(text);
+        else batchText = batchText ? `${batchText}\n\n${text}` : text;
+      }
+    }
+    const text = [params.text?.trim() ?? '', batchText].filter(Boolean).join('\n\n');
+    if (!text && files.length === 0 && syntheticTexts.length === 0) {
+      throw new Error('Message must have at least one part (text or file)');
+    }
+
+    const preface = params.prefaceText?.trim();
+    if (preface) {
+      syntheticTexts.unshift(preface);
+    }
+
+    try {
+      await sendWithProviderCircuit(params.providerID, () =>
+        applySendSelection(client, params.id, {
+          model: { providerID: params.providerID, modelID: params.modelID, ...(params.variant ? { variant: params.variant } : {}) },
+          ...(params.agent ? { agent: params.agent } : {}),
+        }));
+
+      const skills = await resolveSkillMentions(client, params.skills?.names ?? []);
+      const unresolvedInstruction = params.skills?.instructionFor?.(skills.unresolved) ?? null;
+
+      const admitSynthetic = (item: string) =>
+        sendWithProviderCircuit(params.providerID, () =>
+          client.session.synthetic({
+            sessionID: params.id,
+            text: item,
+            delivery: delivery ?? null,
+            resume: false,
+          }));
+
+      for (const item of syntheticTexts) {
+        await admitSynthetic(item);
+      }
+      if (unresolvedInstruction) await admitSynthetic(unresolvedInstruction);
+
+      const prompt = (attachedSkills: ReadonlyArray<{ id: string }>) =>
+        sendWithProviderCircuit(params.providerID, () =>
+          client.session.prompt({
+            sessionID: params.id,
+            id: messageId,
+            text,
+            ...(files.length > 0 ? { files } : {}),
+            ...(agents.length > 0 ? { agents } : {}),
+            ...(attachedSkills.length > 0 ? { skills: attachedSkills.map((skill) => ({ id: skill.id })) } : {}),
+            ...(delivery ? { delivery } : {}),
+          }));
+
+      try {
+        await prompt(skills.attached);
+      } catch (error) {
+        // The list and the prompt are two requests: a skill removed in between
+        // fails before anything was admitted, so the same message id is safe
+        // to send again without the attachment.
+        if (skills.attached.length === 0 || !isV2SkillNotFound(error)) throw error;
+        const instruction = params.skills?.instructionFor?.(skills.attached.map((skill) => skill.name)) ?? null;
+        if (instruction) await admitSynthetic(instruction);
+        await prompt([]);
+      }
+
+      return messageId;
+    } catch (error) {
+      throw toV2SendError('Send message', error);
+    }
   }
 
   private async sendSteer(
@@ -1033,6 +1187,31 @@ class OpencodeService {
     }
 
     const requestDirectory = this.normalizeCandidatePath(params.directory) ?? this.currentDirectory;
+
+    // OC2 spine S6: v2 commands run through `session.command`; the session
+    // record is switched to the queued model/agent first, as on the prompt
+    // path. The v1 path below is untouched.
+    const handle = this.resolveSdkHandle(requestDirectory ?? '', params.id, params.serverId ?? undefined);
+    if (handle.mode === 'v2') {
+      try {
+        await sendWithProviderCircuit(params.providerID, async () => {
+          await applySendSelection(handle.client, params.id, {
+            model: { providerID: params.providerID, modelID: params.modelID, ...(params.variant ? { variant: params.variant } : {}) },
+            ...(params.agent ? { agent: params.agent } : {}),
+          });
+          await handle.client.session.command({
+            sessionID: params.id,
+            name: params.command,
+            text: params.arguments ?? '',
+            ...(parts.length > 0 ? { files: parts.map((part) => toV2PromptFile(part as unknown as { mime: string; filename?: string; url: string })) } : {}),
+          });
+        });
+      } catch (error) {
+        throw toV2SendError('Run command', error);
+      }
+      return tempMessageId;
+    }
+
     const remoteBaseUrl = resolveBaseUrlForSession(params.id, requestDirectory, params.serverId ?? undefined)
     const effectiveBase = remoteBaseUrl ?? this.baseUrl
     const url = buildApiFetchUrl(

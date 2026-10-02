@@ -34,3 +34,20 @@ export function getSessionAssist(session: Session | null | undefined): SessionAs
     generatedAt: typeof assist.generatedAt === 'number' ? assist.generatedAt : 0,
   };
 }
+
+/**
+ * The v2 freshness rule (OC2 spine S6, upstream cb7400923): OpenCode 2 ends
+ * every turn with an idle record, so on a v2 server the newest loaded message
+ * is never the answer anymore and the v1 "target is still the last message"
+ * check never passes. Freshness is decided from the session record alone:
+ * generated after the last idle, session not reverted. The v1 track keeps the
+ * v1 rule — call sites branch on the resolved protocol handle's mode.
+ */
+export function getCurrentSessionAssist(session: Session | null | undefined): SessionAssistPayload | null {
+  const assist = getSessionAssist(session);
+  if (!assist || !session) return null;
+  const reverted = Boolean((session as { revert?: { messageID?: string } | null }).revert?.messageID);
+  if (reverted) return null;
+  const idleAt = (session as { time?: { idle?: number } | null }).time?.idle ?? 0;
+  return assist.generatedAt >= idleAt ? assist : null;
+}
