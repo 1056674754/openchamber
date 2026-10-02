@@ -1116,6 +1116,7 @@ export const settingsDict = {
 'settings.openchamber.keyboardShortcuts.doubleClickRename.label': '더블클릭으로 세션 이름 변경',
 'settings.openchamber.keyboardShortcuts.doubleClickRename.aria': '더블클릭 세션 이름 변경 활성화',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '줄로 이동(파일 편집기)',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': '파일의 심볼로 이동(파일 편집기)',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': '명령 팔레트 열기',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '입력에 포커스',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '설정 열기',

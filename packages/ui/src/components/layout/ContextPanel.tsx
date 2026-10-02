@@ -21,6 +21,7 @@ import { useActiveServerId } from '@/hooks/useActiveServerId';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { resolvePreviewHeaderDisplayUrl } from '@/lib/previewDisplayUrl';
+import { isEditorEventTarget } from '@/lib/editorFocus';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore, type ContextPanelMode } from '@/stores/useUIStore';
@@ -2572,6 +2573,17 @@ export const ContextPanel: React.FC = () => {
       target.closest('.terminal-viewport-container')
       || target.getAttribute('data-terminal-hidden-input') === 'true'
     )) {
+      return;
+    }
+
+    // Same for the file editor and what it opens over itself (search, the
+    // symbol list, go to line): Escape closes those, leaves Vim's INSERT mode
+    // or collapses several cursors, and must not close the whole panel.
+    if (isEditorEventTarget(event.target)) {
+      return;
+    }
+    // Something under the panel already handled this Escape.
+    if (event.defaultPrevented) {
       return;
     }
 

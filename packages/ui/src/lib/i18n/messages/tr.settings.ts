@@ -1127,6 +1127,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.doubleClickRename.label": "Double-click session to rename",
   "settings.openchamber.keyboardShortcuts.doubleClickRename.aria": "Enable double-click to rename session",
   "settings.openchamber.keyboardShortcuts.action.open_go_to_line.label": "Satıra git (dosya düzenleyici)",
+  "settings.openchamber.keyboardShortcuts.action.open_document_symbols.label": "Dosyadaki sembole git (dosya düzenleyici)",
   "settings.openchamber.keyboardShortcuts.action.open_command_palette.label": "Komut paletini aç",
   "settings.openchamber.keyboardShortcuts.action.focus_input.label": "Girdi alanına odaklan",
   "settings.openchamber.keyboardShortcuts.action.open_settings.label": "Ayarları aç",

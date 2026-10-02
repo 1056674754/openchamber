@@ -29,4 +29,10 @@ export const dict: Partial<Record<I18nKey, string>> = {
   'chat.formDock.collapseAria': 'Vraag inklappen',
   'chat.formDock.stepAria': 'Vraag {index}: {title}',
   'chat.formDock.linkInfo': 'Open de link en ga dan verder.',
+  'filesView.editor.symbols': 'Symbolen in bestand',
+  'filesView.symbols.placeholder': 'Naar symbool…',
+  'filesView.symbols.noneInFile': 'Geen functies, klassen of koppen gevonden in dit bestand',
+  'filesView.symbols.noMatches': 'Geen overeenkomende symbolen',
+  'filesView.tree.actions.showGitignored': 'Door git genegeerde bestanden tonen',
+  'filesView.tree.actions.hideGitignored': 'Door git genegeerde bestanden verbergen',
 };

@@ -112,6 +112,13 @@ const SHORTCUT_ACTIONS: ReadonlyArray<ShortcutAction> = [
     customizable: true,
   },
   {
+    id: 'open_document_symbols',
+    defaultCombo: 'mod+alt+o',
+    label: 'Go to symbol in file (files editor)',
+    description: 'Open the document symbols panel in the files editor',
+    customizable: true,
+  },
+  {
     id: 'open_command_palette',
     defaultCombo: 'mod+p',
     label: 'Open command palette',

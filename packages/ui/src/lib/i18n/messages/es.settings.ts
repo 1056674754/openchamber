@@ -1121,6 +1121,7 @@ export const settingsDict = {
   "settings.openchamber.keyboardShortcuts.doubleClickRename.label": "Doble clic para cambiar el nombre de la sesión",
   "settings.openchamber.keyboardShortcuts.doubleClickRename.aria": "Habilitar doble clic para cambiar el nombre",
   "settings.openchamber.keyboardShortcuts.action.open_go_to_line.label": "Ir a línea (editor de archivos)",
+  "settings.openchamber.keyboardShortcuts.action.open_document_symbols.label": "Ir a símbolo en el archivo (editor de archivos)",
   "settings.openchamber.keyboardShortcuts.action.open_command_palette.label": "Abrir paleta de comandos",
   "settings.openchamber.keyboardShortcuts.action.focus_input.label": "Enfocar entrada",
   "settings.openchamber.keyboardShortcuts.action.open_settings.label": "Abrir configuración",

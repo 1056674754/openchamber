@@ -1006,6 +1006,7 @@ export const settingsDict = {
 'settings.openchamber.keyboardShortcuts.doubleClickRename.label': '雙擊會話重新命名',
 'settings.openchamber.keyboardShortcuts.doubleClickRename.aria': '啟用雙擊重新命名會話',
   'settings.openchamber.keyboardShortcuts.action.open_go_to_line.label': '跳轉到行（檔案編輯器）',
+  'settings.openchamber.keyboardShortcuts.action.open_document_symbols.label': '前往檔案中的符號（檔案編輯器）',
   'settings.openchamber.keyboardShortcuts.action.open_command_palette.label': '開啟命令面板',
   'settings.openchamber.keyboardShortcuts.action.focus_input.label': '聚焦輸入方塊',
   'settings.openchamber.keyboardShortcuts.action.open_settings.label': '開啟設定',

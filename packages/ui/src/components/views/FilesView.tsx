@@ -53,7 +53,10 @@ import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import { highlightSelectionMatches } from '@codemirror/search';
 import { codeFolding } from '@/lib/codemirror/codeFolding';
+import { bracketAids, multipleCursors } from '@/lib/codemirror/editingAids';
 import { gitChangeGutter, setGitChangeBaseline } from '@/lib/codemirror/gitChangeGutter';
+import { DocumentSymbolsPanel } from './DocumentSymbolsPanel';
+import { GitignoredToggleButton } from '@/components/layout/GitignoredToggleButton';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
@@ -922,6 +925,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
   const [copiedContent, setCopiedContent] = React.useState(false);
   const [copiedPath, setCopiedPath] = React.useState(false);
   const [isGoToLineOpen, setIsGoToLineOpen] = React.useState(false);
+  const [isSymbolsOpen, setIsSymbolsOpen] = React.useState(false);
 
   const canCreateFile = Boolean(files.writeFile);
   const canCreateFolder = Boolean(files.createDirectory);
@@ -2970,6 +2974,43 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [canEdit, isMobile, shortcutOverrides, textViewMode]);
 
+  React.useEffect(() => {
+    if (!canEdit || textViewMode !== 'edit' || isMobile) {
+      return;
+    }
+
+    const symbolsCombo = getEffectiveShortcutCombo('open_document_symbols', shortcutOverrides);
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest('[role="dialog"]')) {
+        return;
+      }
+
+      const isEditorTarget = Boolean(target?.closest('.cm-editor'));
+      const isTypingTarget = Boolean(
+        target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]')
+      );
+      if (isTypingTarget && !isEditorTarget) {
+        return;
+      }
+
+      const activeElement = document.activeElement as Element | null;
+      const editorHasFocus = Boolean(activeElement?.closest('.cm-editor'));
+      if (!editorHasFocus) {
+        return;
+      }
+
+      if (eventMatchesShortcut(event, symbolsCombo)) {
+        event.preventDefault();
+        setIsSymbolsOpen(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [canEdit, isMobile, shortcutOverrides, textViewMode]);
+
   const editorFontSize = useUIStore((state) => state.editorFontSize);
 
   // Git change markers compare the open file with its HEAD version. The
@@ -3066,9 +3107,10 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       }),
       highlightSelectionMatches({ highlightWordAroundCursor: true, minSelectionLength: 2 }),
       pinPreviewOnEditExtension,
+      bracketAids(),
     );
     if (!isMobile) {
-      extensions.push(codeFolding());
+      extensions.push(codeFolding(), multipleCursors({ vimMode: fileEditorKeymap === 'vim' }));
     }
     if (isMobile) {
       extensions.push(EditorView.updateListener.of((update) => {
@@ -3085,7 +3127,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
       }));
     }
     return extensions;
-  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension]);
+  }, [currentTheme, selectedFile?.path, staticLanguageExtension, dynamicLanguageExtension, wrapLines, isMobile, nudgeEditorSelectionAboveKeyboard, editorFontSize, pinPreviewOnEditExtension, fileEditorKeymap]);
 
   const pierreTheme = React.useMemo(
     () => ({ light: lightTheme.metadata.id, dark: darkTheme.metadata.id }),
@@ -3387,11 +3429,28 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
                     setIsGoToLineOpen((open) => !open);
                     event.currentTarget.blur();
                   }}
+                  data-go-to-line-toggle
                   className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
                   title={t('filesView.editor.goToLine')}
                 >
                   <Icon name="menu-fold-2" className="size-4" />
                 </Button>
+                {!isMobile && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(event) => {
+                      setIsSymbolsOpen((open) => !open);
+                      event.currentTarget.blur();
+                    }}
+                    data-document-symbols-toggle
+                    className="size-6 p-0 text-foreground opacity-100 transition-opacity hover:bg-transparent focus-visible:bg-transparent active:bg-transparent"
+                    aria-label={t('filesView.editor.symbols')}
+                    title={t('filesView.editor.symbols')}
+                  >
+                    <Icon name="list-unordered" className="size-4" />
+                  </Button>
+                )}
                 <GoToLineDialog
                   open={isGoToLineOpen}
                   onOpenChange={setIsGoToLineOpen}
@@ -3957,6 +4016,9 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
               ref={editorWrapperRef}
             >
               {invalidJsonBanner}
+              {!isFullscreen && (
+                <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} view={editorViewRef.current} />
+              )}
               <div className={cn(invalidJsonError ? 'min-h-0 flex-1' : 'h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
                 <FilePositionEditor
                   key={filePositionKey}
@@ -4125,6 +4187,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
           <Button variant="ghost" size="sm" onClick={() => void refreshRoot()} className="size-8 p-0 flex-shrink-0">
             <Icon name="refresh" className="size-4" />
           </Button>
+          <GitignoredToggleButton className="size-8" />
         </div>
       </div>
 
@@ -4270,6 +4333,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ mode = 'full', active = tr
               shouldMaskEditorForPendingNavigation && 'overflow-hidden',
             )}>
               {invalidJsonBanner}
+              <DocumentSymbolsPanel open={isSymbolsOpen} onOpenChange={setIsSymbolsOpen} view={editorViewRef.current} />
               <div className={cn(invalidJsonError ? 'min-h-0 flex-1' : 'h-full', shouldMaskEditorForPendingNavigation && 'invisible')}>
               <FilePositionEditor
                 key={`${filePositionKey}:fullscreen`}
