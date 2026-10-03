@@ -77,18 +77,24 @@ export const OpenChamberPluginStatusToast: React.FC = () => {
                 showDegraded(decision.reason, decision.copyText);
                 return;
             }
+            // 'failed': a crashed plugin is terminal; boot-window failures ride —
+            // OpenCode 2 boots lazily, so probe timeouts and not-yet-registered
+            // inventories resolve seconds later (observed ~6s). The re-probing
+            // status route flips the cached answer; keep polling until the budget
+            // is out before showing the permanent failure toast.
+            const pluginCrashed = decision.kind === 'failed' && decision.reason.startsWith('plugin failed:');
+            if (!pluginCrashed && attempt < MAX_STATUS_CHECK_ATTEMPTS) {
+                schedule(attempt + 1, CHECK_INTERVAL_MS);
+                return;
+            }
             if (decision.kind === 'failed') {
                 showFailure(decision.reason, decision.copyText);
                 return;
             }
-            if (attempt >= MAX_STATUS_CHECK_ATTEMPTS) {
-                showFailure(
-                    t('openchamberPlugin.toast.failed.timeoutReason'),
-                    JSON.stringify(status, null, 2),
-                );
-                return;
-            }
-            schedule(attempt + 1, CHECK_INTERVAL_MS);
+            showFailure(
+                t('openchamberPlugin.toast.failed.timeoutReason'),
+                JSON.stringify(status, null, 2),
+            );
         };
 
         const checkStatus = async (attempt: number) => {
