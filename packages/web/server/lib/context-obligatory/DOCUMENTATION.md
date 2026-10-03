@@ -23,6 +23,14 @@ own post-compaction continuation. Missing individual messages are skipped withou
 discarding the remaining context. Ordinary idle events perform no work and make
 no requests. Child sessions (`parentID`) are skipped.
 
+Dual-track dispatch (v2-mode instance, per `../opencode/v2-prompt-dispatch.js`):
+the restore text IS the dispatch, so the pre-compaction selection goes out as
+`/api/session/:id/model|agent` switches and the text as ONE waking
+`/api/session/:id/synthetic` admission (no `resume: false` — the turn must
+start). All calls scope through `location[directory]` instead of v1's
+`?directory=`; the remote branch's `/api` prefix composes with the
+v2-named paths.
+
 After a successful send, the runtime merge-writes
 `context_obligatory_last_compaction_message_id`. This cursor prevents a replayed
 compaction event from reinjecting the same summary. Inflight work is keyed by

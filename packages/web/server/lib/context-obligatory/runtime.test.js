@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { resolveUpstreamRequestPath } from '../opencode/upstream-v2-paths.js';
 import { createContextObligatoryRuntime } from './runtime.js';
 
 const json = (body) => new Response(JSON.stringify(body), {
@@ -224,6 +225,75 @@ describe('context obligatory runtime', () => {
     expect(started[1]).toContain('http://remote-a.example/api/session/ses_1');
     controllers.forEach((finish) => finish());
     await Promise.all([localPromise, remotePromise]);
+    runtime.stop();
+  });
+});
+
+describe('context obligatory runtime (v2 protocol mode)', () => {
+  afterEach(() => {
+    delete process.env.OPENCHAMBER_PROTOCOL_MODE;
+  });
+
+  it('restores pinned text as one waking synthetic after the selection switches', async () => {
+    process.env.OPENCHAMBER_PROTOCOL_MODE = 'v2';
+    const requests = [];
+    const session = {
+      id: 'ses_1',
+      metadata: { openchamber: { context_obligatory_messages: [
+        { id: 'msg_1', createdAt: 10, role: 'user' },
+      ] } },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input.url);
+      requests.push({ path: url.pathname, method: init.method ?? 'GET', body: init.body, search: url.search });
+      if (url.pathname === '/api/session/ses_1' && init.method === 'PATCH') return json({});
+      if (url.pathname === '/api/session/ses_1') return json(session);
+      if (url.pathname === '/api/session/active') return json({});
+      if (url.pathname === '/api/session/ses_1/children') return json([]);
+      if (url.pathname === '/api/session/ses_1/message') return json([
+        { info: { id: 'msg_agent', role: 'assistant', providerID: 'provider', modelID: 'model', agent: 'build' } },
+        { info: { id: 'msg_summary', role: 'assistant', summary: true, time: { completed: 30 } } },
+      ]);
+      if (url.pathname === '/api/session/ses_1/message/msg_1') return json({ parts: [{ type: 'text', text: 'First' }] });
+      if (init.method === 'POST' && url.pathname.startsWith('/api/session/ses_1/')) return json({ data: {} });
+      throw new Error(`Unexpected ${url.pathname}`);
+    }));
+    const runtime = createContextObligatoryRuntime({
+      // The real upstream-URL boundary, so the v2 posts carry /api paths.
+      buildOpenCodeUrl: (path) => `http://opencode.test${resolveUpstreamRequestPath(path, 'v2')}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      sessionKnowledgeRuntime: {
+        resolvePending: vi.fn(async () => ({ text: 'Pinned project knowledge', signature: 'knowledge-v1' })),
+        readDeliveredSignature: () => '',
+        readPins: () => ({ notes: [], plans: [] }),
+        metadataKey: 'knowledge_context_delivered',
+      },
+    });
+
+    await runtime.processPayload(
+      { type: 'session.compacted', properties: { sessionID: 'ses_1' } },
+      '/repo',
+      'default',
+    );
+
+    const posts = requests.filter((request) => request.method === 'POST');
+    expect(posts.map((request) => request.path)).toEqual([
+      '/api/session/ses_1/model',
+      '/api/session/ses_1/agent',
+      '/api/session/ses_1/synthetic',
+    ]);
+    expect(JSON.parse(posts[0].body)).toEqual({ model: { providerID: 'provider', id: 'model' } });
+    expect(JSON.parse(posts[1].body)).toEqual({ agent: 'build' });
+    const synthetic = JSON.parse(posts[2].body);
+    expect(synthetic.text).toContain('First');
+    expect(synthetic.text).toContain('Pinned project knowledge');
+    expect(synthetic.text).toContain('continuing the pre-compaction work');
+    expect(synthetic.resume).toBeUndefined();
+    // v2 scopes through the location query, not ?directory=.
+    expect(posts[0].search).toContain('location%5Bdirectory%5D=%2Frepo');
+    expect(posts[0].search).not.toContain('directory=');
+    const patch = requests.find((request) => request.method === 'PATCH');
+    expect(JSON.parse(patch.body).metadata.openchamber.context_obligatory_last_compaction_message_id).toBe('msg_summary');
     runtime.stop();
   });
 });

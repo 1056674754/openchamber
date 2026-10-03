@@ -1,3 +1,9 @@
+import {
+  V2_DIRECTORY_PARAM,
+  V2_PROMPT_PATHS,
+  isV2PromptTrack,
+} from '../opencode/v2-prompt-dispatch.js';
+
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_FETCH_LIMIT = 20;
 const LOCAL_SERVER_ID = 'default';
@@ -58,7 +64,7 @@ export const createContextObligatoryRuntime = ({
     }
 
     const params = new URLSearchParams(query || {});
-    params.set('directory', directory);
+    params.set(isV2PromptTrack(serverId) ? V2_DIRECTORY_PARAM : 'directory', directory);
     const search = params.toString();
     let url;
     let authHeaders = {};
@@ -138,21 +144,46 @@ export const createContextObligatoryRuntime = ({
     const modelID = typeof executionInfo?.modelID === 'string' ? executionInfo.modelID : '';
     if (!providerID || !modelID) throw new Error('no pre-compaction assistant provider/model');
     const agent = typeof executionInfo.agent === 'string' ? executionInfo.agent : executionInfo.mode;
-    await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}/prompt_async`, {
-      directory,
-      method: 'POST',
-      body: {
-        model: { providerID, modelID },
-        ...(typeof agent === 'string' && agent ? { agent } : {}),
-        parts: [{
-          type: 'text',
-          text: [knowledge.text, entries.length > 0 ? buildContextPrompt(entries) : '']
-            .filter(Boolean)
-            .join('\n\n---\n\n'),
-          synthetic: true,
-        }],
-      },
-    });
+    const restoreText = [knowledge.text, entries.length > 0 ? buildContextPrompt(entries) : '']
+      .filter(Boolean)
+      .join('\n\n---\n\n');
+    if (isV2PromptTrack(serverId)) {
+      // The restore text IS the dispatch: v2 has no synthetic-only prompt, so
+      // the selection is switched onto the session record and the text is
+      // admitted as one waking synthetic (resume defaults to true — the turn
+      // must start, unlike the parked pre-prompts other senders admit).
+      await openCodeFetch(serverId, V2_PROMPT_PATHS.switchModel(sessionId), {
+        directory,
+        method: 'POST',
+        body: { model: { providerID, id: modelID } },
+      });
+      if (typeof agent === 'string' && agent) {
+        await openCodeFetch(serverId, V2_PROMPT_PATHS.switchAgent(sessionId), {
+          directory,
+          method: 'POST',
+          body: { agent },
+        });
+      }
+      await openCodeFetch(serverId, V2_PROMPT_PATHS.synthetic(sessionId), {
+        directory,
+        method: 'POST',
+        body: { text: restoreText },
+      });
+    } else {
+      await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}/prompt_async`, {
+        directory,
+        method: 'POST',
+        body: {
+          model: { providerID, modelID },
+          ...(typeof agent === 'string' && agent ? { agent } : {}),
+          parts: [{
+            type: 'text',
+            text: restoreText,
+            synthetic: true,
+          }],
+        },
+      });
+    }
 
     const fresh = await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}`, { directory });
     const freshState = readContextState(fresh);
