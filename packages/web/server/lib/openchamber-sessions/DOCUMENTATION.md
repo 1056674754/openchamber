@@ -30,6 +30,17 @@ If a fork or Goal has already been created and prompt dispatch then fails, the
 service throws a structured partial-result error containing the surviving
 Session ID and directory.
 
+## Prompt dispatch
+
+`runPromptAsync` keeps building the v1 `prompt_async` payload (the
+`resolvePromptBody` hook contract) and branches on the recorded protocol mode:
+v1 posts it unchanged to `POST /session/:id/prompt_async`; v2 maps the
+rewritten payload through `postV2PromptDispatch`
+(`../opencode/v2-prompt-dispatch.js`) — selection switches
+(`/api/session/:id/model|agent`, variant on the model ref), then the flat
+`POST /api/session/:id/prompt`, all scoped by the `x-opencode-directory`
+header.
+
 ## OpenChamber-owned Session State (OC2 spine S4, upstream 654705f7d)
 
 OpenCode 2.x accepts `metadata` only at session create time and has no route

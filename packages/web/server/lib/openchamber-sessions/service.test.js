@@ -6,6 +6,7 @@ const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  delete process.env.OPENCHAMBER_PROTOCOL_MODE;
 });
 
 describe('OpenChamber Session selection inheritance', () => {
@@ -265,6 +266,89 @@ describe('OpenChamber Session auto routing default', () => {
     }]);
     expect(dispatchedBodies[0]?.model).toEqual({ providerID: 'openai', modelID: 'gpt-5.5' });
     expect(result.model).toEqual({ providerID: 'openchamber', modelID: 'auto' });
+    expect(result.promptDispatched).toBe(true);
+  });
+
+  test('dispatches through the flat v2 endpoints with the hook rewrite on the switches', async () => {
+    process.env.OPENCHAMBER_PROTOCOL_MODE = 'v2';
+    const messages = [
+      {
+        info: {
+          id: 'msg_user_old',
+          role: 'user',
+          model: { providerID: 'old-provider', modelID: 'old-model' },
+          time: { created: 1 },
+        },
+      },
+    ];
+    let promptAccepted = false;
+    const client = {
+      session: {
+        messages: mock(async () => ({
+          data: promptAccepted
+            ? [...messages, { info: { id: 'msg_user_sent', role: 'user', time: { created: 5 } } }]
+            : messages,
+        })),
+      },
+      command: {
+        list: mock(async () => ({ data: [] })),
+      },
+    };
+    const dispatched = [];
+    globalThis.fetch = mock(async (input, init) => {
+      const url = String(input instanceof URL ? input : input?.url ?? input);
+      const method = init?.method ?? 'GET';
+      if (method === 'POST' && url.includes('/api/session/')) {
+        dispatched.push({ path: new URL(url).pathname, body: JSON.parse(String(init?.body)) });
+        if (url.endsWith('/prompt')) promptAccepted = true;
+        return { ok: true, text: async () => '', json: async () => ({ data: {} }) };
+      }
+      if (url.includes('/session') && method === 'POST') {
+        return { ok: true, json: async () => ({ id: 'ses_v2_default' }) };
+      }
+      if (url.includes('/config/providers')) {
+        return { ok: true, json: async () => ({ providers: [] }) };
+      }
+      if (url.includes('/agent')) {
+        return { ok: true, json: async () => [{ name: 'build', mode: 'primary' }] };
+      }
+      if (url.includes('/config')) {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    const resolvePromptBody = mock(async (body) => {
+      if (body.model?.modelID === 'auto') body.model = { providerID: 'openai', modelID: 'gpt-5.5' };
+    });
+    const service = createOpenChamberSessionService({
+      readSettingsFromDiskMigrated: mock(async () => ({
+        defaultModel: 'openchamber/auto',
+        defaultAgent: 'build',
+        projects: [],
+      })),
+      sanitizeProjects: (projects) => projects,
+      validateDirectoryPath: mock(async (directory) => ({ ok: true, directory })),
+      buildOpenCodeUrl: (pathname) => `http://127.0.0.1:4096${pathname}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => true,
+      createClient: () => client,
+      resolvePromptBody,
+    });
+
+    const result = await service.create({
+      serverId: 'default',
+      directory: '/repo/app',
+      prompt: 'Run this',
+    });
+
+    expect(dispatched.map((entry) => entry.path)).toEqual([
+      '/api/session/ses_v2_default/model',
+      '/api/session/ses_v2_default/agent',
+      '/api/session/ses_v2_default/prompt',
+    ]);
+    expect(dispatched[0].body).toEqual({ model: { providerID: 'openai', id: 'gpt-5.5' } });
+    expect(dispatched[1].body).toEqual({ agent: 'build' });
+    expect(dispatched[2].body).toEqual({ text: 'Run this' });
     expect(result.promptDispatched).toBe(true);
   });
 });

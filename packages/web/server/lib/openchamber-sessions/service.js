@@ -6,6 +6,7 @@ import { createWorktree } from '../git/index.js';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from '../opencode/protocol-mode.js';
+import { isV2PromptTrack, postV2PromptDispatch } from '../opencode/v2-prompt-dispatch.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
 import { createArchiveStore } from './archive-store.js';
@@ -210,6 +211,30 @@ const resolveDefaultSelection = ({
 };
 
 const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payload }) => {
+  // The v2 track maps the (resolvePromptBody-rewritten) v1 payload onto the
+  // flat OpenCode 2 dispatch: selection switches, parked synthetics, then
+  // `POST /api/session/:id/prompt`. The `x-opencode-directory` header scopes
+  // the v2 location middleware, so the header set below carries over.
+  if (isV2PromptTrack()) {
+    const post = async (path, body) => {
+      const response = await fetch(`${baseUrl}/api${path}`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'x-opencode-directory': directory,
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`v2 prompt dispatch failed (${response.status})${detail ? `: ${detail}` : ''}`);
+      }
+    };
+    await postV2PromptDispatch({ sessionId: sessionID, body: payload, post });
+    return;
+  }
   const url = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
   url.searchParams.set('directory', directory);
   const response = await fetch(url.toString(), {
