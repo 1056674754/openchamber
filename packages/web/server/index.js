@@ -1693,9 +1693,12 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
     startHealthMonitoring();
   }
   setTimeout(async () => {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    // The v2 child activates configured plugins asynchronously per location
+    // (observed ~40s after spawn on a cold boot), so the window must outlive
+    // activation, not just readiness.
+    for (let attempt = 0; attempt < 12; attempt += 1) {
       const result = await verifyOpenChamberPluginLoaded();
-      if (result?.loaded || attempt === 5) return;
+      if (result?.loaded || attempt === 11) return;
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
   }, 5000);
