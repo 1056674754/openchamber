@@ -1012,9 +1012,14 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
 
   const slot1Content = renderLeadingSlot(leadingState.slot1);
   const slot2Content = renderLeadingSlot(leadingState.slot2);
-  const rowIndentPx = depth > 0
-    ? (isGlobalPinnedContext ? depth * 16 + GLOBAL_PINNED_CHILD_INDENT : depth * 16 + 4)
-    : 0;
+  // [OPENCHAMBER-FORK] Project rows keep the pre-rowModel group-body lead (pl-4, the
+  // user-tuned two-space indent); nested rows stack on top of it. Pinned/recent keep
+  // their own container padding.
+  const rowIndentPx = isGlobalPinnedContext
+    ? (depth > 0 ? depth * 16 + GLOBAL_PINNED_CHILD_INDENT : 0)
+    : (renderContext === 'project'
+        ? depth * 16 + 16
+        : (depth > 0 ? depth * 16 + 4 : 0));
   const nestedLeadingSlotsStyle = depth > 0
     ? { left: `${rowIndentPx - 34}px` }
     : undefined;
@@ -1552,7 +1557,7 @@ function SessionNodeItemComponent(props: Props): React.ReactNode {
             isDeleting && 'opacity-60',
             isRowSelected && 'bg-primary/15',
           )}
-          style={depth > 0 ? { paddingLeft: `${rowIndentPx}px` } : undefined}
+          style={rowIndentPx > 0 ? { paddingLeft: `${rowIndentPx}px` } : undefined}
           onContextMenu={!mobileVariant ? (e) => {
             e.preventDefault();
             setMenuPosition({ x: e.clientX, y: e.clientY });
