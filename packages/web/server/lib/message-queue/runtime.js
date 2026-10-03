@@ -14,6 +14,12 @@
 import fs from 'fs';
 import path from 'path';
 
+import {
+  V2_DIRECTORY_PARAM,
+  isV2PromptTrack,
+  postV2PromptDispatch,
+} from '../opencode/v2-prompt-dispatch.js';
+
 const QUEUE_FILE_NAME = 'message-queue.json';
 const QUEUE_FILE_VERSION = 1;
 
@@ -54,6 +60,14 @@ const asText = (value) => (typeof value === 'string' ? value : '');
 const asRecord = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : null);
 const asList = (value) => (Array.isArray(value) ? value : null);
 const asCount = (value) => (Number.isFinite(value) && value >= 0 ? Math.floor(value) : null);
+
+// v2 list/get routes answer inside a `{ data }` envelope; the v1 routes never
+// carry a `data` key, so the dispatch-gate reads unwrap on the v2 track and
+// pass v1 payloads through untouched.
+const unwrapDataEnvelope = (value) => {
+  const record = asRecord(value);
+  return record && record.data !== undefined ? record.data : value;
+};
 
 const isValidSessionId = (value) => SESSION_ID_PATTERN.test(asNonEmptyString(value));
 
@@ -362,7 +376,7 @@ export function createMessageQueueRuntime({
   const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const params = new URLSearchParams(query || {});
-    if (directory) params.set('directory', directory);
+    if (directory) params.set(isV2PromptTrack() ? V2_DIRECTORY_PARAM : 'directory', directory);
     const search = params.toString();
     const headers = { Accept: 'application/json', ...getOpenCodeAuthHeaders() };
     const init = { method, headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) };
@@ -383,17 +397,17 @@ export function createMessageQueueRuntime({
    * idle: a fetch failure re-arms instead of sending into a running turn.
    */
   const isSessionIdle = async (sessionId, directory) => {
-    const statuses = asRecord(await openCodeFetch('/session/status', { directory }).catch(() => null));
+    const statuses = asRecord(unwrapDataEnvelope(await openCodeFetch('/session/status', { directory }).catch(() => null)));
     if (!statuses) return null;
     const type = asRecord(statuses[sessionId])?.type;
     if (type === 'busy' || type === 'retry') return false;
     // The status map lists only busy sessions, so a missed busy event leaves
     // no entry while a turn still streams. The trailing unfinished assistant
     // message is the live evidence of that turn (mirrors the UI gate).
-    const messages = asList(await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
+    const messages = asList(unwrapDataEnvelope(await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
       query: { limit: String(MESSAGE_TAIL_LIMIT) },
-    }).catch(() => null));
+    }).catch(() => null)));
     if (!messages) return null;
     const last = asRecord(asRecord(messages[messages.length - 1])?.info);
     if (last?.role === 'assistant' && asCount(asRecord(last.time)?.completed) === null) return false;
@@ -405,7 +419,7 @@ export function createMessageQueueRuntime({
     const [head, ...tail] = text.split(' ');
     const name = head.slice(1);
     if (!name) return null;
-    const commands = asList(await openCodeFetch('/command', { directory })) ?? [];
+    const commands = asList(unwrapDataEnvelope(await openCodeFetch('/command', { directory }))) ?? [];
     const match = commands.map(asRecord).find((command) => command?.name === name);
     if (!match) return null;
     return {
@@ -459,15 +473,19 @@ export function createMessageQueueRuntime({
 
   const sendItem = async (sessionId, directory, item) => {
     const { providerID, modelID, agent, variant } = item.sendConfig;
+    const v2Track = isV2PromptTrack();
     const fileParts = item.attachments.map(toFilePart);
     const contextParts = item.context.flatMap(toContextParts);
     // OpenCode's command route takes file parts only, so a command queued
     // with captured context cannot go through it. Same rule as the composer:
     // without context the command route keeps its semantics; with context the
     // prompt route carries the expanded template (or the skill invocation as an
-    // explicit instruction) together with the context.
+    // explicit instruction) together with the context. The v2 track always
+    // takes the prompt path: its command endpoint takes neither the selection
+    // nor the argument string, and its command list carries no template to
+    // expand — the queued text goes out as-is.
     const command = await resolveSlashCommand(item.text, directory);
-    if (command && contextParts.length === 0) {
+    if (command && contextParts.length === 0 && !v2Track) {
       const body = { command: command.name, arguments: command.arguments, model: `${providerID}/${modelID}` };
       if (agent) body.agent = agent;
       if (variant) body.variant = variant;
@@ -508,7 +526,20 @@ export function createMessageQueueRuntime({
     if (variant) body.variant = variant;
     body.parts = parts;
     await resolvePromptBody?.(body, { sessionId, directory });
-    await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, { directory, method: 'POST', body });
+    if (v2Track) {
+      // The v1 body stays the hook contract; the v2 plan (switches, parked
+      // synthetics, flat prompt) is mapped after the hook so its Auto-routing
+      // rewrite lands on the switches. Queue semantics ride `delivery` (v2's
+      // `prompt_async` equivalent).
+      await postV2PromptDispatch({
+        sessionId,
+        body,
+        delivery: 'queue',
+        post: (path, promptBody) => openCodeFetch(path, { directory, method: 'POST', body: promptBody }),
+      });
+    } else {
+      await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, { directory, method: 'POST', body });
+    }
     if (knowledge.text && sessionKnowledgeRuntime) {
       // After the prompt is accepted, so a rejected dispatch carries it again.
       await sessionKnowledgeRuntime.recordDelivered(sessionId, directory, knowledge.signature).catch(() => undefined);

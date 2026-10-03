@@ -105,7 +105,10 @@ persisted "sending" flag would strand a message forever.
    and the trailing message must not be an unfinished assistant reply (the
    status map only lists busy sessions, so a missed busy event leaves no
    entry while a turn still streams). A failed fetch is unknown, never idle:
-   the tick re-arms with backoff.
+   the tick re-arms with backoff. On a v2-mode instance the status call is
+   the renamed `/api/session/active` with its `{ data }` envelope unwrapped,
+   and every read scopes through `location[directory]` instead of v1's
+   `?directory=`.
 5. The head is marked in flight (broadcast), then sent:
    - text starting with `/` that names a command in OpenCode's `/command`
      list (skills included) and carries no captured context goes to
@@ -121,6 +124,17 @@ persisted "sending" flag would strand a message forever.
      invocation when there is one, pending project knowledge
      (`sessionKnowledgeRuntime.resolvePendingForSession`, synthetic, recorded
      as delivered only after the prompt is accepted), then the agent mention.
+   On a v2-mode instance (protocol mode `v2`) the command route is skipped —
+   the v2 command endpoint takes neither the selection nor the argument
+   string, and the v2 command list carries no template to expand — and the
+   prompt dispatch goes through `postV2PromptDispatch`
+   (`../opencode/v2-prompt-dispatch.js`) after `resolvePromptBody`: the
+   queued selection becomes `POST /api/session/:id/model|agent` switches
+   (variant rides the model switch), context/knowledge texts become
+   `POST /api/session/:id/synthetic` admissions parked with `resume: false`,
+   and the flat `POST /api/session/:id/prompt` carries
+   `{text, files, agents, delivery: 'queue'}` (v2's `prompt_async`
+   equivalent).
    Success removes the item, persists, broadcasts, and marks the user
    message sent for notifications. Failure keeps the item, backs off
    2 s → 60 s (doubling per consecutive failure of that item), and re-arms.

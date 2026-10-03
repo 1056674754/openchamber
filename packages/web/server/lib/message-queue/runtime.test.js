@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resolveUpstreamRequestPath } from '../opencode/upstream-v2-paths.js';
 import { createMessageQueueRuntime, parseQueuedItemInput } from './runtime.js';
 
 const SESSION = 'ses_queue_test_1';
@@ -24,6 +25,7 @@ const makeDataDir = () => {
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.OPENCHAMBER_PROTOCOL_MODE;
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -58,17 +60,20 @@ const createOpenCode = () => {
   return { state, fetchImpl };
 };
 
-const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolvePromptBody } = {}) => {
+const createRuntime = ({ dataDir = makeDataDir(), openCode = createOpenCode(), knowledge = null, retryDelayMs, resolvePromptBody, protocolMode } = {}) => {
   let eventHandler = () => {};
   let statusHandler = () => {};
   const broadcasts = [];
   const promptSent = [];
+  if (protocolMode) process.env.OPENCHAMBER_PROTOCOL_MODE = protocolMode;
   const options = {
     globalEventHub: {
       subscribeEvent(handler) { eventHandler = handler; return () => {}; },
       subscribeStatus(handler) { statusHandler = handler; return () => {}; },
     },
-    buildOpenCodeUrl: (fetchPath) => `http://opencode.test${fetchPath}`,
+    // The real upstream-URL boundary, so the v2 track exercises the same
+    // path mapping the running server applies.
+    buildOpenCodeUrl: (fetchPath) => `http://opencode.test${resolveUpstreamRequestPath(fetchPath, protocolMode ?? 'v1')}`,
     getOpenCodeAuthHeaders: () => ({}),
     sessionKnowledgeRuntime: knowledge,
     broadcastGlobalUiEvent: (event) => broadcasts.push(event),
@@ -539,5 +544,136 @@ describe('message queue runtime', () => {
       { type: 'agent', name: 'reviewer' },
     ]);
     expect(recorded).toEqual([{ sessionId: SESSION, directory: DIRECTORY, signature: 'sig-1' }]);
+  });
+});
+
+/**
+ * A fake OpenCode 2: everything under `/api`, list/get payloads inside the
+ * `{ data }` envelope, and a log of every switch/synthetic/prompt it took.
+ */
+const createOpenCodeV2 = () => {
+  const state = {
+    statuses: {},
+    tail: [],
+    commands: [],
+    sent: [],
+  };
+  const fetchImpl = vi.fn(async (url, init = {}) => {
+    const { pathname } = new URL(url);
+    const method = init.method ?? 'GET';
+    if (method === 'GET' && pathname === '/api/session/active') return Response.json({ data: state.statuses });
+    if (method === 'GET' && pathname.endsWith('/message')) return Response.json({ data: state.tail, cursor: {} });
+    if (method === 'GET' && pathname === '/api/command') return Response.json({ data: state.commands });
+    if (method === 'POST' && pathname.endsWith('/model')) {
+      state.sent.push({ path: pathname, body: JSON.parse(init.body) });
+      return new Response(null, { status: 204 });
+    }
+    if (method === 'POST' && (pathname.endsWith('/agent') || pathname.endsWith('/synthetic') || pathname.endsWith('/prompt'))) {
+      state.sent.push({ path: pathname, body: JSON.parse(init.body) });
+      return Response.json({ data: {} });
+    }
+    return new Response('not found', { status: 404 });
+  });
+  return { state, fetchImpl };
+};
+
+describe('message queue runtime (v2 protocol mode)', () => {
+  it('dispatches a queued message as switches, parked synthetics, and a flat queue prompt', async () => {
+    const openCode = createOpenCodeV2();
+    const knowledge = {
+      resolvePendingForSession: async () => ({ text: 'pinned notes', signature: 'sig-1' }),
+      recordDelivered: async () => undefined,
+    };
+    const { runtime, emit } = createRuntime({ openCode, knowledge, protocolMode: 'v2' });
+    runtime.start();
+    openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    await runtime.enqueue(SESSION, DIRECTORY, item({
+      content: 'plain',
+      text: 'plain',
+      agentMention: 'reviewer',
+      attachments: [{ id: 'a', filename: 'f.txt', mimeType: 'text/plain', size: 1, source: 'local', dataUrl: 'data:text/plain,hi' }],
+      context: [{ kind: 'context', text: 'a large diff', metadata: { openchamberContext: { text: 'diff' } }, instructions: 'Read the PR first' }],
+    }));
+
+    openCode.state.statuses = {};
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
+      `/api/session/${SESSION}/model`,
+      `/api/session/${SESSION}/agent`,
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/synthetic`,
+      `/api/session/${SESSION}/prompt`,
+    ]);
+    expect(openCode.state.sent[0].body).toEqual({ model: { providerID: 'anthropic', id: 'claude', variant: undefined } });
+    expect(openCode.state.sent[1].body).toEqual({ agent: 'build' });
+    expect(openCode.state.sent[2].body).toEqual({ text: 'Read the PR first', delivery: 'queue', resume: false });
+    expect(openCode.state.sent[3].body).toEqual({ text: 'a large diff', metadata: { openchamberContext: { text: 'diff' } }, delivery: 'queue', resume: false });
+    expect(openCode.state.sent[4].body).toEqual({ text: 'pinned notes', delivery: 'queue', resume: false });
+    expect(openCode.state.sent[5].body).toEqual({
+      text: 'plain',
+      files: [{ uri: 'data:text/plain,hi', name: 'f.txt' }],
+      agents: [{ name: 'reviewer' }],
+      delivery: 'queue',
+    });
+    // The idle gate and the dispatch both scope through the v2 location query.
+    const statusUrl = openCode.fetchImpl.mock.calls.find(([, init]) => init?.method === 'GET')?.[0];
+    expect(new URL(statusUrl).searchParams.get('location[directory]')).toBe(DIRECTORY);
+    expect(new URL(statusUrl).searchParams.get('directory')).toBeNull();
+  });
+
+  it('lets the routing hook rewrite the selection that lands on the v2 switches', async () => {
+    const openCode = createOpenCodeV2();
+    const resolvePromptBody = vi.fn(async (body) => {
+      if (body.model?.modelID === 'auto') body.model = { providerID: 'openai', modelID: 'gpt-6-astra' };
+      return null;
+    });
+    const { runtime, emit } = createRuntime({ openCode, resolvePromptBody, protocolMode: 'v2' });
+    runtime.start();
+    openCode.state.statuses = {};
+    await runtime.enqueue(SESSION, DIRECTORY, item({
+      content: 'plain',
+      text: 'plain',
+      sendConfig: { providerID: 'openchamber', modelID: 'auto', agent: 'build' },
+    }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent[0].path).toBe(`/api/session/${SESSION}/model`);
+    expect(openCode.state.sent[0].body).toEqual({ model: { providerID: 'openai', id: 'gpt-6-astra', variant: undefined } });
+    expect(openCode.state.sent.at(-1).path).toBe(`/api/session/${SESSION}/prompt`);
+    expect(resolvePromptBody).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes the prompt path for a queued slash command (the v2 command route has no template)', async () => {
+    const openCode = createOpenCodeV2();
+    openCode.state.commands = [{ name: 'review', description: 'Review the change' }];
+    const { runtime, emit } = createRuntime({ openCode, protocolMode: 'v2' });
+    runtime.start();
+    openCode.state.statuses = {};
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: '/review src', text: '/review src' }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+
+    expect(openCode.state.sent.map((entry) => entry.path)).toEqual([
+      `/api/session/${SESSION}/model`,
+      `/api/session/${SESSION}/agent`,
+      `/api/session/${SESSION}/prompt`,
+    ]);
+    expect(openCode.state.sent[2].body).toEqual({ text: '/review src', delivery: 'queue' });
+  });
+
+  it('never dispatches while the v2 status map reports the session busy', async () => {
+    const openCode = createOpenCodeV2();
+    const { runtime, emit } = createRuntime({ openCode, protocolMode: 'v2' });
+    runtime.start();
+    openCode.state.statuses = { [SESSION]: { type: 'busy' } };
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'plain', text: 'plain' }));
+    emit({ type: 'session.status', properties: { sessionID: SESSION, status: { type: 'idle' } } });
+    await settle();
+    // The unwrapped v2 envelope reports the session busy again: no send.
+    expect(openCode.state.sent).toHaveLength(0);
   });
 });
