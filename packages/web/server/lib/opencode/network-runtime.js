@@ -1,4 +1,8 @@
-import { DEFAULT_PROTOCOL_MODE_SERVER_ID, recordProtocolModeFromVersion } from './protocol-mode.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, recordProtocolModeFromVersion, resolveProtocolMode } from './protocol-mode.js';
+import {
+  resolveUpstreamRequestPath,
+  rewriteDirectoryQueryForUpstream,
+} from './upstream-v2-paths.js';
 
 export const createOpenCodeNetworkRuntime = (deps) => {
   const {
@@ -101,13 +105,21 @@ export const createOpenCodeNetworkRuntime = (deps) => {
     }
   };
 
+  /**
+   * Build an upstream OpenCode URL for a v1-shaped request path. On the v2
+   * track (spine finale) the path is translated to the OpenCode 2 request
+   * shape — `/api` prefix, renamed endpoints, `?directory=` → the v2 location
+   * query — so every caller of this module keeps its v1 path spelling on both
+   * tracks (see `upstream-v2-paths.js`). Already-v2 paths pass through.
+   */
   const buildOpenCodeUrl = (path, prefixOverride) => {
     if (!state.openCodePort) {
       throw new Error('OpenCode port is not available');
     }
     const normalizedPath = path.startsWith('/') ? path : `/${path}`;
     const prefix = normalizeApiPrefix(prefixOverride !== undefined ? prefixOverride : '');
-    const fullPath = `${prefix}${normalizedPath}`;
+    const mode = resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID);
+    const fullPath = `${prefix}${rewriteDirectoryQueryForUpstream(resolveUpstreamRequestPath(normalizedPath, mode), mode)}`;
     const base = state.openCodeBaseUrl ?? `http://localhost:${state.openCodePort}`;
     return `${base}${fullPath}`;
   };

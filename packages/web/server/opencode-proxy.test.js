@@ -4,6 +4,7 @@ import express from 'express';
 import path from 'path';
 
 import { createSseBoundaryTracker, registerOpenCodeProxy, writeSseChunkWithBackpressure } from './lib/opencode/proxy.js';
+import { recordProtocolMode, resetProtocolModes } from './lib/opencode/protocol-mode.js';
 
 const listen = (app, host = '127.0.0.1') => new Promise((resolve, reject) => {
   const server = app.listen(0, host, () => resolve(server));
@@ -300,5 +301,87 @@ describe('OpenCode proxy SSE forwarding', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toBe(true);
+  });
+});
+
+describe('OpenCode proxy v2 boundary translation', () => {
+  let upstreamServer;
+  let proxyServer;
+
+  const setUp = async ({ seen }) => {
+    const upstream = express();
+    const record = (tag) => (req, res) => {
+      seen.push({ tag, url: req.url });
+      res.json({ ok: true, tag });
+    };
+    upstream.get('/api/session', record('v2-session'));
+    upstream.get('/api/session/active', record('v2-session-active'));
+    upstream.get('/api/location', record('v2-location'));
+    upstream.get('/session', record('v1-session'));
+    upstream.get('/session/status', record('v1-session-status'));
+    upstreamServer = await listen(upstream);
+    const upstreamPort = upstreamServer.address().port;
+
+    const app = express();
+    registerOpenCodeProxy(app, {
+      fs: {},
+      os: {},
+      path,
+      OPEN_CODE_READY_GRACE_MS: 0,
+      getRuntime: () => ({
+        openCodePort: upstreamPort,
+        isOpenCodeReady: true,
+        openCodeNotReadySince: 0,
+        isRestartingOpenCode: false,
+      }),
+      getOpenCodeAuthHeaders: () => ({}),
+      buildOpenCodeUrl: (requestPath) => `http://127.0.0.1:${upstreamPort}${requestPath}`,
+      ensureOpenCodeApiPrefix: () => {},
+      readWorktreeBootstrapStatus: async () => ({ status: 'ready' }),
+    });
+    proxyServer = await listen(app);
+    return proxyServer.address().port;
+  };
+
+  afterEach(async () => {
+    await closeServer(proxyServer);
+    await closeServer(upstreamServer);
+    proxyServer = undefined;
+    upstreamServer = undefined;
+    resetProtocolModes();
+  });
+
+  it('keeps the /api prefix, maps renamed endpoints, and moves the directory query on the v2 track', async () => {
+    recordProtocolMode('default', { mode: 'v2' });
+    const seen = [];
+    const proxyPort = await setUp({ seen });
+
+    const listed = await fetch(`http://127.0.0.1:${proxyPort}/api/session?directory=/tmp/proj`, { signal: AbortSignal.timeout(5000) });
+    expect(listed.status).toBe(200);
+    const located = await fetch(`http://127.0.0.1:${proxyPort}/api/path?directory=/tmp/proj`, { signal: AbortSignal.timeout(5000) });
+    expect(located.status).toBe(200);
+    const status = await fetch(`http://127.0.0.1:${proxyPort}/api/session/status`, { signal: AbortSignal.timeout(5000) });
+    expect(status.status).toBe(200);
+
+    expect(seen).toEqual([
+      { tag: 'v2-session', url: '/api/session?location%5Bdirectory%5D=%2Ftmp%2Fproj' },
+      { tag: 'v2-location', url: '/api/location?location%5Bdirectory%5D=%2Ftmp%2Fproj' },
+      { tag: 'v2-session-active', url: '/api/session/active' },
+    ]);
+  });
+
+  it('strips the /api prefix and keeps ?directory= verbatim on the v1 track', async () => {
+    const seen = [];
+    const proxyPort = await setUp({ seen });
+
+    const listed = await fetch(`http://127.0.0.1:${proxyPort}/api/session?directory=/tmp/proj`, { signal: AbortSignal.timeout(5000) });
+    expect(listed.status).toBe(200);
+    const status = await fetch(`http://127.0.0.1:${proxyPort}/api/session/status`, { signal: AbortSignal.timeout(5000) });
+    expect(status.status).toBe(200);
+
+    expect(seen).toEqual([
+      { tag: 'v1-session', url: '/session?directory=/tmp/proj' },
+      { tag: 'v1-session-status', url: '/session/status' },
+    ]);
   });
 });

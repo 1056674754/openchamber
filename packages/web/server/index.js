@@ -48,6 +48,7 @@ import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
 import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './lib/opencode/protocol-mode.js';
 import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
 import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
@@ -1496,7 +1497,12 @@ openCodeConfigFileWatcherRuntime = createOpenCodeConfigFileWatcherRuntime({
       if (!response.ok) return false;
       const statuses = await response.json();
       if (!statuses || typeof statuses !== 'object' || Array.isArray(statuses)) return false;
-      return Object.values(statuses).every((status) => status?.type !== 'busy' && status?.type !== 'retry');
+      // v2 track answers `{ data: { sessionID: { type: ... } } }` (session.active);
+      // the v1 track answers the bare map. Both reduce to the same busy check.
+      const statusMap = statuses.data && typeof statuses.data === 'object' && !Array.isArray(statuses.data)
+        ? statuses.data
+        : statuses;
+      return Object.values(statusMap).every((status) => status?.type !== 'busy' && status?.type !== 'retry');
     } catch {
       return false;
     }

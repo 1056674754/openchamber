@@ -12,6 +12,11 @@ import {
 import { createRealpathCache } from '../path-realpath-cache.js';
 import { DEFAULT_UPSTREAM_STALL_TIMEOUT_MS } from '../event-stream/upstream-reader.js';
 import { getWorktreeBootstrapStatus } from '../git/service.js';
+import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
+import {
+  resolveUpstreamRequestPath,
+  rewriteDirectoryQueryForUpstream,
+} from './upstream-v2-paths.js';
 
 const MAX_MESSAGE_HISTORY_DIFFS = 500;
 const MAX_MESSAGE_HISTORY_PATCH_LENGTH = 100_000;
@@ -333,7 +338,14 @@ export const registerOpenCodeProxy = (app, deps) => {
       const requestUrl = typeof req.originalUrl === 'string' && req.originalUrl.length > 0
         ? req.originalUrl
         : (typeof req.url === 'string' ? req.url : '');
-      const upstreamPath = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
+      let upstreamPath = requestUrl.startsWith('/api') ? requestUrl.slice(4) || '/' : requestUrl;
+      // OpenCode 2's `/api/event` is one global stream across all locations and
+      // declares no query parameters; the v1 directory scoping does not exist
+      // there and undeclared parameters must not reach the upstream validator.
+      // (buildOpenCodeUrl renames `/global/event` to the v2 stream endpoint.)
+      if (resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2') {
+        upstreamPath = upstreamPath.split('?')[0];
+      }
       const headers = collectForwardProxyHeaders(req.headers, getOpenCodeAuthHeaders());
       headers.accept ??= 'text/event-stream';
       headers['cache-control'] ??= 'no-cache';
@@ -666,13 +678,24 @@ export const registerOpenCodeProxy = (app, deps) => {
 
   // Generic proxy for non-SSE OpenCode API routes.
   const resolveOpenCodeProxyAgent = createOpenCodeProxyAgentResolver(resolveProxyTarget);
+  // v1 track: strip the `/api` prefix — OpenCode 1.x serves the bare paths.
+  // v2 track: OpenCode 2 serves `/api/...` (its v1-shaped root paths answer
+  // 500), so the prefix is kept and v1-only names are mapped to their v2
+  // endpoints (`/api/path` → `/api/location`, …) via the shared rename table.
+  const proxyPathRewrite = (path) => {
+    if (resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) !== 'v2') {
+      return path.replace(/^\/api/, '');
+    }
+    const withoutPrefix = path.startsWith('/api') ? path.slice(4) || '/' : path;
+    return resolveUpstreamRequestPath(withoutPrefix, 'v2');
+  };
   const createApiProxy = (timeoutMs) => createProxyMiddleware({
     target: resolveProxyTarget(),
     get agent() {
       return resolveOpenCodeProxyAgent();
     },
     changeOrigin: true,
-    pathRewrite: { '^/api': '' },
+    pathRewrite: proxyPathRewrite,
     ...(timeoutMs ? { timeout: timeoutMs, proxyTimeout: timeoutMs } : {}),
     // Dynamic target — port can change after restart
     router: () => resolveProxyTarget(),
@@ -752,6 +775,25 @@ export const registerOpenCodeProxy = (app, deps) => {
     } catch (error) {
       next(error);
     }
+  });
+
+  // v2 boundary translation (spine finale): OpenCode 2 scopes a request from
+  // `?location[directory]=` or the `x-opencode-directory` header and ignores
+  // v1's `?directory=` — the request would silently fall back to the server's
+  // own working directory. Runs after the worktree gate (which reads the v1
+  // parameter) and only rewrites proxied traffic; handlers above that read
+  // req.url themselves see the original shape.
+  app.use('/api', (req, _res, next) => {
+    if (!req.url || !req.url.includes('directory=')) return next();
+    if (resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) !== 'v2') return next();
+    try {
+      const rewritten = rewriteDirectoryQueryForUpstream(req.url, 'v2');
+      if (rewritten !== req.url) {
+        req.url = rewritten;
+      }
+    } catch {
+    }
+    next();
   });
 
   app.get('/api/session/:sessionID/message', async (req, res) => {

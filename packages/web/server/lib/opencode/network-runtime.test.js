@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createOpenCodeNetworkRuntime } from './network-runtime.js';
+import { recordProtocolMode, resetProtocolModes } from './protocol-mode.js';
 
 const createRuntime = () => createOpenCodeNetworkRuntime({
   state: {
@@ -81,5 +82,39 @@ describe('OpenCode network runtime', () => {
     expect(getStoredProtocolModeEntry('default')?.mode).toBe('v2');
     expect(getStoredProtocolModeEntry('default')?.version).toBe('2.0.14');
     resetProtocolModes();
+  });
+});
+
+describe('buildOpenCodeUrl v1 → v2 upstream mapping', () => {
+  afterEach(() => {
+    resetProtocolModes();
+  });
+
+  it('keeps v1 paths byte-stable on the v1 track', () => {
+    resetProtocolModes();
+    const runtime = createRuntime();
+    expect(runtime.buildOpenCodeUrl('/session', '')).toBe('http://localhost:4096/session');
+    expect(runtime.buildOpenCodeUrl('/global/event', '')).toBe('http://localhost:4096/global/event');
+    expect(runtime.buildOpenCodeUrl('/', '')).toBe('http://localhost:4096/');
+  });
+
+  it('maps v1 paths to the OpenCode 2 request shape on the v2 track', () => {
+    recordProtocolMode('default', { mode: 'v2' });
+    const runtime = createRuntime();
+    expect(runtime.buildOpenCodeUrl('/session', '')).toBe('http://localhost:4096/api/session');
+    expect(runtime.buildOpenCodeUrl('/global/event', '')).toBe('http://localhost:4096/api/event');
+    expect(runtime.buildOpenCodeUrl('/path?directory=/tmp', '')).toBe(
+      'http://localhost:4096/api/location?location%5Bdirectory%5D=%2Ftmp',
+    );
+    expect(runtime.buildOpenCodeUrl('/session/status', '')).toBe('http://localhost:4096/api/session/active');
+  });
+
+  it('leaves base URLs and already-v2 paths untouched on the v2 track', () => {
+    recordProtocolMode('default', { mode: 'v2' });
+    const runtime = createRuntime();
+    expect(runtime.buildOpenCodeUrl('/', '')).toBe('http://localhost:4096/');
+    expect(runtime.buildOpenCodeUrl('', '')).toBe('http://localhost:4096/');
+    expect(runtime.buildOpenCodeUrl('/api/info', '')).toBe('http://localhost:4096/api/info');
+    expect(runtime.buildOpenCodeUrl('/api/event', '')).toBe('http://localhost:4096/api/event');
   });
 });
