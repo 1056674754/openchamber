@@ -20,6 +20,11 @@ import path from 'path';
 
 import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import {
+  V2_DIRECTORY_PARAM,
+  isV2PromptTrack,
+  postV2PromptDispatch,
+} from '../opencode/v2-prompt-dispatch.js';
 
 const OPENCHAMBER_SETTINGS_FILE = path.join(
   process.env.OPENCHAMBER_DATA_DIR
@@ -326,7 +331,7 @@ export const createSessionGoalRuntime = ({
   const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const params = new URLSearchParams(query || {});
-    if (directory) params.set('directory', directory);
+    if (directory) params.set(isV2PromptTrack() ? V2_DIRECTORY_PARAM : 'directory', directory);
     const search = params.toString();
     const url = search ? `${base}?${search}` : base;
     const response = await fetch(url, {
@@ -489,15 +494,26 @@ export const createSessionGoalRuntime = ({
       ? lastAssistantInfo.agent
       : (typeof lastAssistantInfo?.mode === 'string' ? lastAssistantInfo.mode : '');
     const variant = typeof lastAssistantInfo?.variant === 'string' ? lastAssistantInfo.variant : '';
+    const body = {
+      model: { providerID, modelID },
+      ...(agent ? { agent } : {}),
+      ...(variant ? { variant } : {}),
+      parts: [{ type: 'text', text: buildContinuationPrompt(goal) }],
+    };
+    if (isV2PromptTrack()) {
+      // v2 keeps the selection on the session record: switch first, then the
+      // flat prompt (the continuation text is the only part there is).
+      await postV2PromptDispatch({
+        sessionId,
+        body,
+        post: (path, promptBody) => openCodeFetch(path, { directory, method: 'POST', body: promptBody }),
+      });
+      return;
+    }
     await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/prompt_async`, {
       directory,
       method: 'POST',
-      body: {
-        model: { providerID, modelID },
-        ...(agent ? { agent } : {}),
-        ...(variant ? { variant } : {}),
-        parts: [{ type: 'text', text: buildContinuationPrompt(goal) }],
-      },
+      body,
     });
   };
 

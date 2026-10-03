@@ -6,6 +6,12 @@ an independent progress auditor. Built on OpenChamber's backend-driven
 architecture (session-assist is the structural template): the loop lives in
 the web server and survives UI disconnects.
 
+Continuation dispatch is dual-track (`../opencode/v2-prompt-dispatch.js`):
+the v1 track posts the v1 `prompt_async` body unchanged; a v2-mode instance
+receives `/api/session/:id/model|agent` switches (built from the last
+assistant message's selection, variant on the model ref) followed by the
+flat `POST /api/session/:id/prompt` carrying the continuation text.
+
 ## Fork boundary (sscity)
 
 - Goal **runtime** on each OpenChamber process only processes events for **its

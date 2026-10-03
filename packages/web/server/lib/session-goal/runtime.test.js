@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { resolveUpstreamRequestPath } from '../opencode/upstream-v2-paths.js';
 import { createSessionGoalRuntime } from './runtime.js';
 
 const SESSION_ID = 'ses_parent';
@@ -679,6 +680,89 @@ describe('session goal live activity gate', () => {
       status: 'blocked',
       statusReason: 'auto-continuation limit reached',
     });
+    runtime.stop();
+  });
+});
+
+describe('session goal runtime (v2 protocol mode)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+    delete process.env.OPENCHAMBER_PROTOCOL_MODE;
+  });
+
+  it('continues a goal through the flat v2 dispatch with the selection switches first', async () => {
+    process.env.OPENCHAMBER_PROTOCOL_MODE = 'v2';
+    const requests = [];
+    const v2Session = {
+      id: SESSION_ID,
+      directory: DIRECTORY,
+      metadata: { openchamber: { goal } },
+    };
+    const assistantMessage = {
+      info: {
+        id: 'msg_assistant_v2',
+        sessionID: SESSION_ID,
+        role: 'assistant',
+        agent: 'build',
+        providerID: 'provider',
+        modelID: 'model',
+        variant: 'high',
+        finish: 'length',
+        time: { completed: 2 },
+        tokens: { input: 100, output: 4096, reasoning: 4096, cache: { read: 0 } },
+      },
+      parts: [{ type: 'reasoning', text: 'Drafting extensive implementation...' }],
+    };
+    // The v2 reads answer bare shapes here: this suite isolates the v2 send
+    // path; unwrapping the v2 read envelope is a separate follow-up.
+    const fetchImpl = vi.fn(async (input, init = {}) => {
+      const pathname = requestPath(input);
+      requests.push({ pathname, method: init.method ?? 'GET', body: init.body, search: new URL(String(input)).search });
+      if (pathname === `/api/session/${SESSION_ID}` && init.method === 'PATCH') return jsonResponse(v2Session);
+      if (pathname === `/api/session/${SESSION_ID}`) return jsonResponse(v2Session);
+      if (pathname === '/api/session/active') return jsonResponse({});
+      if (pathname === `/api/session/${SESSION_ID}/children`) return jsonResponse([]);
+      if (pathname === `/api/session/${SESSION_ID}/message`) return jsonResponse([assistantMessage]);
+      if (init.method === 'POST' && pathname.startsWith(`/api/session/${SESSION_ID}/`)) {
+        return jsonResponse({ data: {} });
+      }
+      throw new Error(`Unexpected request: ${pathname}`);
+    });
+    globalThis.fetch = fetchImpl;
+    const runtime = createSessionGoalRuntime({
+      // The real upstream-URL boundary, so the v2 posts carry /api paths.
+      buildOpenCodeUrl: (pathname) => `http://opencode.test${resolveUpstreamRequestPath(pathname, 'v2')}`,
+      getOpenCodeAuthHeaders: () => ({}),
+      getSmallModelService: async () => ({ generateSmallModelText: vi.fn() }),
+      idleQuietMs: 10,
+    });
+
+    runtime.processPayload({
+      type: 'session.status',
+      properties: { sessionID: SESSION_ID, status: { type: 'idle' }, directory: DIRECTORY },
+    });
+    await vi.runOnlyPendingTimersAsync();
+
+    const posts = requests.filter((request) => request.method === 'POST');
+    expect(posts.map((request) => request.pathname)).toEqual([
+      `/api/session/${SESSION_ID}/model`,
+      `/api/session/${SESSION_ID}/agent`,
+      `/api/session/${SESSION_ID}/prompt`,
+    ]);
+    expect(JSON.parse(posts[0].body)).toEqual({ model: { providerID: 'provider', id: 'model', variant: 'high' } });
+    expect(JSON.parse(posts[1].body)).toEqual({ agent: 'build' });
+    const promptBody = JSON.parse(posts[2].body);
+    expect(promptBody.text).toContain('Continue working toward the active session goal.');
+    expect(promptBody.model).toBeUndefined();
+    expect(promptBody.parts).toBeUndefined();
+    // v2 ignores ?directory=; the dispatch scopes through the location query.
+    const postUrl = fetchImpl.mock.calls.find(([, init]) => init?.method === 'POST')[0];
+    expect(new URL(postUrl).searchParams.get('location[directory]')).toBe(DIRECTORY);
     runtime.stop();
   });
 });
