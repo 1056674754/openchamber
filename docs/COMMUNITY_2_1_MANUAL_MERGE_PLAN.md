@@ -130,6 +130,8 @@
 - **等价核实挂账**：启动族 3 项（367e5c926/2832c9254/b3760852e）；perf 3 项（40a17b11a/7a5568769/32d0b4de0）；#88 retention 等价核实；PR 家族对齐核对（D10）。
 - **stash 遗留**：事故副本 stash@{2}（f305b975b WIP 重复件）仍待用户审后清理。
 
+- **✅ 轮收官（2026-10-03）**：版本号 2.1.0-sscity（248de7ff7）；公证壳 2.1.0-sscity.20261003-123928 换入 /Applications（旧壳 .bak-123928-20261003-055334，含 node-abi override 修复 package.json overrides.node-abi=3.94.0——bun 1.4.2 隔离布局下 @electron/rebuild 3.7.2 解析 3.87 不识 Electron 43 的 ABI）；runtime 2.1.0-sscity.20261003-133636-bff3a9de5488 激活（v2 源码态：OPENCHAMBER_OPENCODE_SOURCE_ROOT=opencode-v2 + bun 1.4.2 引擎，react 根链接补齐 tui 传递解析，版本比对归一 0c9a8c569）；**OpenCode 实跑 v2.0.21-sscity（协议 mode=v2 生效）**；merge/upstream 已推送 origin（f305b975b..c9737713a+）。OC2 激活收官 4 commits（e7b4bb5a2 路径映射、171b4de61 插件 v2 化、688dd2c6f 布局解析、e63ce1d8b 验证窗口）：四件套复测全绿。剩余：隔壁 agent 联调探针复跑、MERGE_V1.12 全量台账、人工回归清单。
+
 ## 验证计划
 
 沿用：type-check（8 包）/ packages/web vitest / build / signature token / 人工回归。
