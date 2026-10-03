@@ -2,6 +2,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
+import { isV2PromptTrack, postV2PromptDispatch } from '../opencode/v2-prompt-dispatch.js';
 import { discoverLoops } from './loops.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
@@ -548,12 +549,13 @@ export const createScheduledTasksRuntime = (deps) => {
       createdAt: now,
       updatedAt: now,
     };
-    const url = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}`);
-    url.searchParams.set('directory', projectPath);
+    const url = new URL(`${baseUrl}${isV2PromptTrack() ? '/api' : ''}/session/${encodeURIComponent(sessionID)}`);
+    if (!isV2PromptTrack()) url.searchParams.set('directory', projectPath);
     const response = await fetch(url.toString(), {
       method: 'PATCH',
       headers: {
         ...authHeaders,
+        ...(isV2PromptTrack() ? { 'x-opencode-directory': projectPath } : {}),
         'content-type': 'application/json',
         accept: 'application/json',
       },
@@ -569,21 +571,47 @@ export const createScheduledTasksRuntime = (deps) => {
       ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, projectPath)
         .catch(() => ({ text: '', signature: '' }))
       : { text: '', signature: '' };
-    const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
-    promptUrl.searchParams.set('directory', projectPath);
-    const response = await fetch(promptUrl.toString(), {
-      method: 'POST',
-      headers: {
-        ...authHeaders,
-        'content-type': 'application/json',
-        accept: 'application/json',
-      },
-      body: JSON.stringify(buildPromptAsyncPayload(task, projectPath, knowledge.text)),
-    });
+    // The v2 track maps the v1 payload (task selection + synthetic preambles)
+    // onto the flat dispatch; the directory header scopes the v2 location.
+    if (isV2PromptTrack()) {
+      const post = async (path, body) => {
+        const response = await fetch(`${baseUrl}/api${path}`, {
+          method: 'POST',
+          headers: {
+            ...authHeaders,
+            'x-opencode-directory': projectPath,
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => '');
+          throw new Error(`v2 prompt dispatch failed (${response.status})${detail ? `: ${detail}` : ''}`);
+        }
+      };
+      await postV2PromptDispatch({
+        sessionId: sessionID,
+        body: buildPromptAsyncPayload(task, projectPath, knowledge.text),
+        post,
+      });
+    } else {
+      const promptUrl = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}/prompt_async`);
+      promptUrl.searchParams.set('directory', projectPath);
+      const response = await fetch(promptUrl.toString(), {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify(buildPromptAsyncPayload(task, projectPath, knowledge.text)),
+      });
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new Error(`prompt_async failed (${response.status})${body ? `: ${body}` : ''}`);
+      }
     }
     if (knowledge.text && sessionKnowledgeRuntime) {
       await sessionKnowledgeRuntime.recordDelivered(sessionID, projectPath, knowledge.signature)

@@ -46,6 +46,8 @@ Loop-driven runs wait for an active worktree bootstrap before creating their ses
 
 When `goalEnabled` is set, `createTaskGoal` writes the expanded prompt via `session-goal/objectives.js` (inline fallback if the write fails), patches `metadata.openchamber.goal`, then the host session-goal runtime continues the loop from session events. Oversized prompts may be distilled with Small Model for the auditor objective.
 
+Prompt dispatch is dual-track (`../opencode/v2-prompt-dispatch.js`): the v1 track posts `prompt_async` unchanged; a v2-mode instance maps the task payload onto the flat dispatch — `/api/session/:id/model|agent` switches, the goal-intro synthetic parked with `resume: false`, then the flat `/api/session/:id/prompt` — and the goal metadata PATCH rides `/api/session/:id`, both scoped by `x-opencode-directory`. (The scheduled-command path still speaks the SDK client it is given; it is not part of the prompt-sender adaptation.)
+
 - `packages/web/server/lib/scheduled-tasks/routes.js`
   - Scheduled task CRUD endpoints
   - Listing reconciles loop additions, edits, and removals without restart
