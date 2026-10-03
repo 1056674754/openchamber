@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { buildRemoteSessionListUrl, listSessionsForBootstrap, SESSION_LIST_BOOTSTRAP_LIMIT } from "./session-list-bootstrap"
+import { buildRemoteSessionListUrl, listSessionsForBootstrap, SESSION_LIST_BOOTSTRAP_LIMIT, unwrapSessionListRows } from "./session-list-bootstrap"
 
 describe("buildRemoteSessionListUrl", () => {
   test("requests remote session trees instead of root-only sessions", () => {
@@ -40,5 +40,20 @@ describe("buildRemoteSessionListUrl", () => {
         limit: SESSION_LIST_BOOTSTRAP_LIMIT,
       },
     ])
+  })
+})
+
+describe("unwrapSessionListRows", () => {
+  test("passes the v1 bare array through", () => {
+    expect(unwrapSessionListRows([{ id: "a" }, { id: "b" }])).toEqual([{ id: "a" }, { id: "b" }])
+  })
+
+  test("unwraps the v2 cursor-pagination envelope", () => {
+    expect(unwrapSessionListRows({ data: [{ id: "a" }], cursor: 3 })).toEqual([{ id: "a" }])
+  })
+
+  test("non-array non-envelope data yields no rows", () => {
+    expect(unwrapSessionListRows({ location: { directory: "/repo" } })).toEqual([])
+    expect(unwrapSessionListRows(undefined)).toEqual([])
   })
 })

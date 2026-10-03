@@ -1,6 +1,7 @@
 import type { Session } from "@opencode-ai/sdk/v2";
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { retry } from "@/sync/retry";
+import { unwrapSessionListRows } from "@/sync/session-list-bootstrap";
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 export type GlobalSessionRecord = Session & {
@@ -96,13 +97,14 @@ const unwrapSessionList = (
         throw error;
     }
 
-    if (!Array.isArray(result.data)) {
+    if (result.data !== undefined && !Array.isArray(result.data)
+        && !Array.isArray((result.data as { data?: unknown } | undefined)?.data)) {
         const error = new Error(`${operation} returned no data`);
         (error as Error & { status?: number }).status = 503;
         throw error;
     }
 
-    return result.data as GlobalSessionRecord[];
+    return unwrapSessionListRows(result.data) as GlobalSessionRecord[];
 };
 
 const requestSessionPage = async (

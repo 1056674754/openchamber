@@ -120,5 +120,18 @@ export async function listSessionsForBootstrap(
     ;(wrapped as Error & { status?: number }).status = 503
     throw wrapped
   }
-  return result.data.filter((item): item is Session => Boolean(item?.id))
+  return unwrapSessionListRows<Session>(result.data).filter((item): item is Session => Boolean(item?.id))
+}
+
+/**
+ * The v2 cursor-pagination endpoints wrap rows as `{data, cursor}` (plus a
+ * location echo); the v1 track returns the bare array. Normalize both to the
+ * row array so shared callers stay dual-track.
+ */
+export const unwrapSessionListRows = <T = unknown>(data: unknown): T[] => {
+  if (Array.isArray(data)) return data as T[]
+  if (data && typeof data === "object" && Array.isArray((data as { data?: unknown }).data)) {
+    return (data as { data: T[] }).data
+  }
+  return []
 }

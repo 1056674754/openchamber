@@ -35,6 +35,7 @@ describe('v1 → v2 upstream request-path mapping', () => {
   it('renames the v1 names OpenCode 2 moved or folded', () => {
     expect(resolveUpstreamRequestPath('/global/event', 'v2')).toBe('/api/event');
     expect(resolveUpstreamRequestPath('/event', 'v2')).toBe('/api/event');
+    expect(resolveUpstreamRequestPath('/global/config', 'v2')).toBe('/api/config');
     expect(resolveUpstreamRequestPath('/path', 'v2')).toBe('/api/location');
     expect(resolveUpstreamRequestPath('/path?directory=/tmp', 'v2')).toBe('/api/location?directory=/tmp');
     expect(resolveUpstreamRequestPath('/session/status', 'v2')).toBe('/api/session/active');
