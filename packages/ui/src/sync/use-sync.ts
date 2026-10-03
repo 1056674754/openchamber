@@ -2,6 +2,7 @@ import { useCallback, useRef, useMemo } from "react"
 import type { Message, OpencodeClient, Part, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { retry } from "./retry"
+import { unwrapSessionStatusMap } from "./bootstrap"
 import { SESSION_CACHE_LIMIT, type State } from "./types"
 import { pickSessionCacheEvictions } from "./session-cache"
 import {
@@ -65,7 +66,7 @@ const readStatusesForTarget = async (
   }
   const result = await client.session.status({ directory })
   if (result.error) throw new Error(`session.status failed: ${formatSdkError(result.error)}`)
-  return result.data ?? {}
+  return unwrapSessionStatusMap(result.data)
 }
 
 export function logMessageHistoryLoadFailure(input: {

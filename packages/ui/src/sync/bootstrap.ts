@@ -90,6 +90,26 @@ function unwrap<T>(
   return data
 }
 
+/**
+ * The v2 session/active answer nests the map one level ({data: Record}); the
+ * v1 track returns the map directly. Session status maps never legitimately
+ * carry their own `data` key, so a single-key unwrap is unambiguous.
+ */
+export const unwrapSessionStatusMap = (value: unknown): Record<string, SessionStatus> => {
+  if (
+    value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && "data" in value
+    && value.data !== null
+    && typeof value.data === "object"
+    && !Array.isArray(value.data)
+  ) {
+    return value.data as Record<string, SessionStatus>
+  }
+  return (value && !Array.isArray(value) ? value : {}) as Record<string, SessionStatus>
+}
+
 const requestSignature = (items: Array<{ id: string }> | undefined): string => {
   if (!items || items.length === 0) return ""
   return items
@@ -229,7 +249,7 @@ export async function bootstrapDirectory(input: {
         ),
         retry(() =>
           withTimeout(sdk.session.status({ directory }), "session.status").then((x) => {
-            const sessionStatus = unwrap(x, "session.status")
+            const sessionStatus = unwrapSessionStatusMap(unwrap(x, "session.status"))
             set({ session_status: sessionStatus })
             reconcileTimingFromSnapshot(serverId, directory, sessionStatus, getState)
           }),

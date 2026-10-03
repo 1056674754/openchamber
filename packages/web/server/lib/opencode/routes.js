@@ -12,7 +12,13 @@ import { buildAppliedResponse, buildDeferredRestartResponse } from './config-mut
 import { getClaudeCliAuthStatus } from './claude-cli-auth.js';
 import { settingsSurfaceOf } from './settings-files.js';
 import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol-mode.js';
-import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
+import {
+  CREDENTIAL_LIST_ERROR,
+  ENTERPRISE_MODE_ERROR,
+  isCredentialListRequest,
+  isEnterpriseMode,
+  isProviderConnectRequest,
+} from '../enterprise-mode.js';
 
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
@@ -783,9 +789,17 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
   const refuseInEnterpriseMode = (_req, res, next) => (
     isEnterpriseMode() ? res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' }) : next()
   );
-  app.post('/api/integration/:integrationID/connect', refuseInEnterpriseMode);
-  app.post('/api/integration/:integrationID/oauth/:methodID/connect', refuseInEnterpriseMode);
-  app.post('/api/integration/:integrationID/oauth/:attemptID/complete', refuseInEnterpriseMode);
+  app.use((req, res, next) => (
+    isProviderConnectRequest(req.method, req.path) ? refuseInEnterpriseMode(req, res, next) : next()
+  ));
+
+  // Every stored key, secrets included (OpenCode 2.0.20): this server reads it
+  // for itself through `auth.js`, and no client gets it through the proxy.
+  app.use((req, res, next) => (
+    isCredentialListRequest(req.method, req.path)
+      ? res.status(403).json({ error: CREDENTIAL_LIST_ERROR, code: 'credential_list_refused' })
+      : next()
+  ));
 
   app.put('/api/provider', refuseInEnterpriseMode, async (req, res) => {
     try {

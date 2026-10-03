@@ -3,7 +3,13 @@ import { waitForApiUrl } from './opencode-ready';
 import { getConfiguredProviderIds } from './opencodeConfig';
 import { readSettings } from './bridge-settings-runtime';
 import { projectProviderCatalogResponse, providerPrefixOf, collectReferencedProviderIds } from './provider-catalog-filter';
-import { ENTERPRISE_MODE_ERROR, isEnterpriseMode, isProviderConnectRequest } from '../../web/server/lib/enterprise-mode.js';
+import {
+  CREDENTIAL_LIST_ERROR,
+  ENTERPRISE_MODE_ERROR,
+  isCredentialListRequest,
+  isEnterpriseMode,
+  isProviderConnectRequest,
+} from '../../web/server/lib/enterprise-mode.js';
 
 type BridgeMessageInput = {
   id: string;
@@ -117,6 +123,23 @@ const collectProxyResponseHeaders = (headers: Headers, deps: Pick<ProxyRuntimeDe
   return result;
 };
 
+const RESOLVE_PROBE_BASE = 'http://opencode.invalid/';
+
+/**
+ * The path OpenCode receives for a webview path, resolved the same way the
+ * request URL is built below; null when it would leave the OpenCode origin.
+ */
+const resolveOpenCodePath = (normalizedPath: string): string | null => {
+  let resolved: URL;
+  try {
+    resolved = new URL(normalizedPath.replace(/^\/+/, ''), RESOLVE_PROBE_BASE);
+  } catch {
+    return null;
+  }
+  if (resolved.origin !== new URL(RESOLVE_PROBE_BASE).origin) return null;
+  return `${resolved.pathname}${resolved.search}`;
+};
+
 type ProxyRuntimeDeps = {
   tryHandleLocalFsProxy: (method: string, requestPath: string) => Promise<ApiProxyResponsePayload | null>;
   buildUnavailableApiResponse: () => ApiProxyResponsePayload;
@@ -148,12 +171,36 @@ export async function handleProxyBridgeMessage(
         return { id, type, success: true, data: localFsResponse };
       }
 
+      // The path is resolved as a URL before it goes out, so `/http:api/...`
+      // or `/http://host/...` would reach a path the checks below never saw.
+      // Check what OpenCode will receive, and refuse anything that leaves it.
+      const resolvedPath = resolveOpenCodePath(normalizedPath);
+      if (resolvedPath === null) {
+        const data: ApiProxyResponsePayload = {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+          bodyText: JSON.stringify({ error: 'Not an OpenCode path' }),
+        };
+        return { id, type, success: true, data };
+      }
+
       // Enterprise mode: the same provider-connect routes the web server refuses.
-      if (isProviderConnectRequest(normalizedMethod, normalizedPath) && isEnterpriseMode()) {
+      if (isProviderConnectRequest(normalizedMethod, resolvedPath) && isEnterpriseMode()) {
         const data: ApiProxyResponsePayload = {
           status: 403,
           headers: { 'content-type': 'application/json' },
           bodyText: JSON.stringify({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' }),
+        };
+        return { id, type, success: true, data };
+      }
+
+      // Every stored key, secrets included: the extension host reads it for
+      // itself, the webview never gets it.
+      if (isCredentialListRequest(normalizedMethod, resolvedPath)) {
+        const data: ApiProxyResponsePayload = {
+          status: 403,
+          headers: { 'content-type': 'application/json' },
+          bodyText: JSON.stringify({ error: CREDENTIAL_LIST_ERROR, code: 'credential_list_refused' }),
         };
         return { id, type, success: true, data };
       }

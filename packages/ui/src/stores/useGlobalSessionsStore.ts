@@ -319,7 +319,16 @@ export const computeStatusBatchMerge = (
       continue;
     }
     const responseRecord = response as { data?: unknown };
-    const data = responseRecord?.data;
+    let data = responseRecord?.data;
+    // The v2 session/active answer nests the map one level ({data: Record});
+    // descend once so the v2 poll does not read as an empty status payload
+    // (which the staleness prune below would treat as authoritative).
+    if (data && typeof data === 'object' && !Array.isArray(data) && 'data' in data) {
+      const nested = (data as { data?: unknown }).data;
+      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+        data = nested;
+      }
+    }
     if (Array.isArray(data) || data === null || typeof data !== 'object') {
       continue;
     }

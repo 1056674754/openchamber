@@ -1532,12 +1532,21 @@ class OpencodeService {
         return null;
       }
 
-      const data = await response.json().catch(() => null);
-      if (!data || typeof data !== "object") {
+      const payload = await response.json().catch(() => null);
+      if (!payload || typeof payload !== "object") {
         return null;
       }
 
-      return data as Record<
+      // The v2 session/active answer nests the map one level ({data: Record}).
+      const nested = (payload as { data?: unknown }).data;
+      if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+        return nested as Record<
+          string,
+          { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
+        >;
+      }
+
+      return payload as Record<
         string,
         { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }
       >;
