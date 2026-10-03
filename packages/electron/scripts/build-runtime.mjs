@@ -244,7 +244,10 @@ const validateOpenCodeSourceRuntime = ({
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })).trim();
-  if (output !== opencodeVersion) {
+  // v2 reports `opencode v<version>`; v1 reported the bare version. Normalize
+  // both to the bare -sscity version for the comparison.
+  const normalized = output.replace(/^opencode\s+v?/, '');
+  if (normalized !== opencodeVersion) {
     throw new Error(`OpenCode source runtime reported ${output || '(empty)'}; expected ${opencodeVersion}`);
   }
 };
