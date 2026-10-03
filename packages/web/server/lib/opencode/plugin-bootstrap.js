@@ -1,5 +1,4 @@
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, statSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -64,8 +63,11 @@ function findPluginSourceDir() {
   // Packaged runtimes deploy the workspace plugin beside the server inside the
   // same node_modules root; resolving it through the server's own module graph
   // is layout-independent (repo workspace link and runtime install both work).
+  // The package's exports map exposes only an import-conditioned ".", so ESM
+  // resolution is the reliable specifier form; the entry lives at
+  // `<pkg>/src/index.ts` in both layouts, hence the double dirname.
   try {
-    candidates.unshift(dirname(createRequire(import.meta.url).resolve('@openchamber/plugin/package.json')));
+    candidates.unshift(dirname(dirname(fileURLToPath(import.meta.resolve('@openchamber/plugin')))));
   } catch {
   }
   if (process.cwd().includes('openchamber')) {
