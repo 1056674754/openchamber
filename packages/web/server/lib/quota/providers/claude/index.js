@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { buildResult } from '../../utils/index.js';
-import { loadClaudeCredential } from './auth.js';
+import { findClaudeCredential, loadClaudeCredential } from './auth.js';
 import { toClaudeUsage } from './transforms.js';
 
 export const providerId = 'claude';
@@ -43,10 +43,10 @@ const cachedResultFor = (fingerprint, planLabel) => {
 const failure = (error, { configured = true } = {}) =>
   buildResult({ providerId, providerName, ok: false, configured, error });
 
-export const isConfigured = () => Boolean(loadClaudeCredential());
+export const isConfigured = (auth) => Boolean(findClaudeCredential(auth));
 
 const fetchQuotaUncoalesced = async () => {
-  const credential = loadClaudeCredential();
+  const credential = await loadClaudeCredential();
   if (!credential) return failure('Not configured', { configured: false });
 
   const fingerprint = fingerprintOf(credential);

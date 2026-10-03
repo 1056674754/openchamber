@@ -5,7 +5,6 @@ import os from 'os';
 import path from 'path';
 import { executeDirectOpenCodeUpgrade as defaultExecuteDirectOpenCodeUpgrade } from './opencode-upgrade-runtime.js';
 import {
-  getProviderAuthStates,
   removeProviderAuth as removeProviderAuthWithAdapter,
 } from '../subscriptions/auth-adapter.js';
 import { buildAppliedResponse, buildDeferredRestartResponse } from './config-mutation-response.js';
@@ -760,20 +759,15 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
       }
 
       const sources = getProviderSources(providerId, directory);
-      const { listProviderAuths } = await getAuthLibrary();
-      const authResult = await getProviderAuthStates({
-        fetchProvidersSnapshot,
-        buildOpenCodeUrl,
-        getOpenCodeAuthHeaders,
-        listProviderAuths,
-      });
+      const { getProviderAuth } = await getAuthLibrary();
       sources.sources.auth.exists = providerId === 'claude-code'
         ? getClaudeCliAuthStatus().connected
-        : authResult.states[providerId]?.configured === true;
+        : Boolean(await getProviderAuth(providerId));
 
       return res.json({
         providerId,
         sources: sources.sources,
+        config: sources.config,
       });
     } catch (error) {
       console.error('Failed to get provider sources:', error);
@@ -839,19 +833,10 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
         }
       }
 
-      const { listProviderAuths } = await getAuthLibrary();
-      const authResult = await getProviderAuthStates({
-        fetchProvidersSnapshot,
-        buildOpenCodeUrl,
-        getOpenCodeAuthHeaders,
-        listProviderAuths,
-      });
       // OpenCode 2 keeps credentials in its own store, out of this server's
-      // sight, so the form states whether one exists or follows this write
-      // (upstream SegB `50766fa0f`). Absent on the v1 track, where the local
-      // auth.json check stays authoritative.
-      const hasStoredAuth = req.body?.hasCredential === true
-        || authResult.states[providerID]?.configured === true;
+      // sight, so the form states whether one exists or follows this write.
+      const { getProviderAuth } = await getAuthLibrary();
+      const hasStoredAuth = req.body?.hasCredential === true || Boolean(await getProviderAuth(providerID));
       const upsertResult = upsertProviderConfig(providerID, config, directory, scope, { hasStoredAuth });
 
       // v2 track (spine OC2-S3): OpenCode 2 reloads provider config live, so
@@ -927,24 +912,20 @@ ${desktopReturn ? `<a class="return" href="openchamber://focus/mcp-auth">Return 
         });
       }
       if (scope === 'auth') {
-        const { removeProviderAuth: removeLegacyProviderAuth } = await getAuthLibrary();
         const result = await removeProviderAuthWithAdapter(providerId, {
           buildOpenCodeUrl,
           getOpenCodeAuthHeaders,
-          removeLegacyProviderAuth,
         });
-        console.log(`[subscriptions] Removed provider auth via ${result.path}: ${providerId}`);
+        console.log(`[subscriptions] Removed provider auth via OpenCode: ${providerId}`);
         removed = result.removed;
       } else if (scope === 'user' || scope === 'project' || scope === 'custom') {
         removed = removeProviderConfig(providerId, directory, scope);
       } else if (scope === 'all') {
-        const { removeProviderAuth: removeLegacyProviderAuth } = await getAuthLibrary();
         const authResult = await removeProviderAuthWithAdapter(providerId, {
           buildOpenCodeUrl,
           getOpenCodeAuthHeaders,
-          removeLegacyProviderAuth,
         });
-        console.log(`[subscriptions] Removed provider auth via ${authResult.path}: ${providerId}`);
+        console.log(`[subscriptions] Removed provider auth via OpenCode: ${providerId}`);
         const authRemoved = authResult.removed;
         const userRemoved = removeProviderConfig(providerId, directory, 'user');
         const projectRemoved = directory ? removeProviderConfig(providerId, directory, 'project') : false;

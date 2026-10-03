@@ -53,13 +53,12 @@ export {
 } from './providers.js';
 
 export {
-  readAuthFile,
-  writeAuthFile,
-  removeProviderAuth,
+  configureOpenCodeCredentials,
+  openCodeCredentialSource,
+  projectEnvironmentKeys,
+  projectCredentialEntries,
+  readOpenCodeCredentials,
   getProviderAuth,
-  listProviderAuths,
-  AUTH_FILE,
-  OPENCODE_DATA_DIR,
 } from './auth.js';
 
 export { createUiAuth } from '../ui-auth/ui-auth.js';

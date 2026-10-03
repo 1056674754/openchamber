@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { fetchOpenCodeGoUsage, parseOpenCodeGoUsage } from './opencode-go.js';
 
 mock.module('../../opencode/auth.js', () => ({
-  readAuthFile: () => ({ 'opencode-go': { key: 'api-key' } }),
+  readOpenCodeCredentials: async () => ({ 'opencode-go': { key: 'api-key' } }),
 }));
 
 mock.module('../opencode-go-credentials.js', () => ({

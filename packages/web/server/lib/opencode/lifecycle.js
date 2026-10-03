@@ -301,13 +301,13 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
     return await waitForPortRelease(port, 2500);
   };
 
-  const finalizeInterruptedManagedOpenCodeRuns = (reason) => {
+  const finalizeInterruptedManagedOpenCodeRuns = (reason, options = {}) => {
     if (state.isExternalOpenCode) {
       return;
     }
 
     try {
-      const result = finalizeInterruptedOpenCodeRuns({ reason });
+      const result = finalizeInterruptedOpenCodeRuns({ reason, ...options });
       if (result.updatedParts > 0 || result.updatedMessages > 0) {
         console.warn(
           `[OpenCode] Finalized ${result.updatedParts} interrupted tool part(s) and ${result.updatedMessages} message(s) after ${reason}`
@@ -835,6 +835,20 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
       : {};
     const managedOpenCodeEnv = await prepareManagedOpenCodeEnv();
 
+    const processEnv = stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
+      ...shellEnv,
+      ...process.env,
+      ...managedOpenCodeEnv,
+      PATH: envPath,
+      // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
+      // user's own OPENCODE_PASSWORD would otherwise win and every request
+      // we send with openCodePassword would get 401 (upstream 8dd842a3b).
+      // OpenCode 1.x ignores the variable, so v1 behaviour is unchanged.
+      OPENCODE_PASSWORD: openCodePassword,
+      OPENCODE_SERVER_PASSWORD: openCodePassword,
+    })));
+    managedProcessEnv = processEnv;
+
     try {
       const serverInstance = await createManagedOpenCodeServerProcess({
         resolvedBinary,
@@ -843,18 +857,7 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
         timeout: startupTimeoutMs,
         cwd: state.openCodeWorkingDirectory,
         shellEnvKeysCount: Object.keys(shellEnv).length,
-        env: stripAppImageLauncherEnv(stripAppImageArgv0Leak(applyProviderEnvAliases({
-          ...shellEnv,
-          ...process.env,
-          ...managedOpenCodeEnv,
-          PATH: envPath,
-          // OpenCode 2 reads OPENCODE_PASSWORD before the legacy name, so a
-          // user's own OPENCODE_PASSWORD would otherwise win and every request
-          // we send with openCodePassword would get 401 (upstream 8dd842a3b).
-          // OpenCode 1.x ignores the variable, so v1 behaviour is unchanged.
-          OPENCODE_PASSWORD: openCodePassword,
-          OPENCODE_SERVER_PASSWORD: openCodePassword,
-        }))),
+        env: processEnv,
       });
 
       if (!serverInstance || !serverInstance.url) {
@@ -1018,7 +1021,15 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
           });
         }
       }
-      finalizeInterruptedManagedOpenCodeRuns('managed OpenCode restart');
+      // Same rationale as the startup path: keep the full-DB finalization scan
+      // off the restart critical path, with a cutoff captured before the new
+      // process starts so its live parts are exempt.
+      const finalizeCutoffMs = Date.now();
+      void Promise.resolve()
+        .then(() => finalizeInterruptedManagedOpenCodeRuns('managed OpenCode restart', { beforeMs: finalizeCutoffMs }))
+        .catch((error) => {
+          console.warn('[OpenCode] Background interrupted-run finalization failed:', error);
+        });
 
       if (env.ENV_CONFIGURED_OPENCODE_PORT) {
         console.log(`Using OpenCode port from environment: ${env.ENV_CONFIGURED_OPENCODE_PORT}`);
@@ -1308,9 +1319,20 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
             }
 
             state.lastOpenCodeError = null;
-            finalizeInterruptedManagedOpenCodeRuns('managed OpenCode startup');
+            const finalizeCutoffMs = Date.now();
             state.openCodeProcess = await startOpenCode();
             syncToHmrState();
+            // Interrupted-run finalization scans the whole OpenCode `part`
+            // table and can take tens of seconds on multi-million-row DBs;
+            // running it before startOpenCode stalled cold boot behind a
+            // bookkeeping pass. Fire-and-forget after the server is up, with a
+            // cutoff taken before the new process started so live parts of the
+            // restarted server are never mistaken for interrupted ones.
+            void Promise.resolve()
+              .then(() => finalizeInterruptedManagedOpenCodeRuns('managed OpenCode startup', { beforeMs: finalizeCutoffMs }))
+              .catch((error) => {
+                console.warn('[OpenCode] Background interrupted-run finalization failed:', error);
+              });
           }
         }
       }
@@ -1349,6 +1371,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   let healthCheckCyclePromise = null;
   let lastHealthProbeResult = null;
   let healthFailureCountIntervalMs = 15_000;
+  /** The managed OpenCode's launch environment; null before the first launch. */
+  let managedProcessEnv = null;
 
   const resetHealthFailureState = () => {
     consecutiveHealthFailures = 0;
@@ -1522,6 +1546,8 @@ export const createOpenCodeLifecycleRuntime = (deps) => {
   };
 
   return {
+    /** The managed OpenCode's launch environment; null for an external OpenCode or before the first launch. */
+    getManagedOpenCodeProcessEnv: () => (state.isExternalOpenCode ? null : managedProcessEnv),
     killProcessOnPort,
     startOpenCode,
     restartOpenCode,

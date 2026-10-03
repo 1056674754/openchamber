@@ -1,4 +1,4 @@
-import { readAuthFile } from '../../opencode/auth.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 import { asObject, buildResult, getAuthEntry, normalizeAuthEntry, toNumber, toUsageWindow } from '../utils/index.js';
 
 export const providerId = 'command-code';
@@ -7,7 +7,7 @@ export const aliases = ['command-code'];
 
 const API_BASE_URL = 'https://api.commandcode.ai';
 
-const getApiKey = (auth = readAuthFile()) => {
+const getApiKey = (auth) => {
   const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
   const stored = entry?.key ?? entry?.access ?? entry?.token;
   return (typeof stored === 'string' ? stored.trim() : '') || process.env.COMMAND_CODE_API_KEY?.trim() || null;
@@ -77,10 +77,10 @@ export const fetchCommandCodeUsage = async (apiKey, fetchImpl = fetch) => {
   return windows;
 };
 
-export const isConfigured = () => Boolean(getApiKey());
+export const isConfigured = (auth) => Boolean(getApiKey(auth));
 
-export const fetchQuota = async (auth = readAuthFile()) => {
-  const apiKey = getApiKey(auth);
+export const fetchQuota = async (auth = readOpenCodeCredentials()) => {
+  const apiKey = getApiKey(await auth);
   if (!apiKey) return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
   try {
     return buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows: await fetchCommandCodeUsage(apiKey) } });

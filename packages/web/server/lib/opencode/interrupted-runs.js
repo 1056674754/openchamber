@@ -182,6 +182,10 @@ export const finalizeInterruptedOpenCodeRuns = ({
   dbPath = defaultOpenCodeDbPath(),
   now = Date.now,
   reason = 'managed OpenCode process restarted',
+  /** Only finalize parts last touched at/before this epoch-ms instant. Guards
+   *  background finalization against marking parts of an already-restarted
+   *  server as interrupted. */
+  beforeMs,
   Database,
 } = {}) => {
   if (!dbPath || !fs.existsSync(dbPath)) {
@@ -215,6 +219,9 @@ export const finalizeInterruptedOpenCodeRuns = ({
 
     const activeStatusValues = [...ACTIVE_TOOL_STATUSES];
     const activeStatusPlaceholders = activeStatusValues.map(() => '?').join(', ');
+    const cutoffPredicate = typeof beforeMs === 'number' && partColumns.has('time_updated')
+      ? 'AND time_updated <= ? '
+      : '';
     const candidateParts = db.prepare(`
       SELECT id, message_id AS messageId, data
       FROM part
@@ -230,7 +237,8 @@ export const finalizeInterruptedOpenCodeRuns = ({
             ''
           )
         ) IN (${activeStatusPlaceholders})
-    `).all(...activeStatusValues);
+        ${cutoffPredicate}
+    `).all(...activeStatusValues, ...(cutoffPredicate ? [beforeMs] : []));
     if (candidateParts.length === 0) {
       return {
         dbPath,

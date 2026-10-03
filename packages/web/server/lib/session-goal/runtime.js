@@ -20,6 +20,7 @@ import path from 'path';
 
 import { GOAL_OBJECTIVE_CHAR_LIMIT, readObjective } from './objectives.js';
 import { readMergedSettingsSync } from '../opencode/settings-files.js';
+import { readMessageRecords, unwrapOpenCodeEnvelope } from '../opencode/message-records.js';
 import {
   V2_DIRECTORY_PARAM,
   isV2PromptTrack,
@@ -355,15 +356,24 @@ export const createSessionGoalRuntime = ({
       directory,
       query: { limit: String(MESSAGE_FETCH_LIMIT) },
     }).catch(() => null);
-    return Array.isArray(messages) ? messages : null;
+    // v2 branch: OC2 answers a {data, cursor} page of flat records — normalize
+    // to the v1 {info, parts} view (v1 arrays pass through unchanged).
+    return readMessageRecords(messages);
   };
 
   const fetchSessionStatuses = async (directory) => {
     const statuses = await openCodeFetch('/session/status', { directory }).catch(() => null);
-    return statuses && typeof statuses === 'object' && !Array.isArray(statuses) ? statuses : null;
+    // v2 branch: /session/status maps to /api/session/active, which wraps its
+    // map in the {data} envelope; the v1 track answers the bare map.
+    const unwrapped = unwrapOpenCodeEnvelope(statuses);
+    return unwrapped && typeof unwrapped === 'object' && !Array.isArray(unwrapped) ? unwrapped : null;
   };
 
   const fetchSessionChildren = async (sessionId, directory) => {
+    // v2 branch: OpenCode 2 removed /session/:id/children — answer null (the
+    // tick reads it as "no children data", not "look failed", because a
+    // still-working child re-drives the parent's busy→idle cycle).
+    if (isV2PromptTrack()) return null;
     const children = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/children`, { directory })
       .catch(() => null);
     return Array.isArray(children) ? children : null;
@@ -376,7 +386,8 @@ export const createSessionGoalRuntime = ({
   // Returns the written goal, or null when the stored goal no longer matches
   // the expected id (user replaced/cleared it while we worked).
   const writeGoal = async (sessionId, directory, expectedGoalId, mutate) => {
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory });
+    // v2 branch: the session record GET wraps Info in the {data} envelope.
+    const session = unwrapOpenCodeEnvelope(await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory }));
     const currentGoal = parseGoalMetadata(session);
     if (!currentGoal || currentGoal.id !== expectedGoalId) return null;
     const nextGoal = { ...currentGoal, ...mutate(currentGoal), updatedAt: Date.now() };
@@ -520,11 +531,11 @@ export const createSessionGoalRuntime = ({
   const tick = async (sessionId, directory) => {
     if (!isSessionGoalEnabled()) return;
 
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+    const session = unwrapOpenCodeEnvelope(await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
       .catch((error) => {
         console.warn(`[session-goal] session fetch failed: ${error?.message || error}`);
         return null;
-      });
+      }));
     if (!session || typeof session !== 'object') return;
     // Sub-agent/task sessions never carry user goals — skip them.
     if (typeof session.parentID === 'string' && session.parentID) return;
@@ -564,11 +575,15 @@ export const createSessionGoalRuntime = ({
     if (isWorkingStatus(statuses[sessionId])) return;
 
     const children = await fetchSessionChildren(sessionId, directory);
-    if (!children) {
+    // v1: null means the look failed — "could not look" must not pass for
+    // "nothing running", so re-arm. v2 has no children route (see
+    // fetchSessionChildren): null means "no children data" and the guard
+    // degrades to the statuses map above.
+    if (!children && !isV2PromptTrack()) {
       armTimer(sessionId, directory, idleQuietMs);
       return;
     }
-    if (children.some((child) => typeof child?.id === 'string' && isWorkingStatus(statuses[child.id]))) return;
+    if (children && children.some((child) => typeof child?.id === 'string' && isWorkingStatus(statuses[child.id]))) return;
 
     const messages = await fetchRecentMessages(sessionId, directory);
     if (!messages) return;
@@ -852,8 +867,9 @@ export const createSessionGoalRuntime = ({
   // "stop". Messages the user sends afterwards leave the paused goal alone;
   // Resume re-arms the loop (and kicks off immediately on an idle session).
   const pauseAfterAbort = async (sessionId, directory) => {
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
-      .catch(() => null);
+    // v2 branch: unwrap the {data} session-record envelope (no-op on v1).
+    const session = unwrapOpenCodeEnvelope(await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory })
+      .catch(() => null));
     const goal = parseGoalMetadata(session);
     if (!goal || goal.status !== 'active') return;
     await writeGoal(sessionId, directory, goal.id, () => ({

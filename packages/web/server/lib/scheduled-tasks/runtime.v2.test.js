@@ -74,6 +74,11 @@ describe('scheduled-tasks runtime (v2 protocol mode)', () => {
     posts = [];
     globalThis.fetch = vi.fn(async (input, init = {}) => {
       posts.push({ url: String(input), method: init.method ?? 'GET', body: JSON.parse(String(init.body)) });
+      // v2 session.create answers {data: SessionInfo} (the run's session now
+      // comes from the flat POST /api/session, not the v1-path SDK client).
+      if (init.method === 'POST' && String(input).endsWith('/api/session')) {
+        return { ok: true, text: async () => '', json: async () => ({ data: { id: 'sess-v2-1' } }) };
+      }
       return { ok: true, text: async () => '' };
     });
   });
@@ -108,13 +113,20 @@ describe('scheduled-tasks runtime (v2 protocol mode)', () => {
     runtime.stop();
 
     expect(posts.map((post) => `${post.method} ${post.url}`)).toEqual([
+      'POST http://127.0.0.1:9999/api/session',
       'POST http://127.0.0.1:9999/api/session/sess-v2-1/model',
       'POST http://127.0.0.1:9999/api/session/sess-v2-1/agent',
       'POST http://127.0.0.1:9999/api/session/sess-v2-1/prompt',
     ]);
-    expect(posts[0].body).toEqual({ model: { providerID: 'openai', id: 'gpt-4o', variant: 'high' } });
-    expect(posts[1].body).toEqual({ agent: 'build' });
-    expect(posts[2].body).toEqual({ text: 'Summarize open issues' });
+    expect(posts[0].body).toEqual({
+      title: 'V2 Runner 2026-01-01 15:00',
+      location: { directory: '/repo' },
+      model: { providerID: 'openai', id: 'gpt-4o', variant: 'high' },
+      agent: 'build',
+    });
+    expect(posts[1].body).toEqual({ model: { providerID: 'openai', id: 'gpt-4o', variant: 'high' } });
+    expect(posts[2].body).toEqual({ agent: 'build' });
+    expect(posts[3].body).toEqual({ text: 'Summarize open issues' });
     const firstPost = globalThis.fetch.mock.calls.find(([, init]) => init?.method === 'POST');
     expect(firstPost[1].headers['x-opencode-directory']).toBe('/repo');
   });
@@ -127,17 +139,18 @@ describe('scheduled-tasks runtime (v2 protocol mode)', () => {
     runtime.stop();
 
     expect(posts.map((post) => `${post.method} ${post.url}`)).toEqual([
+      'POST http://127.0.0.1:9999/api/session',
       'PATCH http://127.0.0.1:9999/api/session/sess-v2-1',
       'POST http://127.0.0.1:9999/api/session/sess-v2-1/model',
       'POST http://127.0.0.1:9999/api/session/sess-v2-1/synthetic',
       'POST http://127.0.0.1:9999/api/session/sess-v2-1/prompt',
     ]);
-    const goalPatch = posts[0];
+    const goalPatch = posts[1];
     expect(goalPatch.body.metadata.openchamber.goal.status).toBe('active');
     expect(goalPatch.body.metadata.openchamber.goal.objective).toBe('Summarize open issues');
     const patchCall = globalThis.fetch.mock.calls.find(([, init]) => init?.method === 'PATCH');
     expect(patchCall[1].headers['x-opencode-directory']).toBe('/repo');
-    expect(posts[2].body.text).toContain('Goal mode is active for this session');
-    expect(posts[3].body).toEqual({ text: 'Summarize open issues' });
+    expect(posts[3].body.text).toContain('Goal mode is active for this session');
+    expect(posts[4].body).toEqual({ text: 'Summarize open issues' });
   });
 });

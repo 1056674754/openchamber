@@ -1,4 +1,6 @@
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { unwrapOpenCodeEnvelope } from './message-records.js';
+import { V2_DIRECTORY_PARAM, isV2PromptTrack } from './v2-prompt-dispatch.js';
 import { buildDeferredRestartResponse } from './config-mutation-response.js';
 
 export const registerSkillRoutes = (app, dependencies) => {
@@ -123,20 +125,37 @@ export const registerSkillRoutes = (app, dependencies) => {
     }
 
     try {
-      const client = createOpencodeClient({
-        baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
-        directory: workingDirectory || undefined,
-        headers: getOpenCodeAuthHeaders(),
-        fetch: (request) => fetch(request, { signal: AbortSignal.timeout(8_000) }),
-      });
+      // v2 branch: the discovered-skills list lives at /api/skill scoped by the
+      // location query and answers an envelope; the v1 track keeps the SDK
+      // app.skills call byte-identical.
+      let payload;
+      if (isV2PromptTrack()) {
+        const url = new URL(`${buildOpenCodeUrl('/', '').replace(/\/$/, '')}/api/skill`);
+        if (workingDirectory) url.searchParams.set(V2_DIRECTORY_PARAM, workingDirectory);
+        const response = await fetch(url, {
+          headers: { accept: 'application/json', ...getOpenCodeAuthHeaders() },
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (!response.ok) {
+          return null;
+        }
+        payload = unwrapOpenCodeEnvelope(await response.json().catch(() => null));
+      } else {
+        const client = createOpencodeClient({
+          baseUrl: buildOpenCodeUrl('/', '').replace(/\/$/, ''),
+          directory: workingDirectory || undefined,
+          headers: getOpenCodeAuthHeaders(),
+          fetch: (request) => fetch(request, { signal: AbortSignal.timeout(8_000) }),
+        });
 
-      const response = await client.app.skills(
-        workingDirectory ? { directory: workingDirectory } : undefined,
-      );
-      if (response?.error) {
-        return null;
+        const response = await client.app.skills(
+          workingDirectory ? { directory: workingDirectory } : undefined,
+        );
+        if (response?.error) {
+          return null;
+        }
+        payload = response?.data;
       }
-      const payload = response?.data;
       if (!Array.isArray(payload)) {
         return null;
       }

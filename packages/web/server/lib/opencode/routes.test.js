@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import express from 'express';
 import request from 'supertest';
 import { registerOpenCodeRoutes } from './routes.js';
+import { configureOpenCodeCredentials } from './auth.js';
 
 const createApp = (overrides = {}) => {
   const app = express();
@@ -152,36 +153,42 @@ describe('opencode routes', () => {
     expect(markPendingConfigRestart).not.toHaveBeenCalled();
   });
 
-  test('keeps provider source response shape while reading auth from the adapter', async () => {
-    const response = await request(createApp({
-      getProviderSources: () => ({
+  test('keeps provider source response shape while reading auth from OpenCode', async () => {
+    configureOpenCodeCredentials({
+      list: async () => [{
+        integrationID: 'anthropic',
+        active: true,
+        value: { type: 'key', key: 'hidden' },
+      }],
+    });
+    try {
+      const response = await request(createApp({
+        getProviderSources: () => ({
+          sources: {
+            auth: { exists: false },
+            user: { exists: false, path: '/user/config.json' },
+            project: { exists: true, path: '/project/opencode.json' },
+            custom: { exists: false, path: null },
+          },
+          config: { name: 'Anthropic' },
+        }),
+      }))
+        .get('/api/provider/anthropic/source')
+        .expect(200);
+
+      expect(response.body).toEqual({
+        providerId: 'anthropic',
         sources: {
-          auth: { exists: false },
+          auth: { exists: true },
           user: { exists: false, path: '/user/config.json' },
           project: { exists: true, path: '/project/opencode.json' },
           custom: { exists: false, path: null },
         },
-      }),
-      fetchProvidersSnapshot: async () => [{
-        id: 'anthropic',
-        name: 'Anthropic',
-        source: 'api',
-        env: ['ANTHROPIC_API_KEY'],
-        key: 'hidden',
-      }],
-    }))
-      .get('/api/provider/anthropic/source')
-      .expect(200);
-
-    expect(response.body).toEqual({
-      providerId: 'anthropic',
-      sources: {
-        auth: { exists: true },
-        user: { exists: false, path: '/user/config.json' },
-        project: { exists: true, path: '/project/opencode.json' },
-        custom: { exists: false, path: null },
-      },
-    });
+        config: { name: 'Anthropic' },
+      });
+    } finally {
+      configureOpenCodeCredentials(null);
+    }
   });
 
   test('proxies provider auth deletion to OpenCode without changing the response shape', async () => {

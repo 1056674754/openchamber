@@ -478,10 +478,18 @@
         position: absolute;
         width: 100%;
         z-index: 9999;
+        /* Desktop shells hide the native title bar; until React mounts the
+           app header (the real drag region) this layer is the only surface.
+           Make it draggable so the window can be moved while booting.
+           Ignored by regular browsers. */
+        -webkit-app-region: drag;
       }
       #initial-loading.fade-out {
         opacity: 0;
         pointer-events: none;
+        /* Release the drag region during the fade so the app underneath
+           receives clicks immediately (the element is removed 300ms later). */
+        -webkit-app-region: no-drag;
       }
     </style>
   </head>

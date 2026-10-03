@@ -22,6 +22,8 @@
 import { collectRecentTurns } from './context.js';
 import { buildAssistPrompt, buildAssistSystemPrompt } from './prompt.js';
 import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from '../opencode/protocol-mode.js';
+import { readMessageRecords, unwrapOpenCodeEnvelope } from '../opencode/message-records.js';
+import { V2_DIRECTORY_PARAM, isV2PromptTrack } from '../opencode/v2-prompt-dispatch.js';
 
 const LOCAL_SERVER_ID = 'default';
 const IDLE_QUIET_MS = 60_000;
@@ -101,7 +103,9 @@ export const createSessionAssistRuntime = ({
   const openCodeFetch = async (fetchPath, { directory, method = 'GET', body, query } = {}) => {
     const base = buildOpenCodeUrl(fetchPath, '');
     const params = new URLSearchParams(query || {});
-    if (directory) params.set('directory', directory);
+    // v2 branch: the location middleware ignores ?directory= — use the v2
+    // location query (session-goal's openCodeFetch pattern); v1 unchanged.
+    if (directory) params.set(isV2PromptTrack() ? V2_DIRECTORY_PARAM : 'directory', directory);
     const search = params.toString();
     const url = search ? `${base}?${search}` : base;
     const response = await fetch(url, {
@@ -121,7 +125,8 @@ export const createSessionAssistRuntime = ({
   };
 
   const fetchSession = async (sessionId, directory) => {
-    const session = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory }).catch(() => null);
+    // v2 branch: the session record GET wraps Info in the {data} envelope.
+    const session = unwrapOpenCodeEnvelope(await openCodeFetch(`/session/${encodeURIComponent(sessionId)}`, { directory }).catch(() => null));
     return session && typeof session === 'object' ? session : null;
   };
 
@@ -130,7 +135,9 @@ export const createSessionAssistRuntime = ({
       directory,
       query: { limit: String(MESSAGE_FETCH_LIMIT) },
     }).catch(() => null);
-    return Array.isArray(messages) ? messages : null;
+    // v2 branch: normalize the {data, cursor} page of flat records to the v1
+    // view (v1 arrays pass through).
+    return readMessageRecords(messages);
   };
 
   // Merge-write assist metadata from a FRESH session read so concurrent writes
@@ -226,10 +233,10 @@ export const createSessionAssistRuntime = ({
       // Sub-agent / task sessions: skip (parent's conversation drives the recap).
       if (session.parentID) return;
 
-      const messages = await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
+      const messages = readMessageRecords(await openCodeFetch(`/session/${encodeURIComponent(sessionId)}/message`, {
         directory,
         query: { limit: String(CONTEXT_MESSAGE_LIMIT) },
-      }).catch(() => null);
+      }).catch(() => null));
       if (!messages || messages.length === 0) return;
 
       // Bounded recent human turns with annotation-aware attached context;

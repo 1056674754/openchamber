@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { createOpencodeClient } from '@opencode-ai/sdk/v2';
+import { readMessageRecords } from '../opencode/message-records.js';
+import { isV2PromptTrack } from '../opencode/v2-prompt-dispatch.js';
 import { OPENCHAMBER_ALL_ACTIONS } from './actions.js';
 import { OpenChamberControlError, asControlError } from './error.js';
 import { writeScreenshot } from './screenshots.js';
@@ -221,18 +223,33 @@ export const createOpenChamberControlService = (dependencies) => {
     return statuses[sessionID] || { type: 'idle' };
   };
 
-  const sessionMessages = async (client, sessionID, directory, role, limit) => {
-    const fetchLimit = limit === undefined ? undefined : Math.max(100, limit * 4);
-    let response = await client.session.messages({
+  // v2 branch: OpenCode 2 serves message lists only under /api and answers
+  // flat records in a {data, cursor} page — plain-fetch there and normalize to
+  // the v1 view; the v1 track keeps the SDK call byte-identical.
+  const fetchMessageRecords = async (client, sessionID, directory, fetchLimit) => {
+    if (isV2PromptTrack()) {
+      const url = new URL(`${buildOpenCodeUrl('/', '').replace(/\/$/, '')}/api/session/${encodeURIComponent(sessionID)}/message`);
+      if (fetchLimit !== undefined) url.searchParams.set('limit', String(fetchLimit));
+      const response = await fetch(url, {
+        headers: { ...getOpenCodeAuthHeaders(), 'x-opencode-directory': directory, accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(`OpenCode session messages failed with ${response.status}`);
+      return readMessageRecords(await response.json().catch(() => null)) ?? [];
+    }
+    const response = await client.session.messages({
       sessionID,
       directory,
       ...(fetchLimit ? { limit: fetchLimit } : {}),
     });
-    let raw = Array.isArray(response?.data) ? response.data : [];
+    return readMessageRecords(response) ?? [];
+  };
+
+  const sessionMessages = async (client, sessionID, directory, role, limit) => {
+    const fetchLimit = limit === undefined ? undefined : Math.max(100, limit * 4);
+    let raw = await fetchMessageRecords(client, sessionID, directory, fetchLimit);
     let messages = extractTextMessages(raw, role);
     if (limit !== undefined && messages.length < limit && raw.length >= fetchLimit) {
-      response = await client.session.messages({ sessionID, directory });
-      raw = Array.isArray(response?.data) ? response.data : [];
+      raw = await fetchMessageRecords(client, sessionID, directory, undefined);
       messages = extractTextMessages(raw, role);
     }
     return limit === undefined ? messages : messages.slice(-limit);

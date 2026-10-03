@@ -1,4 +1,6 @@
 import { isEnterpriseMode } from '../enterprise-mode.js';
+import { unwrapOpenCodeEnvelope } from '../opencode/message-records.js';
+import { isV2PromptTrack } from '../opencode/v2-prompt-dispatch.js';
 
 const pushPayloadForEnterpriseMode = (payload) => {
   if (!isEnterpriseMode()) return payload;
@@ -127,11 +129,15 @@ export const createNotificationTriggerRuntime = (deps) => {
 
     try {
       const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
-      const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+      // v2 branch: the location middleware ignores ?directory= — scope by the
+      // x-opencode-directory header instead; the v1 track keeps the query.
+      const v2Track = isV2PromptTrack();
+      const url = directory && !v2Track ? `${base}?directory=${encodeURIComponent(directory)}` : base;
       const response = await fetch(url, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
+          ...(v2Track && directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
           ...getOpenCodeAuthHeaders(),
         },
         signal: AbortSignal.timeout(2000),
@@ -139,7 +145,8 @@ export const createNotificationTriggerRuntime = (deps) => {
       if (!response.ok) {
         return undefined;
       }
-      const session = await response.json().catch(() => null);
+      // v2 branch: the session record GET wraps Info in the {data} envelope.
+      const session = unwrapOpenCodeEnvelope(await response.json().catch(() => null));
       if (!session || typeof session !== 'object') {
         return undefined;
       }
@@ -234,17 +241,21 @@ export const createNotificationTriggerRuntime = (deps) => {
     if (!sessionId) return false;
     try {
       const base = buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}`, '');
-      const url = directory ? `${base}?directory=${encodeURIComponent(directory)}` : base;
+      // v2 branch: scope by the x-opencode-directory header (?directory= is
+      // ignored) and unwrap the {data} envelope; v1 keeps query + bare record.
+      const v2Track = isV2PromptTrack();
+      const url = directory && !v2Track ? `${base}?directory=${encodeURIComponent(directory)}` : base;
       const response = await fetch(url, {
         method: 'GET',
         headers: {
           Accept: 'application/json',
+          ...(v2Track && directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : {}),
           ...getOpenCodeAuthHeaders(),
         },
         signal: AbortSignal.timeout(2000),
       });
       if (!response.ok) return false;
-      const session = await response.json().catch(() => null);
+      const session = unwrapOpenCodeEnvelope(await response.json().catch(() => null));
       const goal = session?.metadata?.openchamber?.goal;
       return Boolean(goal && typeof goal === 'object' && goal.status === 'active');
     } catch {

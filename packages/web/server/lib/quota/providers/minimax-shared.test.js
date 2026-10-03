@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../opencode/auth.js', () => ({
-  readAuthFile: vi.fn(() => ({
+  readOpenCodeCredentials: vi.fn(async () => ({
     'minimax-coding-plan': { key: 'test-key' },
   })),
 }));

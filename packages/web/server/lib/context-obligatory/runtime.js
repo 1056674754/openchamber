@@ -3,6 +3,7 @@ import {
   V2_PROMPT_PATHS,
   isV2PromptTrack,
 } from '../opencode/v2-prompt-dispatch.js';
+import { readMessageRecord, readMessageRecords, unwrapOpenCodeEnvelope } from '../opencode/message-records.js';
 
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_FETCH_LIMIT = 20;
@@ -100,7 +101,9 @@ export const createContextObligatoryRuntime = ({
   };
 
   const tick = async (sessionId, directory, serverId) => {
-    const session = await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}`, { directory });
+    // v2 branch: the session record GET wraps Info in the {data} envelope
+    // (no-op on the v1 track's bare record).
+    const session = unwrapOpenCodeEnvelope(await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}`, { directory }));
     if (session?.parentID) return;
     const state = readContextState(session);
     const knowledge = serverId === LOCAL_SERVER_ID && sessionKnowledgeRuntime
@@ -110,22 +113,26 @@ export const createContextObligatoryRuntime = ({
       : { text: '', signature: '' };
     if (state.messages.length === 0 && !knowledge.text) return;
 
-    const recent = await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}/message`, {
+    const recent = readMessageRecords(await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}/message`, {
       directory,
       query: { limit: String(MESSAGE_FETCH_LIMIT) },
-    });
-    if (!Array.isArray(recent) || recent.length === 0) return;
+    }));
+    // v2 branch: the list read normalizes the {data, cursor} page of flat
+    // records to the v1 view (v1 arrays pass through).
+    if (!recent || recent.length === 0) return;
     const summary = recent.toReversed().find((message) =>
       message?.info?.role === 'assistant' && message.info.summary === true)?.info;
     if (!summary?.id || !summary?.time?.completed) return;
     if (state.openchamber.context_obligatory_last_compaction_message_id === summary.id) return;
 
     const fetched = await Promise.allSettled(state.messages.map(async (pinned) => {
-      const message = await openCodeFetch(
+      // v2 branch: unwrap the single-message {data} envelope and normalize the
+      // flat record (no-op on the v1 track).
+      const message = readMessageRecord(await openCodeFetch(
         serverId,
         `/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(pinned.id)}`,
         { directory },
-      );
+      ));
       const text = Array.isArray(message?.parts)
         ? message.parts.filter((part) => part?.type === 'text' && typeof part.text === 'string')
           .map((part) => part.text.trim()).filter(Boolean).join('\n\n')
@@ -185,7 +192,8 @@ export const createContextObligatoryRuntime = ({
       });
     }
 
-    const fresh = await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}`, { directory });
+    // v2 branch: unwrap the {data} session-record envelope (no-op on v1).
+    const fresh = unwrapOpenCodeEnvelope(await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}`, { directory }));
     const freshState = readContextState(fresh);
     await openCodeFetch(serverId, `/session/${encodeURIComponent(sessionId)}`, {
       directory,

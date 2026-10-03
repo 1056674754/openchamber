@@ -48,7 +48,9 @@ import { resolveOpenCodeEnvConfig } from './lib/opencode/env-config.js';
 import { createHmrStateRuntime } from './lib/opencode/hmr-state-runtime.js';
 import { createOpenCodeNetworkRuntime } from './lib/opencode/network-runtime.js';
 import { createOpenCodeAuthStateRuntime } from './lib/opencode/auth-state-runtime.js';
+import { configureOpenCodeCredentials, openCodeCredentialSource } from './lib/opencode/auth.js';
 import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './lib/opencode/protocol-mode.js';
+import { V2_DIRECTORY_PARAM, isV2PromptTrack } from './lib/opencode/v2-prompt-dispatch.js';
 import { createProjectDirectoryRuntime } from './lib/opencode/project-directory-runtime.js';
 import { createSettingsNormalizationRuntime } from './lib/opencode/settings-normalization-runtime.js';
 import { createSettingsHelpers } from './lib/opencode/settings-helpers.js';
@@ -1435,6 +1437,16 @@ const openCodeLifecycleRuntime = createOpenCodeLifecycleRuntime({
 });
 
 const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
+
+// Quota lookups, voice keys and routing read provider credentials from the
+// running OpenCode (`GET /api/credential`), plus the values of the variables a
+// managed OpenCode takes keys from, read from the environment it was given.
+configureOpenCodeCredentials(openCodeCredentialSource({
+  buildOpenCodeUrl,
+  getOpenCodeAuthHeaders,
+  getLaunchEnvironment: () => openCodeLifecycleRuntime.getManagedOpenCodeProcessEnv(),
+}));
+
 const getOpenCodeUpgradeCapability = () => {
   const activeBinary = lastOpenCodeLaunchDiagnostics?.binary || resolvedOpencodeBinary;
   return resolveOpenCodeUpgradeCapability({
@@ -1503,7 +1515,11 @@ openCodeConfigFileWatcherRuntime = createOpenCodeConfigFileWatcherRuntime({
     if (getActiveSessionCount() > 0 || !openCodePort || !isOpenCodeReady) return false;
     try {
       const url = new URL(buildOpenCodeUrl('/session/status'));
-      if (openCodeWorkingDirectory) url.searchParams.set('directory', openCodeWorkingDirectory);
+      // v2 branch: the location middleware ignores ?directory= — use the v2
+      // location query; the v1 track keeps ?directory= byte-identical.
+      if (openCodeWorkingDirectory) {
+        url.searchParams.set(isV2PromptTrack() ? V2_DIRECTORY_PARAM : 'directory', openCodeWorkingDirectory);
+      }
       const response = await fetch(url, {
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
       });

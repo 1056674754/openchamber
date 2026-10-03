@@ -1,4 +1,5 @@
 import { GOAL_OBJECTIVE_CHAR_LIMIT, writeObjective } from './objectives.js';
+import { V2_DIRECTORY_PARAM, isV2PromptTrack } from '../opencode/v2-prompt-dispatch.js';
 
 const TRIM_MARKER = '\n\n[objective trimmed for the auditor; the full prompt was delivered in chat]\n\n';
 
@@ -88,8 +89,12 @@ export const createSessionGoal = async ({
     createdAt: now,
     updatedAt: now,
   };
-  const url = new URL(`${baseUrl}/session/${encodeURIComponent(sessionID)}`);
-  url.searchParams.set('directory', directory);
+  // v2 branch: OpenCode 2 serves the session record at /api/session/:id and
+  // scopes by the location query (its /session root path answers 500); the v1
+  // track keeps /session + ?directory= byte-identical.
+  const v2Track = isV2PromptTrack();
+  const url = new URL(`${baseUrl}${v2Track ? '/api' : ''}/session/${encodeURIComponent(sessionID)}`);
+  url.searchParams.set(v2Track ? V2_DIRECTORY_PARAM : 'directory', directory);
   const response = await fetch(url.toString(), {
     method: 'PATCH',
     headers: { ...authHeaders, 'content-type': 'application/json', accept: 'application/json' },

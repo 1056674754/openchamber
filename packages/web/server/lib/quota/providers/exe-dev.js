@@ -1,11 +1,5 @@
-import { readAuthFile } from '../../opencode/auth.js';
-import { asObject, buildResult, formatMoney, getAuthEntry, normalizeAuthEntry, toNumber, toTimestamp, toUsageWindow } from '../utils/index.js';
-
-const readExeDevCredential = () => {
-  const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), [providerId]));
-  const usageToken = typeof entry?.usageToken === 'string' ? entry.usageToken.trim() : '';
-  return usageToken ? { usageToken } : null;
-};
+import { readManagedCredential } from '../credentials/providers.js';
+import { asObject, buildResult, formatMoney, toNumber, toTimestamp, toUsageWindow } from '../utils/index.js';
 
 export const providerId = 'exe-dev';
 export const providerName = 'exe.dev';
@@ -58,10 +52,10 @@ export const fetchExeDevUsage = async (credential, fetchImpl = fetch) => {
   return windows;
 };
 
-export const isConfigured = () => Boolean(readExeDevCredential());
+export const isConfigured = () => Boolean(readManagedCredential(providerId));
 
 export const fetchQuota = async () => {
-  const credential = readExeDevCredential();
+  const credential = readManagedCredential(providerId);
   if (!credential) {
     return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
   }

@@ -1,25 +1,47 @@
-import { execFileSync } from 'node:child_process';
-import os from 'node:os';
-import path from 'node:path';
+/**
+ * Claude credential discovery.
+ *
+ * Claude Code is the primary source: on macOS it keeps its OAuth tokens in the
+ * login Keychain, elsewhere in a credentials file. OpenCode's own `auth.json`
+ * entry is the fallback for users who signed into Anthropic through OpenCode
+ * instead of Claude Code.
+ *
+ * Every source is read-only. Claude rotates a Keychain/credentials entry from
+ * under us whenever Claude Code refreshes, so credentials are read fresh per
+ * request rather than cached; a stale cached token would outlive the record it
+ * came from.
+ *
+ * @module quota/providers/claude/auth
+ */
 
-import { readAuthFile } from '../../../opencode/auth.js';
-import {
-  asNonEmptyString,
-  asObject,
-  getAuthEntry,
-  normalizeAuthEntry,
-  normalizeTimestamp,
-  readJsonFile,
-} from '../../utils/index.js';
+import { execFileSync } from 'child_process';
+import os from 'os';
+import path from 'path';
+
+import { readOpenCodeCredentials } from '../../../opencode/auth.js';
+import { asObject, asNonEmptyString, normalizeTimestamp, getAuthEntry, normalizeAuthEntry, readJsonFile } from '../../utils/index.js';
 
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 const OPENCODE_AUTH_ALIASES = ['anthropic', 'claude'];
+
+/**
+ * @typedef {object} ClaudeCredential
+ * @property {string} accessToken
+ * @property {string|null} refreshToken
+ * @property {number|null} expiresAt Epoch milliseconds, when the source reports it.
+ * @property {string|null} planLabel Subscription tier reported by Claude Code, e.g. `max`.
+ * @property {'keychain'|'credentials-file'|'opencode-auth'|'env'} source
+ */
 
 const claudeConfigDirectory = () => {
   const override = asNonEmptyString(process.env.CLAUDE_CONFIG_DIR);
   return override ? path.resolve(override) : path.join(os.homedir(), '.claude');
 };
 
+/**
+ * Claude Code writes one JSON blob holding both its own OAuth tokens
+ * (`claudeAiOauth`) and unrelated MCP server tokens. Only the former is read.
+ */
 const parseClaudeCodeBlob = (blob, source) => {
   const oauth = asObject(asObject(blob)?.claudeAiOauth);
   const accessToken = asNonEmptyString(oauth?.accessToken);
@@ -29,7 +51,7 @@ const parseClaudeCodeBlob = (blob, source) => {
     refreshToken: asNonEmptyString(oauth.refreshToken),
     expiresAt: normalizeTimestamp(oauth.expiresAt),
     planLabel: asNonEmptyString(oauth.subscriptionType),
-    source,
+    source
   };
 };
 
@@ -40,9 +62,10 @@ const readKeychainCredential = () => {
     raw = execFileSync('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'], {
       encoding: 'utf8',
       timeout: 10_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'ignore']
     });
   } catch {
+    // No entry, or the user denied Keychain access. Both mean "try the next source".
     return null;
   }
   try {
@@ -56,8 +79,8 @@ const readKeychainCredential = () => {
 const readCredentialsFile = () =>
   parseClaudeCodeBlob(readJsonFile(path.join(claudeConfigDirectory(), '.credentials.json')), 'credentials-file');
 
-const readOpenCodeCredential = () => {
-  const entry = normalizeAuthEntry(getAuthEntry(readAuthFile(), OPENCODE_AUTH_ALIASES));
+const readOpenCodeCredential = (auth) => {
+  const entry = normalizeAuthEntry(getAuthEntry(auth, OPENCODE_AUTH_ALIASES));
   const accessToken = asNonEmptyString(entry?.access) ?? asNonEmptyString(entry?.token);
   if (!accessToken) return null;
   return {
@@ -65,7 +88,7 @@ const readOpenCodeCredential = () => {
     refreshToken: asNonEmptyString(entry.refresh),
     expiresAt: normalizeTimestamp(entry.expires),
     planLabel: null,
-    source: 'opencode-auth',
+    source: 'opencode-auth'
   };
 };
 
@@ -75,8 +98,29 @@ const readEnvCredential = () => {
   return { accessToken, refreshToken: null, expiresAt: null, planLabel: null, source: 'env' };
 };
 
-export const loadClaudeCredential = () =>
+/**
+ * First credential a source can produce, in priority order, given the
+ * credentials OpenCode stores (`auth`).
+ *
+ * The Keychain wins over the credentials file because on macOS the file is a
+ * leftover that Claude Code no longer updates.
+ *
+ * @returns {ClaudeCredential|null}
+ */
+export const findClaudeCredential = (auth) =>
   readKeychainCredential()
   ?? readCredentialsFile()
-  ?? readOpenCodeCredential()
+  ?? readOpenCodeCredential(auth)
+  ?? readEnvCredential();
+
+/**
+ * Same order as `findClaudeCredential`; OpenCode is asked only when the
+ * local Claude Code sources have nothing.
+ *
+ * @returns {Promise<ClaudeCredential|null>}
+ */
+export const loadClaudeCredential = async () =>
+  readKeychainCredential()
+  ?? readCredentialsFile()
+  ?? readOpenCodeCredential(await readOpenCodeCredentials())
   ?? readEnvCredential();

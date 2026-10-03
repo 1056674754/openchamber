@@ -12,7 +12,7 @@ export function registerQuotaRoutes(app, {
   app.get('/api/quota/providers', async (_req, res) => {
     try {
       const { listConfiguredQuotaProviders } = await getQuotaProviders();
-      const providers = listConfiguredQuotaProviders();
+      const providers = await listConfiguredQuotaProviders();
       res.json({ providers });
     } catch (error) {
       console.error('Failed to list quota providers:', error);

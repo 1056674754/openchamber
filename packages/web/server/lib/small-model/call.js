@@ -1,7 +1,6 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { readAuthFile, writeAuthFile } from '../opencode/auth.js';
 import { readConfig, readConfigLayers, isPlainObject } from '../opencode/shared.js';
 import { getCatalogProvider } from './catalog.js';
 import { getAuthEntryForProvider } from './resolve.js';
@@ -122,9 +121,9 @@ const refreshOpenaiOauth = async (entry) => {
           : entry.refresh,
         expires: Date.now() + (Number(payload?.expires_in) > 0 ? Number(payload.expires_in) : 3600) * 1000,
       };
-      const auth = readAuthFile();
-      auth.openai = refreshed;
-      writeAuthFile(auth);
+      // The refreshed token is kept in memory for this process only: OpenCode
+      // 2.x owns the credential store, so writing it back would drift from the
+      // credential OpenCode actually uses.
       return refreshed;
     })().finally(() => {
       openaiRefreshPromise = null;

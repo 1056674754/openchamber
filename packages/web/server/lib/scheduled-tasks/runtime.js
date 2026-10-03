@@ -2,7 +2,7 @@ import { createOpencodeClient } from '@opencode-ai/sdk/v2';
 import { DateTime } from 'luxon';
 import { CronExpressionParser } from 'cron-parser';
 import { expandSnippets } from '../opencode/snippets.js';
-import { isV2PromptTrack, postV2PromptDispatch } from '../opencode/v2-prompt-dispatch.js';
+import { V2_DIRECTORY_PARAM, isV2PromptTrack, postV2PromptDispatch } from '../opencode/v2-prompt-dispatch.js';
 import { discoverLoops } from './loops.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
@@ -619,7 +619,7 @@ export const createScheduledTasksRuntime = (deps) => {
     }
   };
 
-  const resolveScheduledCommand = async ({ client, projectPath, task }) => {
+  const resolveScheduledCommand = async ({ client, baseUrl, authHeaders, projectPath, task }) => {
     const parsed = parseScheduledCommandPrompt(task?.execution?.prompt);
     if (!parsed) {
       return null;
@@ -627,8 +627,21 @@ export const createScheduledTasksRuntime = (deps) => {
 
     let commands = [];
     try {
-      const response = await client.command.list({ directory: projectPath });
-      commands = Array.isArray(response?.data) ? response.data : [];
+      // v2 branch: the command catalog lives at /api/command (location-scoped)
+      // and answers {location, data}; the v1 track keeps the SDK list call.
+      if (isV2PromptTrack()) {
+        const url = new URL(`${baseUrl}/api/command`);
+        url.searchParams.set(V2_DIRECTORY_PARAM, projectPath);
+        const response = await fetch(url, {
+          headers: { ...authHeaders, accept: 'application/json' },
+        });
+        if (!response.ok) return null;
+        const body = await response.json().catch(() => null);
+        commands = Array.isArray(body?.data) ? body.data : [];
+      } else {
+        const response = await client.command.list({ directory: projectPath });
+        commands = Array.isArray(response?.data) ? response.data : [];
+      }
     } catch {
       return null;
     }
@@ -637,7 +650,28 @@ export const createScheduledTasksRuntime = (deps) => {
     return command ? { ...parsed, template: command.template } : null;
   };
 
-  const runScheduledCommand = async ({ client, projectPath, sessionID, task, command }) => {
+  const runScheduledCommand = async ({ client, baseUrl, authHeaders, projectPath, sessionID, task, command }) => {
+    // v2 branch: the route moved to /api/session/:id/command and its body
+    // carries {name, text} — agent/model/variant are session properties set at
+    // create time (upstream's mapping); the v1 track keeps the SDK call.
+    if (isV2PromptTrack()) {
+      const response = await fetch(`${baseUrl}/api/session/${encodeURIComponent(sessionID)}/command`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'x-opencode-directory': projectPath,
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({ name: command.command, text: command.arguments }),
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => '');
+        throw new Error(`v2 command dispatch failed (${response.status})${detail ? `: ${detail}` : ''}`);
+      }
+      return;
+    }
+
     await client.session.command({
       sessionID,
       directory: projectPath,
@@ -673,10 +707,41 @@ export const createScheduledTasksRuntime = (deps) => {
       headers: authHeaders,
     });
 
-    const sessionResponse = await client.session.create({
-      directory: projectPath,
-      title,
-    });
+    // v2 branch: create at /api/session with the body's location ref and the
+    // run's selection (v2 session.command takes no agent/model, so the session
+    // owns them — upstream's mapping); the v1 track keeps the SDK create.
+    let sessionResponse;
+    if (isV2PromptTrack()) {
+      const createResponse = await fetch(`${baseUrl}/api/session`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders,
+          'x-opencode-directory': projectPath,
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify({
+          title,
+          location: { directory: projectPath },
+          model: {
+            providerID: task.execution.providerID,
+            id: task.execution.modelID,
+            ...(task.execution.variant ? { variant: task.execution.variant } : {}),
+          },
+          ...(task.execution.agent ? { agent: task.execution.agent } : {}),
+        }),
+      });
+      if (!createResponse.ok) {
+        const detail = await createResponse.text().catch(() => '');
+        throw new Error(`session create failed (${createResponse.status})${detail ? `: ${detail}` : ''}`);
+      }
+      sessionResponse = await createResponse.json().catch(() => null);
+    } else {
+      sessionResponse = await client.session.create({
+        directory: projectPath,
+        title,
+      });
+    }
     const sessionID = sessionResponse?.data?.id;
     if (!sessionID) {
       throw new Error('failed to create session');
@@ -705,7 +770,7 @@ export const createScheduledTasksRuntime = (deps) => {
       }
     }
 
-    const scheduledCommand = await resolveScheduledCommand({ client, projectPath, task });
+    const scheduledCommand = await resolveScheduledCommand({ client, baseUrl, authHeaders, projectPath, task });
 
     if (task.execution.goalEnabled) {
       const commandObjective = scheduledCommand
@@ -724,6 +789,8 @@ export const createScheduledTasksRuntime = (deps) => {
     if (scheduledCommand) {
       await runScheduledCommand({
         client,
+        baseUrl,
+        authHeaders,
         projectPath,
         sessionID,
         task,

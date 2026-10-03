@@ -219,6 +219,64 @@ describe('interrupted OpenCode run finalization', () => {
     expect(result.updatedMessages).toBe(0);
   });
 
+  it('beforeMs cutoff exempts parts written after the restart instant', () => {
+    const { db, dbPath } = createTempDb();
+    try {
+      const message = {
+        id: 'msg_after_cutoff',
+        role: 'assistant',
+        time: { created: 1600 },
+        finish: null,
+        error: null,
+      };
+      const part = {
+        id: 'prt_after_cutoff',
+        type: 'tool',
+        tool: 'bash',
+        state: {
+          status: 'running',
+          input: { command: 'live command' },
+          time: { start: 1700 },
+        },
+      };
+      db.prepare('INSERT INTO message (id, data, time_updated) VALUES (?, ?, ?)').run(
+        message.id,
+        JSON.stringify(message),
+        1600
+      );
+      db.prepare('INSERT INTO part (id, message_id, data, time_updated) VALUES (?, ?, ?, ?)').run(
+        part.id,
+        message.id,
+        JSON.stringify(part),
+        1700
+      );
+    } finally {
+      db.close();
+    }
+
+    // Cutoff captured before the new process started: the running part above
+    // belongs to the restarted server and must NOT be finalized.
+    const result = finalizeInterruptedOpenCodeRuns({
+      dbPath,
+      Database,
+      now: () => 2000,
+      reason: 'background finalization',
+      beforeMs: 1500,
+    });
+
+    expect(result.candidateParts).toBe(0);
+    expect(result.updatedParts).toBe(0);
+    expect(result.updatedMessages).toBe(0);
+
+    const verifyDb = new Database(dbPath, { readonly: true });
+    try {
+      const partRow = verifyDb.prepare('SELECT data FROM part WHERE id = ?').get('prt_after_cutoff');
+      expect(JSON.parse(partRow.data).state.status).toBe('running');
+    } finally {
+      verifyDb.close();
+    }
+  });
+
   it('does not rewrite terminal messages that still contain a stale active-looking part', () => {
     const { db, dbPath } = createTempDb();
     try {

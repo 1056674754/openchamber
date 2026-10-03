@@ -21,7 +21,9 @@ import {
 } from './classifier.js';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode } from '../enterprise-mode.js';
 import { loadRoutingHistory } from './history.js';
-import { readAuthFile } from '../opencode/auth.js';
+import { readMessageRecords } from '../opencode/message-records.js';
+import { V2_DIRECTORY_PARAM, isV2PromptTrack } from '../opencode/v2-prompt-dispatch.js';
+import { readOpenCodeCredentials } from '../opencode/auth.js';
 
 const HISTORY_TIMEOUT_MS = 2500;
 /** One bounded window, trimmed locally by collectRecentTurns (fork session-assist). */
@@ -66,9 +68,9 @@ export const requestTextOf = (body) => {
  */
 const apiKeySchema = z.object({ type: z.literal('api'), key: z.string().min(1) });
 
-export const readOpenCodeKeys = ({ readAuth = readAuthFile } = {}) => {
+export const readOpenCodeKeys = async ({ readAuth = readOpenCodeCredentials } = {}) => {
   try {
-    const auth = readAuth();
+    const auth = await readAuth();
     return { zenKey: apiKeySchema.safeParse(auth?.opencode).data?.key ?? null };
   } catch {
     // An unreadable credential store still leaves the OpenChamber key.
@@ -112,7 +114,7 @@ export function createRoutingRuntime({
     // An endpoint the administrator pinned replaces the one saved in Settings.
     const pinned = readPinnedEndpoint();
     const customEndpoint = pinned ?? savedEndpoint;
-    const keys = { typesafeKey, customEndpoint, ...readProviderKeys() };
+    const keys = { typesafeKey, customEndpoint, ...(await readProviderKeys()) };
     // Enterprise mode overrides whatever was picked; the pick itself is kept.
     // The pinned endpoint is the administrator's own, so there it is the
     // default and Off the only other choice.
@@ -180,7 +182,12 @@ export function createRoutingRuntime({
   // Fork adaptation: one bounded message fetch through the shared plain-fetch
   // path (the same shape session assist reads), not the SDK client's paging.
   const readHistory = async ({ sessionId, directory }) => {
-    const params = new URLSearchParams({ directory, limit: String(HISTORY_MESSAGE_LIMIT) });
+    // v2 branch: the location middleware ignores ?directory= — use the v2
+    // location query (session-goal's openCodeFetch pattern); v1 unchanged.
+    const params = new URLSearchParams({
+      [isV2PromptTrack() ? V2_DIRECTORY_PARAM : 'directory']: directory,
+      limit: String(HISTORY_MESSAGE_LIMIT),
+    });
     const response = await fetch(`${buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message`, '')}?${params}`, {
       headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
       signal: AbortSignal.timeout(HISTORY_TIMEOUT_MS),
@@ -188,7 +195,9 @@ export function createRoutingRuntime({
     if (!response.ok) {
       throw new Error(`OpenCode messages failed with ${response.status}`);
     }
-    return loadRoutingHistory({ records: await response.json().catch(() => null) });
+    // v2 branch: OC2 answers a {data, cursor} page of flat records — normalize
+    // to the v1 view (v1 arrays pass through) before turn collection.
+    return loadRoutingHistory({ records: readMessageRecords(await response.json().catch(() => null)) });
   };
 
   // A category without a model of its own means "the fallback pair"; a variant

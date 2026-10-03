@@ -282,13 +282,15 @@ describe('OpenChamber Session auto routing default', () => {
       },
     ];
     let promptAccepted = false;
+    // v2 wire shape: message reads answer a {data, cursor} page.
+    const messagePage = () => ({
+      data: promptAccepted
+        ? [...messages, { info: { id: 'msg_user_sent', role: 'user', time: { created: 5 } } }]
+        : messages,
+    });
     const client = {
       session: {
-        messages: mock(async () => ({
-          data: promptAccepted
-            ? [...messages, { info: { id: 'msg_user_sent', role: 'user', time: { created: 5 } } }]
-            : messages,
-        })),
+        messages: mock(async () => messagePage()),
       },
       command: {
         list: mock(async () => ({ data: [] })),
@@ -302,6 +304,13 @@ describe('OpenChamber Session auto routing default', () => {
         dispatched.push({ path: new URL(url).pathname, body: JSON.parse(String(init?.body)) });
         if (url.endsWith('/prompt')) promptAccepted = true;
         return { ok: true, text: async () => '', json: async () => ({ data: {} }) };
+      }
+      if (method === 'POST' && url.endsWith('/api/session')) {
+        // v2 session.create answers {data: SessionInfo}.
+        return { ok: true, json: async () => ({ data: { id: 'ses_v2_default' } }) };
+      }
+      if (method === 'GET' && new URL(url).pathname.endsWith('/message')) {
+        return { ok: true, json: async () => messagePage() };
       }
       if (url.includes('/session') && method === 'POST') {
         return { ok: true, json: async () => ({ id: 'ses_v2_default' }) };

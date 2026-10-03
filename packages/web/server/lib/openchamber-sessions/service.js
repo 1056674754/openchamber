@@ -6,6 +6,7 @@ import { createWorktree } from '../git/index.js';
 import { OpenChamberControlError } from '../openchamber-control/error.js';
 import { expandSnippets } from '../opencode/snippets.js';
 import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from '../opencode/protocol-mode.js';
+import { readMessageRecords } from '../opencode/message-records.js';
 import { isV2PromptTrack, postV2PromptDispatch } from '../opencode/v2-prompt-dispatch.js';
 import { parseScheduledCommandPrompt } from '../scheduled-tasks/runtime.js';
 import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js';
@@ -95,14 +96,34 @@ const isPrimaryAgentMode = (mode) => !mode || mode === 'primary' || mode === 'al
 const PROMPT_LANDED_TIMEOUT_MS = 5_000;
 const PROMPT_LANDED_POLL_MS = 150;
 
-const latestUserMessageID = async ({ client, sessionID, directory }) => {
-  let response;
+// v2 branch: OpenCode 2 serves message lists only under /api and answers flat
+// records in a {data, cursor} page — plain-fetch there and normalize to the v1
+// {info, parts} view; the v1 track keeps the SDK call byte-identical.
+const fetchSessionMessageRecords = async ({ client, baseUrl, authHeaders, sessionID, directory, limit }) => {
+  if (isV2PromptTrack()) {
+    const url = new URL(`${baseUrl}/api/session/${encodeURIComponent(sessionID)}/message`);
+    if (limit !== undefined) url.searchParams.set('limit', String(limit));
+    const response = await fetch(url, {
+      headers: {
+        ...authHeaders,
+        'x-opencode-directory': directory,
+        accept: 'application/json',
+      },
+    });
+    if (!response.ok) throw new Error(`session messages failed (${response.status})`);
+    return readMessageRecords(await response.json().catch(() => null)) ?? [];
+  }
+  const response = await client.session.messages({ sessionID, directory, ...(limit !== undefined ? { limit } : {}) });
+  return readMessageRecords(response) ?? [];
+};
+
+const latestUserMessageID = async ({ client, baseUrl, authHeaders, sessionID, directory }) => {
+  let messages;
   try {
-    response = await client.session.messages({ sessionID, directory, limit: 100 });
+    messages = await fetchSessionMessageRecords({ client, baseUrl, authHeaders, sessionID, directory, limit: 100 });
   } catch {
     return { ok: false, messageID: null };
   }
-  const messages = Array.isArray(response?.data) ? response.data : [];
   let latest = null;
   for (const message of messages) {
     const info = message?.info;
@@ -112,10 +133,10 @@ const latestUserMessageID = async ({ client, sessionID, directory }) => {
   return { ok: true, messageID: asNonEmptyString(latest?.id) };
 };
 
-const waitForPromptLanded = async ({ client, sessionID, directory, baselineUserMessageID }) => {
+const waitForPromptLanded = async ({ client, baseUrl, authHeaders, sessionID, directory, baselineUserMessageID }) => {
   const deadline = Date.now() + PROMPT_LANDED_TIMEOUT_MS;
   for (;;) {
-    const latest = await latestUserMessageID({ client, sessionID, directory });
+    const latest = await latestUserMessageID({ client, baseUrl, authHeaders, sessionID, directory });
     if (!latest.ok) return true;
     if (latest.messageID && latest.messageID !== baselineUserMessageID) return true;
     if (Date.now() >= deadline) return false;
@@ -254,6 +275,29 @@ const runPromptAsync = async ({ baseUrl, authHeaders, sessionID, directory, payl
 };
 
 const createSession = async ({ baseUrl, authHeaders, directory, title }) => {
+  // v2 branch: OpenCode 2 creates sessions at /api/session with the directory
+  // in the body's location ref (its /session root path answers 500); the v1
+  // track keeps the root path and ?directory= byte-identical.
+  if (isV2PromptTrack()) {
+    const response = await fetch(`${baseUrl}/api/session`, {
+      method: 'POST',
+      headers: {
+        ...authHeaders,
+        'x-opencode-directory': directory,
+        'content-type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({ location: { directory }, ...(title ? { title } : {}) }),
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`session create failed (${response.status})${body ? `: ${body}` : ''}`);
+    }
+    const body = await response.json().catch(() => null);
+    const sessionID = body?.data?.id;
+    if (!sessionID) throw new Error('failed to create session');
+    return sessionID;
+  }
   const url = new URL(`${baseUrl}/session`);
   url.searchParams.set('directory', directory);
   const response = await fetch(url.toString(), {
@@ -477,10 +521,9 @@ export const createOpenChamberSessionService = (dependencies) => {
     return { directory: validated.directory };
   };
 
-  const fetchLastUserSelection = async ({ client, sessionID, directory }) => {
+  const fetchLastUserSelection = async ({ client, baseUrl, authHeaders, sessionID, directory }) => {
     try {
-      const response = await client.session.messages({ sessionID, directory, limit: 20 });
-      const records = Array.isArray(response?.data) ? response.data : [];
+      const records = await fetchSessionMessageRecords({ client, baseUrl, authHeaders, sessionID, directory, limit: 20 });
       for (let index = records.length - 1; index >= 0; index -= 1) {
         const info = records[index]?.info;
         if (info?.role !== 'user') continue;
@@ -498,10 +541,9 @@ export const createOpenChamberSessionService = (dependencies) => {
     return null;
   };
 
-  const latestAssistantMessageID = async ({ client, sessionID, directory }) => {
+  const latestAssistantMessageID = async ({ client, baseUrl, authHeaders, sessionID, directory }) => {
     try {
-      const response = await client.session.messages({ sessionID, directory, limit: 100 });
-      const records = Array.isArray(response?.data) ? response.data : [];
+      const records = await fetchSessionMessageRecords({ client, baseUrl, authHeaders, sessionID, directory, limit: 100 });
       let latest = null;
       for (const record of records) {
         const info = record?.info;
@@ -531,7 +573,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     let agent = requestedAgent;
     let variant = requestedVariant;
     if (reuseSessionSelection && (!model || !agent)) {
-      const previous = await fetchLastUserSelection({ client, sessionID, directory });
+      const previous = await fetchLastUserSelection({ client, baseUrl, authHeaders, sessionID, directory });
       if (previous) {
         if (!model) {
           model = previous.model;
@@ -606,7 +648,7 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
     }
     if (!dispatchedAsCommand) {
-      const baseline = await latestUserMessageID({ client, sessionID, directory });
+      const baseline = await latestUserMessageID({ client, baseUrl, authHeaders, sessionID, directory });
       const knowledge = sessionKnowledgeRuntime
         ? await sessionKnowledgeRuntime.resolvePendingForSession(sessionID, directory)
           .catch(() => ({ text: '', signature: '' }))
@@ -635,6 +677,8 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
       const landed = await waitForPromptLanded({
         client,
+        baseUrl,
+        authHeaders,
         sessionID,
         directory,
         baselineUserMessageID: baseline.messageID,
@@ -775,6 +819,8 @@ export const createOpenChamberSessionService = (dependencies) => {
       }
       const baselineAssistantMessageId = await latestAssistantMessageID({
         client,
+        baseUrl,
+        authHeaders,
         sessionID: targetSessionID,
         directory,
       });
@@ -882,6 +928,16 @@ export const createOpenChamberSessionService = (dependencies) => {
     const resolved = await resolveDirectory(payload);
 
     if (typeof waitForOpenCodeReady === 'function') await waitForOpenCodeReady(10_000, 250);
+
+    // v2 branch: OpenCode 2 has no route that sets SessionInfo.time.archived
+    // (session.update answers 204 and carries only title/metadata/permissions),
+    // so the OpenChamber archive store is the mark of record [spine 654705f7d]
+    // — the same OpenChamber-owned split upstream ships; the v1 track keeps
+    // the session.update batch below.
+    if (isV2PromptTrack()) {
+      const result = await getArchiveStore().archive(ids, archivedAt);
+      return { directory: resolved.directory, archived: result.archived, failedIds: result.failedIds };
+    }
 
     const baseUrl = buildOpenCodeUrl('/', '').replace(/\/$/, '');
     const authHeaders = getOpenCodeAuthHeaders();

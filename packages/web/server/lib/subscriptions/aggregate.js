@@ -49,9 +49,8 @@ const resolveQuotaProviderId = (providerId) => {
  * @param {string|null} [dependencies.workingDirectory]
  * @param {Record<string, string|undefined>} [dependencies.processEnv]
  * @param {() => Promise<object[]>} [dependencies.fetchProvidersSnapshot]
- * @param {() => string[]} [dependencies.listProviderAuths]
  * @param {(providerId: string, workingDirectory?: string|null) => object} [dependencies.getProviderSources]
- * @param {() => string[]} [dependencies.listConfiguredQuotaProviders]
+ * @param {() => Promise<string[]>} [dependencies.listConfiguredQuotaProviders]
  * @param {() => number} [dependencies.now]
  * @returns {Promise<{providers: object[], degraded: boolean, fetchedAt: number}>}
  */
@@ -59,13 +58,21 @@ export const aggregateSubscriptions = async ({
   workingDirectory = null,
   processEnv = process.env,
   fetchProvidersSnapshot,
-  listProviderAuths,
   getProviderSources = readProviderSources,
   listConfiguredQuotaProviders = readConfiguredQuotaProviders,
   now = Date.now,
 }) => {
-  const authResult = await getProviderAuthStates({ fetchProvidersSnapshot, listProviderAuths });
-  const configuredQuotaProviders = new Set(listConfiguredQuotaProviders());
+  const authResult = await getProviderAuthStates({ fetchProvidersSnapshot });
+  // Reading OpenCode's stored credentials fails while OpenCode is down; the
+  // quota flags then answer "not configured" and the degraded flag carries
+  // the failure instead of a stale credential list masquerading as state.
+  let configuredProviderIds = [];
+  try {
+    configuredProviderIds = await listConfiguredQuotaProviders();
+  } catch {
+    // Degraded: the degraded flag below carries the failure.
+  }
+  const configuredQuotaProviders = new Set(configuredProviderIds);
 
   const providers = authResult.providers.map((provider) => {
     const auth = authResult.states[provider.id] ?? {

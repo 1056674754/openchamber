@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const credential = vi.fn();
-vi.mock('./auth.js', () => ({ loadClaudeCredential: () => credential() }));
+vi.mock('./auth.js', () => ({
+  findClaudeCredential: () => credential(),
+  loadClaudeCredential: async () => credential(),
+}));
 
 import { fetchQuota, resetClaudeQuotaCache } from './index.js';
 

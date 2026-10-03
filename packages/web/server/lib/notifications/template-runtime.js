@@ -1,4 +1,5 @@
 import { summarizeText as summarizeSharedText } from '../text/summarization.js';
+import { readMessageRecords } from '../opencode/message-records.js';
 
 export const createNotificationTemplateRuntime = (deps) => {
   const {
@@ -147,8 +148,10 @@ export const createNotificationTemplateRuntime = (deps) => {
 
       if (!response.ok) return '';
 
-      const messages = await response.json().catch(() => null);
-      if (!Array.isArray(messages)) return '';
+      // v2 branch: OC2 answers a {data, cursor} page of flat records —
+      // normalize to the v1 {info, parts} view (v1 arrays pass through).
+      const messages = readMessageRecords(await response.json().catch(() => null));
+      if (!messages) return '';
 
       let target = null;
       if (messageId) {

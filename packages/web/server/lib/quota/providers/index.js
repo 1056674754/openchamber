@@ -6,6 +6,7 @@
  */
 
 import { buildResult } from '../utils/index.js';
+import { readOpenCodeCredentials } from '../../opencode/auth.js';
 
 import * as claude from './claude/index.js';
 import * as clinePass from './cline-pass.js';
@@ -179,12 +180,18 @@ const registry = {
   }
 };
 
-export const listConfiguredQuotaProviders = () => {
+/**
+ * Providers with a usable credential. OpenCode's stored credentials are read
+ * once and handed to every provider; when OpenCode cannot be asked this
+ * throws, so a transient failure does not look like "nothing configured".
+ */
+export const listConfiguredQuotaProviders = async () => {
+  const auth = await readOpenCodeCredentials();
   const configured = [];
 
   for (const [id, provider] of Object.entries(registry)) {
     try {
-      if (provider.isConfigured()) {
+      if (provider.isConfigured(auth)) {
         configured.push(id);
       }
     } catch {

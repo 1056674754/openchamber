@@ -2,7 +2,7 @@ import fs from 'fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import os from 'os';
 import path from 'path';
-import { readAuthFile } from '../opencode/auth.js';
+import { readOpenCodeCredentials } from '../opencode/auth.js';
 import { readConfigLayers } from '../opencode/shared.js';
 import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from '../opencode/protocol-mode.js';
 import { getModelCatalog } from './catalog.js';
@@ -104,7 +104,7 @@ async function generateSmallModelTextV1({ prompt, system, maxOutputTokens, model
     throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   }
 
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const catalog = await getModelCatalog().catch(() => ({}));
 
   const explicit = parseModelRef(model);
@@ -206,7 +206,7 @@ async function tryCandidates(candidates, { auth, catalog, directory, prompt, sys
 
 async function listAuthenticatedProvidersV1() {
   try {
-    const auth = readAuthFile();
+    const auth = await readOpenCodeCredentials();
     const ids = new Set(
       Object.keys(auth || {}).filter((providerID) => isUsableAuthEntry(auth[providerID])),
     );
@@ -239,7 +239,7 @@ async function listRuntimeCallableProviders() {
 }
 
 async function describeSmallModelV1({ directory, preferredProviderID, preferredModelID, outputReserveTokens, overrideModel } = {}) {
-  const auth = readAuthFile();
+  const auth = await readOpenCodeCredentials();
   const catalog = await getModelCatalog().catch(() => ({}));
   const explicit = parseModelRef(overrideModel);
   const resolved = explicit

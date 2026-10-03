@@ -1,5 +1,3 @@
-import { listProviderAuths as listLegacyProviderAuths } from '../opencode/auth.js';
-
 const AUTH_SOURCES = new Set(['api', 'env', 'config', 'custom']);
 
 const hasCredentialKey = (provider) => {
@@ -59,13 +57,14 @@ const fetchProviderSnapshot = async ({
 };
 
 /**
- * Read provider authentication state from OpenCode, falling back to the legacy auth file.
+ * Read provider authentication state from OpenCode. When OpenCode cannot be
+ * asked the answer is an empty, explicitly degraded result: OpenCode owns the
+ * credential store, so there is no local fallback that could answer for it.
  * @param {object} [dependencies]
  * @param {() => Promise<object[]>} [dependencies.fetchProvidersSnapshot]
  * @param {(path: string) => string} [dependencies.buildOpenCodeUrl]
  * @param {() => Record<string, string>} [dependencies.getOpenCodeAuthHeaders]
  * @param {typeof fetch} [dependencies.fetchImpl]
- * @param {() => string[]} [dependencies.listProviderAuths]
  * @returns {Promise<{providers: Array<{id: string, name: string, source: string|null, env: string[]}>, states: Record<string, {configured: boolean, source: string, envVars: string[], type: string}>, degraded: boolean}>}
  */
 export const getProviderAuthStates = async ({
@@ -73,7 +72,6 @@ export const getProviderAuthStates = async ({
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   fetchImpl = globalThis.fetch,
-  listProviderAuths = listLegacyProviderAuths,
 } = {}) => {
   try {
     const snapshot = await fetchProviderSnapshot({
@@ -90,39 +88,26 @@ export const getProviderAuthStates = async ({
       .map((provider) => [provider.id, mapProviderAuthState(provider)]));
     return { providers, states, degraded: false };
   } catch (error) {
-    console.warn('[subscriptions] OpenCode provider auth lookup failed; using legacy auth file:', error?.message || error);
-    let providerIds = [];
-    try {
-      providerIds = listProviderAuths();
-    } catch (legacyError) {
-      console.warn('[subscriptions] Legacy provider auth lookup also failed:', legacyError?.message || legacyError);
-    }
-    const providers = providerIds.map((id) => ({ id, name: id, source: 'api', env: [] }));
-    const states = Object.fromEntries(providerIds.map((id) => [id, {
-      configured: true,
-      source: 'api',
-      envVars: [],
-      type: 'unknown',
-    }]));
-    return { providers, states, degraded: true };
+    console.warn('[subscriptions] OpenCode provider auth lookup failed; reporting degraded with no providers:', error?.message || error);
+    return { providers: [], states: {}, degraded: true };
   }
 };
 
 /**
- * Remove provider auth through OpenCode HTTP, falling back only when OpenCode is unreachable.
+ * Remove provider auth through OpenCode HTTP. OpenCode owns the credential
+ * store; when it cannot be asked the failure is surfaced instead of edited
+ * into a local file OpenCode will never read again.
  * @param {string} providerId
  * @param {object} dependencies
  * @param {(path: string) => string} dependencies.buildOpenCodeUrl
  * @param {() => Record<string, string>} dependencies.getOpenCodeAuthHeaders
  * @param {typeof fetch} [dependencies.fetchImpl]
- * @param {(providerId: string) => boolean} dependencies.removeLegacyProviderAuth
- * @returns {Promise<{removed: boolean, path: 'http'|'legacy'}>}
+ * @returns {Promise<{removed: boolean}>}
  */
 export const removeProviderAuth = async (providerId, {
   buildOpenCodeUrl,
   getOpenCodeAuthHeaders,
   fetchImpl = globalThis.fetch,
-  removeLegacyProviderAuth,
 }) => {
   let response;
   try {
@@ -131,13 +116,12 @@ export const removeProviderAuth = async (providerId, {
       headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
     });
   } catch (error) {
-    console.warn(`[subscriptions] OpenCode auth DELETE unreachable for ${providerId}; using legacy auth file:`, error?.message || error);
-    return { removed: removeLegacyProviderAuth(providerId), path: 'legacy' };
+    throw new Error(`OpenCode auth DELETE unreachable for ${providerId}: ${error?.message || error}`);
   }
 
   if (!response.ok) {
     throw new Error(`OpenCode auth DELETE failed (status ${response.status})`);
   }
   const payload = await response.json().catch(() => true);
-  return { removed: payload !== false, path: 'http' };
+  return { removed: payload !== false };
 };

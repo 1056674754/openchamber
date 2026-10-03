@@ -1,6 +1,8 @@
 import express from 'express';
 import { constants as fsConstants } from 'node:fs';
 import { mintOutsideFileGrant } from '../fs/routes.js';
+import { readMessageRecord } from '../opencode/message-records.js';
+import { isV2PromptTrack } from '../opencode/v2-prompt-dispatch.js';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_IMAGE_SOURCES = 12;
@@ -157,15 +159,23 @@ export const markdownImageSources = (message) => {
 
 const fetchMessage = async ({ sessionId, messageId, directory, buildOpenCodeUrl, getOpenCodeAuthHeaders, fetchImpl }) => {
   const url = new URL(buildOpenCodeUrl(`/session/${encodeURIComponent(sessionId)}/message/${encodeURIComponent(messageId)}`, ''));
-  url.searchParams.set('directory', directory);
+  // v2 branch: the location middleware ignores ?directory= — scope by the
+  // x-opencode-directory header (percent-encoded like the SDK wire format) and
+  // unwrap the flat record from its {data} envelope; the v1 track keeps the
+  // query and the bare {info, parts} record.
+  const v2Track = isV2PromptTrack();
+  if (!v2Track) url.searchParams.set('directory', directory);
   const response = await fetchImpl(url, {
-    headers: { accept: 'application/json', 'x-opencode-directory': directory, ...getOpenCodeAuthHeaders() },
+    headers: {
+      accept: 'application/json',
+      ...(v2Track ? { 'x-opencode-directory': encodeURIComponent(directory) } : { 'x-opencode-directory': directory }),
+      ...getOpenCodeAuthHeaders(),
+    },
     signal: AbortSignal.timeout(10_000),
   });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`OpenCode returned ${response.status}`);
-  const message = await response.json().catch(() => null);
-  return message?.info && Array.isArray(message.parts) ? message : null;
+  return readMessageRecord(await response.json().catch(() => null));
 };
 
 const inspectImage = async ({ source, directory, approvedTempRoot, fsPromises, path }) => {

@@ -21,9 +21,6 @@ describe('subscription auth adapter', () => {
       buildOpenCodeUrl: (path) => `http://opencode.test${path}`,
       getOpenCodeAuthHeaders: () => ({ Authorization: 'Basic hidden' }),
       fetchImpl,
-      listProviderAuths: () => {
-        throw new Error('legacy fallback should not run');
-      },
     });
 
     expect(result.degraded).toBe(false);
@@ -58,39 +55,22 @@ describe('subscription auth adapter', () => {
     );
   });
 
-  test('returns partial legacy auth data with degraded true when OpenCode is down', async () => {
+  test('returns an empty degraded result when OpenCode is down', async () => {
     const result = await getProviderAuthStates({
       fetchProvidersSnapshot: async () => {
         throw new Error('connection refused');
       },
-      listProviderAuths: () => ['legacy-provider'],
     });
 
-    expect(result).toEqual({
-      providers: [{ id: 'legacy-provider', name: 'legacy-provider', source: 'api', env: [] }],
-      states: {
-        'legacy-provider': {
-          configured: true,
-          source: 'api',
-          envVars: [],
-          type: 'unknown',
-        },
-      },
-      degraded: true,
-    });
+    expect(result).toEqual({ providers: [], states: {}, degraded: true });
   });
 
-  test('uses the legacy delete only when the OpenCode request is unreachable', async () => {
-    const removeLegacyProviderAuth = mock(() => true);
-    const result = await removeProviderAuth('anthropic', {
+  test('surfaces an unreachable OpenCode instead of a local fallback on delete', async () => {
+    await expect(removeProviderAuth('anthropic', {
       buildOpenCodeUrl: () => {
         throw new Error('port unavailable');
       },
       getOpenCodeAuthHeaders: () => ({}),
-      removeLegacyProviderAuth,
-    });
-
-    expect(result).toEqual({ removed: true, path: 'legacy' });
-    expect(removeLegacyProviderAuth).toHaveBeenCalledWith('anthropic');
+    })).rejects.toThrow('OpenCode auth DELETE unreachable for anthropic');
   });
 });

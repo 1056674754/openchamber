@@ -56,22 +56,19 @@ describe('subscription aggregation', () => {
     expect(JSON.stringify(payload)).not.toContain('secret-header');
   });
 
-  test('preserves fallback providers and degraded state when OpenCode is unavailable', async () => {
+  test('reports degraded with no providers when OpenCode is unavailable', async () => {
     const payload = await aggregateSubscriptions({
       fetchProvidersSnapshot: async () => {
         throw new Error('offline');
       },
-      listProviderAuths: () => ['anthropic'],
       getProviderSources: () => ({ sources: {} }),
-      listConfiguredQuotaProviders: () => [],
+      listConfiguredQuotaProviders: async () => {
+        throw new Error('offline');
+      },
       now: () => 100,
     });
 
     expect(payload.degraded).toBe(true);
-    expect(payload.providers).toHaveLength(1);
-    expect(payload.providers[0]).toMatchObject({
-      id: 'anthropic',
-      auth: { configured: true, source: 'api', type: 'unknown' },
-    });
+    expect(payload.providers).toHaveLength(0);
   });
 });

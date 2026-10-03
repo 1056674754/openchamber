@@ -26,6 +26,7 @@ export {
 } from './api.js';
 
 import { buildResult } from '../../utils/index.js';
+import { readOpenCodeCredentials } from '../../../opencode/auth.js';
 import {
   resolveGoogleAuthSources,
   resolveGoogleOAuthClient,
@@ -42,10 +43,10 @@ export const providerId = 'google';
 export const providerName = 'Google';
 export const aliases = ['google', 'google.oauth'];
 
-export const isConfigured = () => resolveGoogleAuthSources().length > 0;
+export const isConfigured = (auth) => resolveGoogleAuthSources(auth).length > 0;
 
 export const fetchGoogleQuota = async () => {
-  const authSources = resolveGoogleAuthSources();
+  const authSources = resolveGoogleAuthSources(await readOpenCodeCredentials());
   if (!authSources.length) {
     return buildResult({
       providerId,

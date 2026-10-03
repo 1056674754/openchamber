@@ -6,7 +6,7 @@ import { aggregateSubscriptions } from './aggregate.js';
  * @param {object} dependencies
  * @param {() => Promise<object[]>} dependencies.fetchProvidersSnapshot
  * @param {(req: object) => Promise<{directory?: string|null, error?: string}>} dependencies.resolveProjectDirectory
- * @param {() => Promise<{listConfiguredQuotaProviders: () => string[]}>} dependencies.getQuotaProviders
+ * @param {() => Promise<{listConfiguredQuotaProviders: () => Promise<string[]>}>} dependencies.getQuotaProviders
  * @param {Record<string, string|undefined>} [dependencies.processEnv]
  */
 export const registerSubscriptionRoutes = (app, {

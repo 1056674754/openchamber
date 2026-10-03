@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../opencode/auth.js', () => ({ readAuthFile: () => ({}) }));
+vi.mock('../opencode/auth.js', () => ({ readOpenCodeCredentials: async () => ({}) }));
 vi.mock('../opencode/shared.js', () => ({ readConfigLayers: () => ({ mergedConfig: {} }) }));
 vi.mock('./catalog.js', () => ({ getModelCatalog: async () => ({}) }));
 const callSmallModel = vi.fn();
