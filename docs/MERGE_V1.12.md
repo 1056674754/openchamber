@@ -3621,3 +3621,28 @@ B8 已落全部 stage 0→5e-4 组件层（8 commits，189 文件 +40.4k，switc
 **有意分叉/N/A**：fork Header 无 surface-title 槽位（上游 spacesSurfaceProjectId 标题 hunk 无挂点，页标题由 SpacesView 自担）；fork 无 MobileSessionsSheet/MobileProjectEditSurface 独立面（mobileVariant 复用 SessionSidebar/SessionGroupSection，随桌面面生效）；fork 无 realtime-proxy surface（上游 allowlist hunk N/A）；host session.import 端点嵌入式 OpenCode 尚无，archive 导入按 chat 失败计入 not-saved（删除确认已承载该路径，../opencode 2.x 后即通）。
 
 **验证**：type-check 8 包 0 错；触及文件 eslint 0 新增（5 error/3 warning 逐条与 HEAD~1 比对全部既有）；ui bun 触及域（sidebar/spaces/runtime-fetch）342 测试 0 失败；web vitest 全量 3885 过 / 5 失败全部归因既有（2 code-out=B8 bba37705b 记录的同一对读回预算测试隔离复跑同败、config-file-watcher=S4 预declared 环境、guests/background=HEAD 基线同败、network-defaults=并行负载超时且隔离 5/5 绿——串行隔离复跑对账，失败集与 S8 基线差集为空且通过数更多）。**Docker live（OPENCHAMBER_TEST_DOCKER=1，Engine 29.7.2）**：190 过 / 12 失败 / 100 自跳过——12 失败全部级联自 pinned 基础镜像 `node@sha256:dd58…` 本机不存在且本网络会话两次 20 分钟拉取停滞（套件内首个建空间测试等镜像超时后级联，跳过闸同一镜像检查）；失败路径未触及接线代码，B8 批本就未跑过 live 套件。镜像可得后应复跑。零行为红线：switch 关 = 无 host 无路由无 docker 无请求（journey 读 gating 于 isolatedSpacesEnabled），v1 事件/polling 套件与基线差集为空。
+
+## v2.1.0 合并轮：v1.24.2 → v2.1.0（2026-10-01 → 10-03，主轮 67c + 部署/激活/收官 8c）
+
+上游区间 `v1.24.2..v2.1.0`：433 commits / 2159 文件 / +192k-50k，无 orphan 拓扑。分类 docs/merge-v2.1/classify-seg-{a,b,c}.md；脊柱计划 oc2-spine-plan.md；轮计划 COMMUNITY_2_1_MANUAL_MERGE_PLAN.md（决策 D1-D10 全锁定：Spaces 立项末批、Enterprise 做、OC2 脊柱拆批并行推、nl 第 12 locale、posthog 不做）。
+
+**批次与证据**（逐批 type-check 0 错 + 触及域测试绿，全量 vitest 3885 过）：
+
+- **B1 低风险直移**（45 上游 commit / 14 git，57e8f75e2）：quota/stats、服务器健壮性、主题/models、agents/settings/skills、chat 小修、worktree/玻璃、windows/vscode/control、dev-tunnel/fs、ui 收尾。跳过 24 项有据（foreign 6、OC2/基建 7、fork 无表面 8、已等价 4）。
+- **OC2 脊柱 S1-S5+S7+S6+S8**（8/8 批）：S1 e7232d293 双栈门控基座（@opencode/client 2.0.14 与 SDK 1.18.31 共存、compatibility 双 probe、mode 按 serverId、默认 v1 零行为变化）；S2 1b333c5a2 translate-v2（24 事件→v1 词汇）+credential-db+managed-config+hub mode 分支；S3 e89cd32e8 config-v2 双轨+迁移链+routes mode 分支；S4 afa9f4f52 small-model 双轨+会话元数据/归档存储；S5 a1811aaaf UI SDK 双轨句柄（多服务器路由单实现两轨共享）+projection trio；S7 cf334f00c Question→Form（94 文件）；**S6 bee3dcd69+4f401d1d7 wire-bridge（coalescing 前 v2→v1 词汇翻译，MultiServerSyncLayer/global-store 零改动，多服务器×双mode 矩阵 43 测试）+v2 发送路径**；**S8 44445e21b→f895758d5 index.js 最终接线+FormDock/PermissionDock 挂载+S6 缺口补译+embedded 双布局+VS Code 探针+v2 mock 冒烟 9/9**。
+- **B3 权限三模式+Enterprise**（d84bf8b88+1e5441ba0，120 文件）：ask/safety/accept-all + classification providers + 机器策略文件/扩展白名单/断网模式/custom Jev。fork 保全：v1 请求路径、client 仅 auto 代答、schedule-task 布尔兼容。
+- **B5**（5c）：CodeMirror 三连（gutter/folding/symbols/multi-cursor/preview tabs→fork tabs store）、Files 大升级（富预览/图片缩放/上传/file.open）、multirun composer 并行模式（fork queue 语义保全：queuedOnly 永不分流）。
+- **B6 SDK 增量**（3c）：file editors 终态（#192）、Excalidraw 扩展化终态（D6）、browser provider/shared surface、插件通知、schannel 重试。
+- **B7 vscode/electron**（11c）：prompt navigator 门移除、Agent Manager→共享 multirun（B5 字节同源对齐）、桌面环境剥离、enterprise LAN 门、guest frame 断网。
+- **B8 Spaces + 接线批**（8c 189 文件 +40.4k，stage 0→5e-4 终态；接线 4c）：Docker place/manager/gatekeeper/dispatcher/journey/grants/idle-stop/repair/SpacesView；switch 默认关=零行为变化；fork 多服务器重适（合并仅宿主 proxy lane、remote lane 直达）；四套接线共存核对。Docker live 190 过/12 失败（pinned 镜像拉取停滞级联，非代码）。
+- **prompt 派发 v2 适配**（6c）：五发送器（消息队列/openchamber-sessions/session-goal/scheduled-tasks/context-obligatory）v2 扁平形状双轨（switch-model/switch-agent 先行+synthetic 停泊+delivery 映射），v1 逐字节重建审查。
+
+**部署与激活**（2026-10-03）：公证壳 2.1.0-sscity.20261003-123928 换入 /Applications（内嵌 bun 1.4.2 + fallback OpenCode 2.0.21-sscity；Notarized+staple+Gatekeeper accepted）+ runtime 2.1.0-sscity.20261003-133636-bff3a9de5488 激活（OPENCHAMBER_OPENCODE_SOURCE_ROOT=opencode-v2 源码态 v2）→ **OpenCode 实跑 v2.0.21-sscity（engine/bun 1.4.2 + v2 编译期 defines），协议 mode=v2 生效**。OC2 激活收官 4 commits（upstream-v2-paths 路径映射、插件 v2 化、部署布局解析、验证窗口 60s）：四件套复测全绿。build-version 后缀校验（7ec204219）、node-abi override 3.94.0（bun 1.4.2 隔离布局下 @electron/rebuild 的 3.87 不识 Electron 43 ABI）、runtime validate 前缀归一（0c9a8c569）。
+
+**修复**：侧栏 project 行两空格缩进恢复（089fba50a，pre-rowModel pl-4 调校回归）；bun-test shim DOM globals 隔离；walkthrough nl 漂移。
+
+**范围外（延后/不做）**：Isolated Spaces live Docker 套件复跑（12 失败=pinned 镜像拉取停滞）；#22 session metadata 2.0.15 大改；nativeRecords 渲染面；guests background CSP 断言先存失败（extensions 批，待修）；dictation、浏览器标注、上游 markdownCore 修复（fork 自研/无表面）。
+
+**已知 flake**（隔离全绿）：session-assist、git-service applyHunk、config-file-watcher、network-defaults 满载超时；spaces code-out 读回预算（重载机）。
+
+**待人工回归**：多服务器×双 mode 矩阵、OC2 冒烟、Spaces（需 Docker+开关）、权限三模式、files 编辑器全家、multirun、插件 v2 加载（[openchamber-plugin] v2 setup loaded 已捕获 ✓）、iCloud 签名链、VS Code、nl locale。回归清单：docs/REGRESSION_V2_1.md。
