@@ -75,7 +75,19 @@ function unwrap<T>(
     ;(err as Error & { status?: number }).status = 503
     throw err
   }
-  return result.data
+  // OpenCode 2 wraps location-scoped responses as {location, data[, cursor]}.
+  // The v1 track returns the payload directly; normalize both so shared
+  // bootstrap consumers stay dual-track. (A payload that legitimately carries
+  // its own `data` key never also carries `location`/`cursor`.)
+  let data: T = result.data
+  const candidate: unknown = data
+  if (candidate !== null && typeof candidate === "object" && !Array.isArray(candidate) && "data" in candidate) {
+    const envelope = candidate as { data?: unknown; location?: unknown; cursor?: unknown }
+    if ("location" in envelope || "cursor" in envelope) {
+      data = envelope.data as T
+    }
+  }
+  return data
 }
 
 const requestSignature = (items: Array<{ id: string }> | undefined): string => {

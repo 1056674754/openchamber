@@ -28,6 +28,7 @@ import { DEFAULT_PROTOCOL_MODE_SERVER_ID, resolveProtocolMode } from './protocol
 const V2_RENAMED_PATHS = new Map([
   ['/global/event', '/event'],
   ['/global/config', '/config'],
+  ['/config/providers', '/provider'],
   ['/path', '/location'],
   ['/session/status', '/session/active'],
 ]);
