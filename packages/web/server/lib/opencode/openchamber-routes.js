@@ -23,6 +23,7 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     getCachedZenModels,
     unreadStore,
     markersStore,
+    probePluginLoaded = null,
   } = dependencies;
 
   let cachedModelsMetadata = null;
@@ -482,6 +483,10 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
   });
 
   app.get('/api/openchamber/plugin-status', (_req, res) => {
-    res.json(getPluginStatus());
+    const status = getPluginStatus();
+    // A cached failure is re-probed (throttled by the caller) so recovery after
+    // a slow OpenCode boot reaches the UI instead of a permanent failure toast.
+    if (!status.loaded && typeof probePluginLoaded === 'function') probePluginLoaded();
+    res.json(status);
   });
 };

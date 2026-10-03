@@ -3646,3 +3646,5 @@ B8 已落全部 stage 0→5e-4 组件层（8 commits，189 文件 +40.4k，switc
 **已知 flake**（隔离全绿）：session-assist、git-service applyHunk、config-file-watcher、network-defaults 满载超时；spaces code-out 读回预算（重载机）。
 
 **待人工回归**：多服务器×双 mode 矩阵、OC2 冒烟、Spaces（需 Docker+开关）、权限三模式、files 编辑器全家、multirun、插件 v2 加载（[openchamber-plugin] v2 setup loaded 已捕获 ✓）、iCloud 签名链、VS Code、nl locale。回归清单：docs/REGRESSION_V2_1.md。
+
+**回归修复轮 1**（2026-10-03 下午，人工回归首日报）：①插件加载失败 toast——OC2 懒启动（location services 13s+，`/api/plugin` 同步挂起）使 v2 探针 5s 超时、UI 15 次轮询耗尽后永久判失败且不再复查；修复 = `/api/openchamber/plugin-status` 缓存失败时节流重探（3s，index.js `probePluginLoadedThrottled`→bootstrap-runtime→openchamber-routes 注入链）+ UI 轮询上限 15→60 + v2 成功路径 `result.tools.join` TypeError 修复（v2 无 tools）。②侧栏空白——桌面侧栏行虚拟器测量粘滞类缺陷（ArkWeb/Capacitor 同病，fresh 状态未复现，截图来自早晨带病实例）；按鸿蒙端先例 ≤240 行（`SIDEBAR_STATIC_ROW_LIMIT`）直接静态渲染，超限（超大 archived/搜索）仍虚拟化；组件测试 3 新增。佐证：早晨 08:35 boot "could not find plugin source and no cached v2 bundle"（runtime 安装竞态，后续 boot 自愈）；14:32 懒启动完成后 `@openchamber/plugin` 在 OC2 清单 active、plugin-status loaded:true 实测确认。

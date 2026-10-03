@@ -42,6 +42,13 @@
 - Docker live 套件 12 失败 = pinned 镜像拉取停滞（镜像可得后复跑）
 - 三个文件型插件 degraded（v2 需目录形态，上游生态）
 - guests background CSP 断言先存失败（extensions 批遗留，待修）
+- web 侧 config-entity-v2 / startup-pipeline / session-runtime / network-runtime 等测试用 vitest `vi.*` API，bun test 下环境性报错（先存，与本轮无关）
+
+## D2. 2026-10-03 回归缺陷修复记录
+
+- **插件加载失败 toast（已修）**：OC2 懒启动（location services 13s+）期间 `/api/plugin` 挂起，v2 探针 5s 超时；UI 轮询 15 次耗尽即永久失败且不再复查。修复：`/api/openchamber/plugin-status` 在缓存失败时触发节流重探（3s，index.js `probePluginLoadedThrottled`），UI 轮询上限 15→60；顺带修 v2 成功路径 `result.tools.join` 崩溃（v2 无 tools，改可选链 + 清单计数）。
+- **侧栏空白（加固）**：桌面侧栏行虚拟器测量粘滞（与 ArkWeb/Capacitor 同病：槽位大小过期 → 行间空洞）。未在 fresh 状态复现（用户截图来自长时间运行的早晨实例）；按鸿蒙端先例改为 ≤240 行直接静态渲染（`SIDEBAR_STATIC_ROW_LIMIT`），组分页使常规侧栏远低于阈值；超大 archived/搜索列表仍虚拟化。
+- 另：早晨 08:35 启动曾报 "could not find plugin source and no cached v2 bundle"（runtime 162843 安装竞态，164138 起自愈）；当前 runtime 插件源/目录 bundle 均完整。
 
 ## E. 回归环境（无头/隔离）
 

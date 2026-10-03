@@ -55,6 +55,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getCachedZenModels,
       agentToolRuntime = null,
       pluginNotificationEmitter = null,
+      probePluginLoaded = null,
       skipBodyParsing,
     } = options;
 
@@ -145,6 +146,7 @@ export const createBootstrapRuntime = (dependencies) => {
       getCachedZenModels,
       unreadStore,
       markersStore,
+      probePluginLoaded,
     });
 
     return {

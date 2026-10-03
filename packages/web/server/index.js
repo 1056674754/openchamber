@@ -1455,9 +1455,22 @@ const verifyOpenChamberPluginLoaded = async () => {
   if (!result.loaded) {
     console.warn('[openchamber] plugin not loaded:', result.reason);
   } else {
-    console.log('[openchamber] plugin verified:', result.tools.join(', '));
+    // The v2 probe reads the plugin inventory and does not report v1 tools.
+    console.log('[openchamber] plugin verified:', result.tools?.join(', ') || `(v2 inventory: ${result.plugins?.length ?? 0} plugins)`);
   }
   return result;
+};
+// OpenCode 2 boots its location services lazily; the first minutes can answer
+// plugin probes with hangs or an inventory without the plugin. The status route
+// drives this throttled re-probe so recovery reaches the UI without waiting for
+// the next lifecycle event.
+const PLUGIN_REPROBE_THROTTLE_MS = 3000;
+let lastPluginReprobeStartedAt = 0;
+const probePluginLoadedThrottled = () => {
+  const now = Date.now();
+  if (now - lastPluginReprobeStartedAt < PLUGIN_REPROBE_THROTTLE_MS) return;
+  lastPluginReprobeStartedAt = now;
+  void verifyOpenChamberPluginLoaded().catch(() => undefined);
 };
 let openCodeConfigFileWatcherRuntime = null;
 const refreshOpenCodeAfterConfigChange = async (...args) => {
@@ -2052,6 +2065,7 @@ async function main(options = {}) {
     setAutoAcceptSession,
     unreadStore,
     markersStore,
+    probePluginLoaded: probePluginLoadedThrottled,
     // A request to a space keeps its body for the space; the dispatcher streams it (upstream f9d212f38).
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });

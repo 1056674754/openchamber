@@ -12,7 +12,10 @@ import { useConfigStore } from '@/stores/useConfigStore';
 const PLUGIN_STATUS_TOAST_ID = 'openchamber-plugin-status';
 const INITIAL_CHECK_DELAY_MS = 1_000;
 const CHECK_INTERVAL_MS = 1_000;
-const MAX_STATUS_CHECK_ATTEMPTS = 15;
+// OpenCode 2 boots location services lazily (13s+ observed with large configs)
+// and plugin probes hang until that finishes; the status route re-probes on
+// demand, so keep polling long enough to observe the recovery.
+const MAX_STATUS_CHECK_ATTEMPTS = 60;
 
 let statusToastShown = false;
 

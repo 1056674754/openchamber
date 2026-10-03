@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  SIDEBAR_STATIC_ROW_LIMIT,
   findFirstVisibleSessionSidebarRowIndex,
   getInitialSessionSidebarRowIndexes,
   mergeSessionSidebarVirtualIndexes,
+  shouldVirtualizeSessionSidebarRows,
 } from './sessionSidebarVirtualization';
 
 describe('SessionSidebarRows initialization', () => {
@@ -24,5 +26,19 @@ describe('SessionSidebarRows initialization', () => {
       { index: 0, end: 32 },
       { index: 1, end: 64 },
     ], 32)).toBe(1);
+  });
+});
+
+describe('shouldVirtualizeSessionSidebarRows', () => {
+  test('ordinary paginated sidebars render directly', () => {
+    expect(shouldVirtualizeSessionSidebarRows({ platformDisabled: false, rowCount: SIDEBAR_STATIC_ROW_LIMIT })).toBe(false);
+  });
+
+  test('very large lists virtualize', () => {
+    expect(shouldVirtualizeSessionSidebarRows({ platformDisabled: false, rowCount: SIDEBAR_STATIC_ROW_LIMIT + 1 })).toBe(true);
+  });
+
+  test('platform-disabled rendering stays direct at any size', () => {
+    expect(shouldVirtualizeSessionSidebarRows({ platformDisabled: true, rowCount: 25_000 })).toBe(false);
   });
 });

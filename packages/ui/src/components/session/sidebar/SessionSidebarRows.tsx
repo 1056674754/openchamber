@@ -5,6 +5,7 @@ import {
   findFirstVisibleSessionSidebarRowIndex,
   getInitialSessionSidebarRowIndexes,
   mergeSessionSidebarVirtualIndexes,
+  shouldVirtualizeSessionSidebarRows,
 } from './sessionSidebarVirtualization';
 import { isOhosApp } from '@/lib/platform';
 
@@ -34,7 +35,12 @@ export function SessionSidebarRows({
   // ArkWeb scroll-event delivery breaks the virtualizer's measurements (rows
   // unmount mid-scroll, totalSize inflates → growing blank spacer). On ohos
   // render every row directly and derive the first visible index from the DOM.
-  const disableVirtualization = isOhosApp();
+  // Modest desktop lists do the same: direct rendering sidesteps measured-size
+  // stickiness (stale slots → blank holes between rows).
+  const disableVirtualization = !shouldVirtualizeSessionSidebarRows({
+    platformDisabled: isOhosApp(),
+    rowCount: rows.length,
+  });
   const getScrollElement = React.useCallback(() => scrollElement, [scrollElement]);
   const estimateSize = React.useCallback((index: number) => rows[index]?.estimateSize ?? 32, [rows]);
   const getItemKey = React.useCallback((index: number) => rows[index]?.key ?? index, [rows]);
