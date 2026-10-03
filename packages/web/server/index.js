@@ -1674,6 +1674,19 @@ const bootstrapOpenCodeAtStartup = async (...args) => {
     console.warn('[openchamber] config overlay skipped:', error?.message || error);
   }
   await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
+  // The protocol mode is only authoritative after the readiness probe. On the
+  // first v2 boot the pre-spawn overlay was still written in the v1 shape (its
+  // file entries are skipped by OpenCode 2), so rewrite it in the v2 shape now:
+  // the managed child watches `OPENCODE_CONFIG` and hot-reloads its plugin
+  // list, which is also the verification window right below.
+  if (resolveProtocolMode(DEFAULT_PROTOCOL_MODE_SERVER_ID) === 'v2') {
+    try {
+      const overlayPath = prepareOpenChamberConfig();
+      if (overlayPath) process.env.OPENCODE_CONFIG = overlayPath;
+    } catch (error) {
+      console.warn('[openchamber] v2 overlay refresh skipped:', error?.message || error);
+    }
+  }
   openCodeConfigFileWatcherRuntime.start();
   scheduleOpenCodeApiDetection();
   if (openCodeLifecycleState.openCodePort && !openCodeLifecycleState.isExternalOpenCode) {

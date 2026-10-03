@@ -7,6 +7,9 @@ export type OpenChamberPluginStatus = {
     readonly checkedAt?: string;
     readonly features?: Record<string, boolean>;
     readonly runtime?: unknown;
+    /** Track the server used for the check (spine finale): the v2 probe reads
+     *  the server's plugin inventory and does not report v1 hook features. */
+    readonly protocolMode?: 'v1' | 'v2';
 };
 
 export type OpenChamberPluginStatusDecision =
@@ -40,6 +43,7 @@ export function normalizeOpenChamberPluginStatus(raw: unknown): OpenChamberPlugi
         ...(typeof raw.reason === 'string' ? { reason: raw.reason } : {}),
         ...(typeof raw.checkedAt === 'string' ? { checkedAt: raw.checkedAt } : {}),
         ...(raw.runtime === undefined ? {} : { runtime: raw.runtime }),
+        ...(raw.protocolMode === 'v1' || raw.protocolMode === 'v2' ? { protocolMode: raw.protocolMode } : {}),
         ...(stringArray(raw.tools) ? { tools: stringArray(raw.tools) } : {}),
         ...(stringArray(raw.missingTools) ? { missingTools: stringArray(raw.missingTools) } : {}),
         ...(stringArray(raw.missingFeatures) ? { missingFeatures: stringArray(raw.missingFeatures) } : {}),
@@ -49,6 +53,9 @@ export function normalizeOpenChamberPluginStatus(raw: unknown): OpenChamberPlugi
 
 export function formatOpenChamberPluginStatusReason(status: OpenChamberPluginStatus): string {
     const details: string[] = [];
+    // The v2 probe reads the server's plugin inventory; the v1 hook features
+    // (liveSteer) are not part of its contract, so their absence is not a gap.
+    const v2WithoutFeatureReport = status.protocolMode === 'v2' && !status.features;
 
     if (status.reason && status.reason !== 'not-checked') {
         details.push(status.reason);
@@ -59,7 +66,7 @@ export function formatOpenChamberPluginStatusReason(status: OpenChamberPluginSta
     if (status.missingFeatures && status.missingFeatures.length > 0) {
         details.push(`missing features: ${status.missingFeatures.join(', ')}`);
     }
-    if (status.loaded && status.features?.liveSteer !== true) {
+    if (status.loaded && status.features?.liveSteer !== true && !v2WithoutFeatureReport) {
         details.push('missing features: liveSteer');
     }
 
@@ -76,7 +83,9 @@ export function resolveOpenChamberPluginStatusDecision(
     if (!status.loaded && status.reason === 'not-checked') {
         return { kind: 'pending' };
     }
-    if (status.loaded && status.features?.liveSteer === true) {
+    const featureReportSatisfied = status.features?.liveSteer === true
+        || (status.protocolMode === 'v2' && !status.features);
+    if (status.loaded && featureReportSatisfied) {
         if (status.missingTools && status.missingTools.length > 0) {
             return {
                 kind: 'degraded',
