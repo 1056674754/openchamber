@@ -1,6 +1,6 @@
 {
   "name": "@openchamber/electron",
-  "version": "1.24.2-sscity",
+  "version": "2.1.0-sscity",
   "private": true,
   "description": "Electron desktop runtime for OpenChamber",
   "author": "OpenChamber",
@@ -16,7 +16,7 @@
   "devDependencies": {
     "@electron/rebuild": "^3.7.0",
     "@playwright/test": "1.62.0",
-    "electron": "^43.0.0",
+    "electron": "43.3.0",
     "electron-builder": "^26.0.0"
   },
   "desktopPrerequisites": [
