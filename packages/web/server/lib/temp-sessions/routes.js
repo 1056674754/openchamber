@@ -130,7 +130,11 @@ export function registerTempSessionRoutes(app) {
         });
       }
 
-      const session = await sessionResponse.json();
+      const payload = await sessionResponse.json();
+      // The v2 create wraps the session in a location envelope ({location, data}).
+      const session = payload && typeof payload === 'object' && 'data' in payload
+        ? payload.data
+        : payload;
       console.log('[TempSessions] Created OpenCode session:', session?.id, 'for directory:', dirPath);
 
       res.json({ path: dirPath, topic, session });
