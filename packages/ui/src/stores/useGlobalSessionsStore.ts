@@ -1299,7 +1299,9 @@ useGlobalSessionsStore.subscribe((state, previous) => {
 
 export const ensureGlobalSessionsLoaded = async (fallbackActive?: Session[]): Promise<LoadResult> => {
   const state = useGlobalSessionsStore.getState();
-  if (state.hasLoaded && state.status !== 'error') {
+  // A lone SSE upsert also flips hasLoaded via applySnapshot; only a
+  // marked-complete snapshot proves the catalog list itself was fetched.
+  if (state.hasLoaded && state.isCompleteSnapshot && state.status !== 'error') {
     return {
       activeSessions: state.activeSessions,
       archivedSessions: state.archivedSessions,
