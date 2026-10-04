@@ -854,14 +854,15 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     inflightLoad = (async () => {
       try {
         const sdk = opencodeClient.getApiClient() as unknown as V2SessionListClient;
-        const allRoots = await listGlobalSessionPage(sdk, {
+        // The v2 page caps at 200 sorted by updated desc — walk the full
+        // cursor chain or every project group older than the window renders
+        // as history-less. Pinned sessions beyond the walk hydrate by id.
+        const allRoots = await listGlobalSessionPages(sdk, {
           archived: true,
           narrowToArchived: false,
           pageSize: PAGE_SIZE,
+          onPage: (accepted) => indexDefaultServerSessions(accepted),
         });
-        // The v2 page caps at 200 sorted by updated desc, so older pinned
-        // sessions may sit beyond it; hydrate them by id so the pinned zone
-        // never renders title-less stubs.
         const known = new Set(allRoots.map((session) => session.id));
         const missingPinned = readPinnedSessionIds().filter((id) => !known.has(id));
         if (missingPinned.length > 0) {
