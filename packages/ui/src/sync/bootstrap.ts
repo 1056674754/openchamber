@@ -368,6 +368,11 @@ export async function bootstrapDirectory(input: {
       const beforeSignatures = new Map(
         Object.entries(before.form ?? {}).map(([sessionID, forms]) => [sessionID, requestSignature(forms)]),
       )
+      // R2 残留: the deferred form refresh still reads the legacy wire —
+      // OC2's /api/form answers a different record shape than the dock's
+      // FormRequest, and the S6 sync-bridge batch owns that translation.
+      // Until then this 404s on the v2 track and the catch below absorbs it;
+      // the dock itself is fed by the translated form events.
       const x = await sdk.question.list(directory ? { directory } : undefined)
       if (x.error) {
         const status = (x as { response?: { status?: number } }).response?.status
