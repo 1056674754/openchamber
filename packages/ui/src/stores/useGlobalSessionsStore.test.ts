@@ -6,6 +6,12 @@ import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registr
 import type { SessionListRequest } from './globalSessions';
 
 let mockedSdkClient: unknown = {};
+/** The v2 lane fake: the default server reads sessions through getApiClient. */
+let mockedV2Client: unknown = {
+  session: {
+    list: async () => ({ data: [] as Session[], cursor: {} }),
+  },
+};
 
 // useGlobalSessionsStore pulls in @/lib/opencode/client, which has a circular
 // dependency that surfaces as a TDZ ("Cannot access 'opencodeClient before
@@ -15,6 +21,7 @@ let mockedSdkClient: unknown = {};
 mock.module('@/lib/opencode/client', () => ({
   opencodeClient: {
     getSdkClient: () => mockedSdkClient,
+    getApiClient: () => mockedV2Client,
     setDirectory: () => {},
     getDirectory: () => '',
   },
@@ -422,14 +429,12 @@ describe('applyDirectorySnapshot isolation', () => {
 describe('loadSessions completeness', () => {
   test('marks a successful roots load as a complete snapshot', async () => {
     resetCatalog();
-    mockedSdkClient = {
-      experimental: {
-        session: {
-          list: async () => ({
-            data: [makeSession('root', DIR_A)],
-            response: { headers: new Headers() },
-          }),
-        },
+    mockedV2Client = {
+      session: {
+        list: async () => ({
+          data: [makeSession('root', DIR_A)],
+          cursor: {},
+        }),
       },
     };
 
@@ -451,12 +456,10 @@ describe('loadSessions completeness', () => {
       isCompleteSnapshot: false,
       status: 'ready',
     });
-    mockedSdkClient = {
-      experimental: {
-        session: {
-          list: async () => {
-            throw new Error('network down');
-          },
+    mockedV2Client = {
+      session: {
+        list: async () => {
+          throw new Error('network down');
         },
       },
     };
@@ -473,17 +476,17 @@ describe('loadSessions completeness', () => {
 describe('demand-loaded session catalog', () => {
   test('bootstraps with one root-only page even when a cursor is present', async () => {
     resetCatalog();
-    const requests: SessionListRequest[] = [];
-    mockedSdkClient = {
-      experimental: {
-        session: {
-          list: async (request: SessionListRequest) => {
-            requests.push(request);
-            return {
-              data: [makeSession('root', DIR_A)],
-              response: { headers: new Headers({ 'x-next-cursor': '1' }) },
-            };
-          },
+    const requests: Array<{ directory?: string; limit: number; cursor?: string }> = [];
+    mockedV2Client = {
+      session: {
+        list: async (input: { directory?: string; limit: number; cursor?: string }) => {
+          requests.push(input);
+          // A partial page with a server cursor: the walker must still stop —
+          // a page shorter than the limit is the last one.
+          return {
+            data: [makeSession('root', DIR_A)],
+            cursor: { next: 'more' },
+          };
         },
       },
     };
@@ -491,8 +494,6 @@ describe('demand-loaded session catalog', () => {
     await useGlobalSessionsStore.getState().loadSessions();
 
     expect(requests).toEqual([{
-      archived: true,
-      roots: true,
       limit: 200,
     }]);
     expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id)).toEqual(['root']);
@@ -501,15 +502,13 @@ describe('demand-loaded session catalog', () => {
   test('preserves an SSE upsert that arrives while roots are loading', async () => {
     resetCatalog();
     const deferred: {
-      resolve?: (value: { data: Session[] }) => void;
+      resolve?: (value: { data: Session[]; cursor: {} }) => void;
     } = {};
-    mockedSdkClient = {
-      experimental: {
-        session: {
-          list: () => new Promise<{ data: Session[] }>((resolve) => {
-            deferred.resolve = resolve;
-          }),
-        },
+    mockedV2Client = {
+      session: {
+        list: () => new Promise<{ data: Session[]; cursor: {} }>((resolve) => {
+          deferred.resolve = resolve;
+        }),
       },
     };
 
@@ -523,7 +522,7 @@ describe('demand-loaded session catalog', () => {
       resolveList = deferred.resolve;
     }
     if (!resolveList) throw new Error('session list request did not start');
-    resolveList({ data: [makeSession('root', DIR_A)] });
+    resolveList({ data: [makeSession('root', DIR_A)], cursor: {} });
     await load;
 
     expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id).sort()).toEqual([
@@ -540,8 +539,9 @@ describe('demand-loaded session catalog', () => {
       parentID: parent.id,
     };
     let childRequests = 0;
-    mockedSdkClient = {
+    mockedV2Client = {
       session: {
+        list: async () => ({ data: [parent, child], cursor: {} }),
         children: async () => {
           childRequests += 1;
           return { data: [child] };
@@ -557,11 +557,9 @@ describe('demand-loaded session catalog', () => {
     await useGlobalSessionsStore.getState().loadSessionChildren(parent);
     await useGlobalSessionsStore.getState().loadSessionChildren(parent);
 
-    expect(childRequests).toBe(1);
-    expect(useGlobalSessionsStore.getState().activeSessions.map((session) => session.id).sort()).toEqual([
-      'child-demand',
-      'parent-demand',
-    ]);
+    // The v2 lane has no children endpoint: the catalog list already carries
+    // children, so the demand load resolves without a request.
+    expect(childRequests).toBe(0);
     expect(useGlobalSessionsStore.getState().childLoadState.get(parent.id)).toBe('loaded');
   });
 
@@ -572,11 +570,9 @@ describe('demand-loaded session catalog', () => {
       ...makeSession('archived-root', DIR_A),
       time: { created: 1, updated: 2, archived: 3 },
     };
-    mockedSdkClient = {
-      experimental: {
-        session: {
-          list: async () => ({ data: [active, archived] }),
-        },
+    mockedV2Client = {
+      session: {
+        list: async () => ({ data: [active, archived], cursor: {} }),
       },
     };
 

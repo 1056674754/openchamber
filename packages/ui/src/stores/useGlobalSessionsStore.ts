@@ -4,7 +4,7 @@ import type { SessionStatus } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
 import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
 import { resolveSessionAuthority } from '@/sync/session-authority';
-import { filterManagedChatsForRuntime, listGlobalSessionPage, listGlobalSessionPages, splitGlobalSessionsByArchived } from '@/stores/globalSessions';
+import { filterManagedChatsForRuntime, listGlobalSessionPage, listGlobalSessionPages, splitGlobalSessionsByArchived, type SessionListClient, type V2SessionListClient } from '@/stores/globalSessions';
 import { retry } from '@/sync/retry';
 import { readRemoteSessionStatuses } from '@/sync/remote-session-status';
 import { shouldSkipStaleSessionEvent } from '@/sync/session-event-freshness';
@@ -240,7 +240,7 @@ type DirectoryPageResult = {
 };
 
 const fetchDirectoryPages = async (
-  sdk: OpencodeClient,
+  sdk: OpencodeClient | V2SessionListClient,
   directories: Set<string>,
 ): Promise<DirectoryPageResult> => {
   const results = await Promise.allSettled(
@@ -484,9 +484,11 @@ const indexServerSessions = (sessions: Session[], serverId: string): void => {
   }
 };
 
-const getClientForServer = (serverId: string): OpencodeClient => {
+const getClientForServer = (serverId: string): SessionListClient | V2SessionListClient => {
   if (serverId === DEFAULT_SERVER_ID) {
-    return opencodeClient.getSdkClient();
+    // The default lane is the v2 client: its session.list is the /api/session
+    // page. The legacy SDK here would 404 on OpenCode 2.
+    return opencodeClient.getApiClient() as unknown as V2SessionListClient;
   }
 
   const connection = serverRegistry.get(serverId);
@@ -537,7 +539,7 @@ export const searchGlobalRootSessions = async (query: string): Promise<Session[]
   const search = query.trim();
   if (!search) return [];
 
-  const targets = new Map<string, OpencodeClient>([
+  const targets = new Map<string, SessionListClient | V2SessionListClient>([
     [DEFAULT_SERVER_ID, getClientForServer(DEFAULT_SERVER_ID)],
   ]);
   for (const connection of serverRegistry.getAll()) {
@@ -822,7 +824,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     inflightLoad = (async () => {
       try {
-        const sdk = opencodeClient.getSdkClient();
+        const sdk = opencodeClient.getApiClient() as unknown as V2SessionListClient;
         const allRoots = await listGlobalSessionPage(sdk, {
           archived: true,
           narrowToArchived: false,
@@ -876,7 +878,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
 
-    const sdk = opencodeClient.getSdkClient();
+    const sdk = opencodeClient.getApiClient() as unknown as V2SessionListClient;
     const fetched = await fetchDirectoryPages(sdk, directorySet);
 
     if (fetched.errors.length > 0) {
@@ -942,7 +944,18 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           ?? DEFAULT_SERVER_ID;
         const client = getClientForServer(serverId);
         const directory = resolveGlobalSessionDirectory(session);
-        const result = await retry(() => client.session.children({
+        // v2 removed session.children: the catalog list carries children
+        // without a parentID filter, so there is nothing to demand-load.
+        const legacyClient = client as OpencodeClient;
+        if (!('experimental' in legacyClient)) {
+          set((state) => {
+            const childLoadState = new Map(state.childLoadState);
+            childLoadState.set(session.id, 'loaded');
+            return { childLoadState };
+          });
+          return [];
+        }
+        const result = await retry(() => legacyClient.session.children({
           sessionID: session.id,
           ...(directory ? { directory } : {}),
         }));

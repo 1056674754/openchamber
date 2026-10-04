@@ -223,7 +223,6 @@ export async function listGlobalSessionPage(
 ): Promise<GlobalSessionRecord[]> {
     // `roots` is a v1-only server filter: the v2 /api/session page returns
     // roots and children together and callers derive the tree client-side.
-    console.log('[dbg] listGlobalSessionPage legacy=', isLegacySessionClient(apiClient), JSON.stringify(options))
     const { sessions } = isLegacySessionClient(apiClient)
         ? await requestSessionPage(apiClient, {
             ...(options.directory ? { directory: options.directory } : {}),
