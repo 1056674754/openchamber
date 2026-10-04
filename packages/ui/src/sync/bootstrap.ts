@@ -352,7 +352,8 @@ export async function bootstrapDirectory(input: {
     // which touches that same state. Every directory bootstrapped at startup
     // would otherwise launch one full fleet per project. Both surfaces fetch
     // on demand through their own stores (useMcpStore, useCommandsStore).
-    retry(() => sdk.lsp.status({ directory }).then((x) => set({ lsp: unwrap(x, "lsp.status") }))),
+    // LSP was dropped upstream in OpenCode 2 (no /api/lsp route); the sync
+    // state field stays for shape compatibility and is never populated.
     retry(() =>
       sdk.vcs.get({ directory }).then((x) => {
         const current = getState()
