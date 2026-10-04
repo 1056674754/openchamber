@@ -3,6 +3,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { devtools } from 'zustand/middleware';
 import type { CreateMultiRunParams, CreateMultiRunResult } from '@/types/multirun';
 import type { Session } from '@/lib/opencode/client';
+import type { Session as LegacySession } from '@opencode-ai/sdk/v2/client';
 import { opencodeClient } from '@/lib/opencode/client';
 import { saveWorktreeSetupCommands } from '@/lib/openchamberConfig';
 import { fetchSessionKnowledge, reportSessionKnowledgeDelivered } from '@/lib/sessionKnowledgeApi';
@@ -75,13 +76,16 @@ export const registerMultiRunSession = (session: Session, directory: string): Se
 
   registerSessionDirectory(session.id, normalizedDirectory);
   useSessionUIStore.getState().markSessionAsOpenChamberCreated(session.id);
-  useGlobalSessionsStore.getState().upsertSession(sessionWithDirectory);
+  // The sync/global stores still type records with the legacy wire Session
+  // (R2 残留: sync-bridge batch retypes them); lane logic reads only the
+  // shared fields.
+  useGlobalSessionsStore.getState().upsertSession(sessionWithDirectory as unknown as LegacySession);
 
   try {
     const store = getSyncChildStores().ensureChild(normalizedDirectory, { bootstrap: false });
     store.setState((state) => {
       if (state.session.some((entry) => entry.id === session.id)) return state;
-      return { session: [sessionWithDirectory, ...state.session] };
+      return { session: [sessionWithDirectory as unknown as LegacySession, ...state.session] };
     });
   } catch {
     // The child store may not exist yet; the SSE bootstrap will deliver the session.

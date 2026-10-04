@@ -849,6 +849,11 @@ export function translateWireEvent(event: OpenCodeEvent): SyncEvent[] {
     // (side-channel spend; the session totals arrive as `session.usage.updated`)
     // and `log.synced` (durable-log bookkeeping).
 
+    // 2.0.21: session metadata mutations are announced but carry no render
+    // state of their own; the next session read observes the metadata.
+    case "session.metadata.updated":
+      return []
+
     // Addressed to the TUI client.
     case "tui.command.execute":
     case "tui.prompt.append":

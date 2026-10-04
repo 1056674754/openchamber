@@ -278,7 +278,7 @@ describe("translateWireEvent", () => {
       [{ ...base, type: "credential.updated", data: {} }, "credential"],
       [{ ...base, type: "credential.switched", data: { integrationID: "openai", credentialID: null } }, "credential"],
       [
-        { ...base, type: "project.updated", data: { id: "proj", canonical: "/repo", time: { created: 1, updated: 1 }, sandboxes: [] } },
+        { ...base, type: "project.updated", data: { id: "proj", canonical: "/repo", time: { created: 1, updated: 1, active: 0 }, sandboxes: [] } },
         "project",
       ],
     ]

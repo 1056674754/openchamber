@@ -40,14 +40,10 @@ const getLastAssistantText = async (source: FusionSource): Promise<string> => {
   const messages = getSyncMessages(source.session.id, directory);
 
   if (messages.length === 0 && source.directory) {
-    const result = await opencodeClient.withDirectory(source.directory, () =>
-      opencodeClient.getSdkClient().session.messages({
-        sessionID: source.session.id,
-        directory: source.directory ?? undefined,
-        limit: 50,
-      })
-    );
-    const records = result.data ?? [];
+    // R2 client unification: the paged v2 message read returns projected
+    // `{ info, parts }` records.
+    const page = await opencodeClient.getSessionMessages(source.session.id, { limit: 50 }, source.directory);
+    const records = page.items;
     for (let index = records.length - 1; index >= 0; index -= 1) {
       const record = records[index] as { info?: { role?: string }; parts?: unknown[] };
       if (record.info?.role !== 'assistant') continue;

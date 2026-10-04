@@ -150,25 +150,20 @@ const sessionBelongsToScope = async (
 
         for (const directory of directories) {
             try {
-                const result = await opencodeClient.getScopedSdkClient(directory).session.get({
-                    sessionID: id,
-                    directory,
-                });
-                if (result.data) {
-                    fetchedById.set(id, result.data);
-                    return result.data;
-                }
+                // v2 client: the directory resolves through the header; the
+                // record only feeds the parentID inheritance walk.
+                const session = await opencodeClient.getSession(id, directory) as unknown as Session;
+                fetchedById.set(id, session);
+                return session;
             } catch {
                 // Try the next known project directory.
             }
         }
 
         try {
-            const result = await opencodeClient.getSdkClient().session.get({ sessionID: id });
-            if (result.data) {
-                fetchedById.set(id, result.data);
-                return result.data;
-            }
+            const session = await opencodeClient.getSession(id) as unknown as Session;
+            fetchedById.set(id, session);
+            return session;
         } catch {
             // Missing session metadata means we cannot safely inherit the parent setting.
         }

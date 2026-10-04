@@ -1,4 +1,3 @@
-import type { Message, Part } from "@opencode-ai/sdk/v2"
 
 export type SessionTitleCandidateResult = {
   candidates: string[]
@@ -20,7 +19,7 @@ export type FetchSessionTitleCandidatesInput = {
  * Concatenate message texts into a single string, truncated to maxLength.
  */
 export function buildSessionText(
-  messages: { info: Message; parts: Part[] }[],
+  messages: Array<{ info: { id?: string }; parts: Array<{ type?: string; text?: string }> }>,
   maxLength = 8000,
 ): string {
   let text = ""

@@ -11,7 +11,6 @@ import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 import { runBackgroundNetworkTask } from '@/lib/background-network';
-import { resolveSdkForDirectory } from '@/sync/session-actions';
 import { resolveApiUrl as resolveServerApiUrl } from '@/lib/api/serverUrl';
 
 
@@ -189,19 +188,20 @@ export const useCommandsStore = create<CommandsStore>()(
               try {
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-                // Ensure the list is scoped to the same directory we use for config source detection.
-                const targetSdk = resolveSdkForDirectory(directory ?? '', serverBaseUrl, serverId ?? undefined);
-                const commandResponse = await runBackgroundNetworkTask(() => targetSdk.command.list(
-                  directory ? { directory } : undefined,
-                ));
-                if (commandResponse.error) throw new Error('Failed to list commands');
-                const commands = (commandResponse.data ?? []).map((command) => ({
+                // R2 client unification: the command list rides the v2
+                // `command.list` route (envelope unwrapped in the client).
+                // The v2 wire carries name/description only — templates and
+                // scopes come from the per-command config routes below.
+                const commandList = await runBackgroundNetworkTask(() =>
+                  opencodeClient.listCommands(directory ?? undefined, undefined, serverId ?? undefined),
+                );
+                const commands = (commandList ?? []).map((command) => ({
                   name: command.name,
                   description: command.description,
-                  agent: command.agent,
-                  model: command.model,
-                  source: command.source,
-                  template: command.template,
+                  agent: undefined,
+                  model: undefined,
+                  source: undefined,
+                  template: undefined,
                 }));
 
                 const configurableCommands = commands.filter((cmd) => cmd.source !== 'skill');

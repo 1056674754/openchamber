@@ -1,8 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { opencodeClient, type ProjectFileSearchHit } from '@/lib/opencode/client';
-import { createOpencodeClient } from '@opencode-ai/sdk/v2';
-import { DEFAULT_SERVER_ID, serverRegistry } from '@/lib/opencode/server-registry';
+import { DEFAULT_SERVER_ID } from '@/lib/opencode/server-registry';
 
 const CACHE_TTL_MS = 30_000;
 const MAX_CACHE_ENTRIES = 40;
@@ -88,36 +87,17 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
         }
 
         const searchPromise = (async () => {
-          if (serverId === DEFAULT_SERVER_ID && !serverBaseUrl) {
-            return opencodeClient.searchFiles(normalizedQuery, {
-              directory: normalizedDirectory,
-              limit,
-              includeHidden,
-              respectGitignore,
-              dirs: type !== 'file',
-              type,
-            });
-          }
-
-          const baseUrl = serverBaseUrl || serverRegistry.get(serverId)?.config.baseUrl;
-          if (!baseUrl) throw new Error(`File search server ${serverId} is not connected`);
-          const client = createOpencodeClient({ baseUrl, directory: normalizedDirectory });
-          const response = await client.find.files({
-            query: normalizedQuery,
+          // R2 client unification: one v2 find route for every lane — the
+          // explicit serverId resolves the remote lane's base URL inside the
+          // client; the `{path}` hits are mapped to ProjectFileSearchHit there.
+          return opencodeClient.searchFiles(normalizedQuery, {
+            directory: normalizedDirectory,
             limit,
-            dirs: type === 'directory' ? 'true' : 'false',
+            includeHidden,
+            respectGitignore,
+            dirs: type !== 'file',
             type,
-          });
-          if (response.error) throw new Error('Failed to search remote files');
-          return (response.data ?? []).map<ProjectFileSearchHit>((relativePath) => {
-            const normalizedRelativePath = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
-            const name = normalizedRelativePath.split('/').filter(Boolean).pop() || normalizedRelativePath;
-            return {
-              name,
-              path: `${normalizedDirectory.replace(/\/+$/, '')}/${normalizedRelativePath}`,
-              relativePath: normalizedRelativePath,
-              extension: name.includes('.') ? name.split('.').pop()?.toLowerCase() : undefined,
-            };
+            serverId: serverId !== DEFAULT_SERVER_ID || serverBaseUrl ? serverId : undefined,
           });
         })()
           .then((files) => {

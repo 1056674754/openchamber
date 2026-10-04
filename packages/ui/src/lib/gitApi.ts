@@ -6,7 +6,6 @@ import { opencodeClient } from './opencode/client';
 import { renderMagicPrompt } from './magicPrompts';
 import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
-import { resolveSdkForDirectory } from '@/sync/session-routing';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { serverRegistry } from '@/lib/opencode/server-registry';
@@ -92,22 +91,6 @@ const extractJsonObject = (value: string): Record<string, unknown> | null => {
   return null;
 };
 
-const extractAssistantText = (response: unknown): string => {
-  const data = (response as { data?: { parts?: Array<unknown> } } | null)?.data;
-  const parts = Array.isArray(data?.parts) ? data.parts : [];
-  return parts
-    .map((part) => {
-      const item = part as { type?: unknown; text?: unknown; content?: unknown; value?: unknown };
-      if (item.type !== 'text') return '';
-      if (typeof item.text === 'string') return item.text;
-      if (typeof item.content === 'string') return item.content;
-      if (typeof item.value === 'string') return item.value;
-      return '';
-    })
-    .filter((text) => text.trim().length > 0)
-    .join('\n')
-    .trim();
-};
 
 export async function checkIsGitRepository(directory: string): Promise<boolean> {
   const runtime = getRuntimeGit();
@@ -725,58 +708,31 @@ const runStructuredGenerationInActiveSession = async ({
   const trimmedDirectory = typeof directory === 'string' ? directory.trim() : '';
   const visiblePromptText = typeof visiblePrompt === 'string' ? visiblePrompt.trim() : '';
   const hiddenPromptText = typeof hiddenPrompt === 'string' ? hiddenPrompt.trim() : '';
-  const promptParts: Array<{ type: 'text'; text: string; synthetic?: boolean }> = [];
-  if (visiblePromptText) {
-    promptParts.push({
-      type: 'text',
-      text: hiddenPromptText ? `${visiblePromptText}\n\n` : visiblePromptText,
-      synthetic: false,
-    });
-  }
-  if (hiddenPromptText) {
-    promptParts.push({ type: 'text', text: hiddenPromptText, synthetic: true });
-  }
-  if (promptParts.length === 0) {
+  const prompt = [visiblePromptText, hiddenPromptText].filter(Boolean).join('\n\n');
+  if (!prompt) {
     throw new Error('Generation prompts are empty');
   }
 
   requestChatForceScrollBottom(generationSession.sessionId);
 
-  const sdkClient = resolveSdkForDirectory(
-    directory,
+  // R2 client unification: v2 generation is the structured `session.generate`
+  // route — transient text from the session's context, never entering
+  // history. The model runs on the session's own selection; the resolved
+  // provider/model context is advisory.
+  const assistantText = await opencodeClient.generateSessionText(
     generationSession.sessionId,
-    generationSession.serverId,
-    opencodeClient.getApiClient(),
+    prompt,
+    trimmedDirectory.length > 0 ? trimmedDirectory : undefined,
+    generationSession.serverId ?? undefined,
   );
-  const response = await sdkClient.session.prompt({
-    sessionID: generationSession.sessionId,
-    ...(trimmedDirectory.length > 0 ? { directory: trimmedDirectory } : {}),
-    model: {
-      providerID: generationSession.providerID,
-      modelID: generationSession.modelID,
-    },
-    ...(generationSession.agent ? { agent: generationSession.agent } : {}),
-    ...(generationSession.variant ? { variant: generationSession.variant } : {}),
-    parts: promptParts,
-  });
 
-  const responseError = response?.error as { message?: string } | undefined;
-  if (!response?.data) {
-    throw new Error(responseError?.message || `Failed to generate ${kind} output`);
-  }
-
-  const info = response.data.info as { finish?: string; error?: unknown };
-  const assistantText = extractAssistantText(response);
   const parsedOutput = extractJsonObject(assistantText);
   if (!parsedOutput) {
     console.error('[git-generation][browser] invalid JSON output', {
       kind,
       sessionId: generationSession.sessionId,
       elapsedMs: Date.now() - requestStartedAt,
-      finish: info?.finish,
       assistantText,
-      messageInfo: response.data.info,
-      messageParts: response.data.parts,
     });
     throw new Error('No JSON output returned by session');
   }

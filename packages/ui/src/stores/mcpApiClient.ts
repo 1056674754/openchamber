@@ -10,5 +10,5 @@ export const getMcpApiClient = (directory: string | null | undefined): OpencodeC
   }
 
   const defaultConnection = serverRegistry.get(DEFAULT_SERVER_ID);
-  return defaultConnection?.client ?? opencodeClient.getApiClient();
+  return defaultConnection?.client ?? opencodeClient.getSdkClient();
 };

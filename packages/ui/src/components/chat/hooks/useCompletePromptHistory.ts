@@ -2,7 +2,6 @@ import React from "react"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
 
 import { serverRegistry } from "@/lib/opencode/server-registry"
-import { resolveSdkForDirectory } from "@/sync/session-actions"
 import {
   loadCompleteUserPromptHistory,
   type CompleteUserPromptHistoryResult,
@@ -75,9 +74,8 @@ const loadPromptHistory = (input: {
     for (const listener of listeners) listener(snapshot)
   }
 
-  const client = resolveSdkForDirectory(input.directory, input.sessionID, input.serverID)
   const request = loadCompleteUserPromptHistory({
-    client,
+    serverId: input.serverID,
     sessionID: input.sessionID,
     directory: input.directory,
     limit: PAGE_SIZE,

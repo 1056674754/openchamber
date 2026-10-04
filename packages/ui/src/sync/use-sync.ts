@@ -2,7 +2,6 @@ import { useCallback, useRef, useMemo } from "react"
 import type { Message, OpencodeClient, Part, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { retry } from "./retry"
-import { unwrapSessionStatusMap } from "./bootstrap"
 import { SESSION_CACHE_LIMIT, type State } from "./types"
 import { pickSessionCacheEvictions } from "./session-cache"
 import {
@@ -15,6 +14,7 @@ import { requireExistingSessionDirectory } from "./session-routing"
 import { useSessionUIStore } from "./session-ui-store"
 import { getSyncStoresForServer } from "./multi-server-registry"
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry"
+import { opencodeClient } from "@/lib/opencode/client"
 import { dropSessionCaches, getProtectedSessionCacheIds } from "./session-cache"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import {
@@ -64,9 +64,14 @@ const readStatusesForTarget = async (
   if (serverId !== DEFAULT_SERVER_ID) {
     return readRemoteSessionStatuses(serverId, directory)
   }
-  const result = await client.session.status({ directory })
-  if (result.error) throw new Error(`session.status failed: ${formatSdkError(result.error)}`)
-  return unwrapSessionStatusMap(result.data)
+  // R2 client unification: the host's per-directory status read (the v2
+  // `{data}` envelope is unwrapped inside the client). Null means the fetch
+  // failed — a failure must surface, not read as "everything idle".
+  const statuses = await opencodeClient.getSessionStatusForDirectory(directory)
+  if (!statuses) throw new Error('session.status failed: host status fetch returned no data')
+  // The client's status record is structurally the legacy SessionStatus; the
+  // store type stays legacy until the sync-bridge retype (R2 残留).
+  return statuses as Record<string, SessionStatus>
 }
 
 export function logMessageHistoryLoadFailure(input: {
@@ -350,9 +355,8 @@ export function useSync() {
       readonly targetServerId?: string
     }) => {
       const targetDirectory = input.targetDirectory ?? directory
-      const client = resolveSdkForDirectory(targetDirectory, input.sessionID, input.targetServerId)
       const result = await loadMessageHistoryBatch({
-        client,
+        serverId: input.targetServerId,
         sessionID: input.sessionID,
         directory: targetDirectory,
         limit: input.limit,
@@ -438,7 +442,7 @@ export function useSync() {
           : undefined
         let page = options?.before && options.throughMessageID
           ? (await loadMessageHistoryThroughTarget({
-              client: resolveSdkForDirectory(targetDirectory, sessionID, options.targetServerId),
+              serverId: options.targetServerId,
               sessionID,
               directory: targetDirectory,
               limit,

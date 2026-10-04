@@ -1,4 +1,5 @@
-import type { OpencodeClient, PermissionRequest, Project } from "@opencode-ai/sdk/v2/client"
+import type { OpencodeClient, Path, PermissionRequest, Project } from "@opencode-ai/sdk/v2/client"
+import { opencodeClient } from "@/lib/opencode/client"
 import type { FormRequest } from "@/types/form"
 import type { SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { retry } from "./retry"
@@ -138,25 +139,52 @@ function projectID(directory: string, projects: Project[]) {
 // Bootstrap global state
 // ---------------------------------------------------------------------------
 
+// [OPENCHAMBER-FORK] R2 client unification: the authoritative bootstrap reads
+// ride the v2 client wrapper (location/config/projects/providers-catalog).
+// The legacy `sdk` parameter stays for the blocking-request recovery blocks
+// and the LSP probe, which have no v2 equivalent yet (R2 残留).
+function pathFromLocation(location: { directory?: string | null; project?: { directory?: string | null } }): Path {
+  return {
+    directory: location.directory ?? "",
+    worktree: location.project?.directory ?? "",
+    config: "",
+    state: "",
+    home: "",
+  }
+}
+
 export async function bootstrapGlobal(
   sdk: OpencodeClient,
   set: (patch: Partial<GlobalState>) => void,
 ) {
+  void sdk
   const retryGlobal = <T>(operation: () => Promise<T>) => retry(operation, GLOBAL_BOOTSTRAP_RETRY_OPTIONS)
   const results = await Promise.allSettled([
-    retryGlobal(() => sdk.path.get().then((x) => set({ path: unwrap(x, "path.get") }))),
-    retryGlobal(() => sdk.global.config.get().then((x) => set({ config: unwrap(x, "global.config.get") }))),
+    retryGlobal(() => opencodeClient.getLocation().then((location) => set({ path: pathFromLocation(location) }))),
+    retryGlobal(() => opencodeClient.getConfig().then((config) => set({ config: config as unknown as GlobalState["config"] }))),
     retryGlobal(() =>
-      sdk.project.list().then((x) => {
-        const data = unwrap(x, "project.list")
+      opencodeClient.listProjects().then((data) => {
         const projects = data
           .filter((p): p is Project => !!p?.id)
           .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
           .sort((a, b) => cmp(a.id, b.id))
-        set({ projects })
+        set({ projects: projects as unknown as GlobalState["projects"] })
       }),
     ),
-    retryGlobal(() => sdk.provider.list().then((x) => set({ providers: unwrap(x, "provider.list") }))),
+    retryGlobal(() =>
+      opencodeClient.getProviders().then((catalog) => {
+        const defaults: Record<string, string> = catalog.default
+          ? { [catalog.default.providerID]: catalog.default.id }
+          : {}
+        set({
+          providers: {
+            all: catalog.providers as unknown as GlobalState["providers"]["all"],
+            connected: catalog.providers as unknown as GlobalState["providers"]["connected"],
+            default: defaults,
+          },
+        })
+      }),
+    ),
   ])
 
   const errors = results
@@ -240,16 +268,19 @@ export async function bootstrapDirectory(input: {
   const metadataLoads = shouldLoadMetadata
     ? [
         retry(() =>
-          withTimeout(sdk.path.get({ directory }), "path.get").then((x) => {
-            const data = unwrap(x, "path.get")
+          withTimeout(opencodeClient.getLocation(directory), "path.get").then((location) => {
+            const data = pathFromLocation(location)
             set({ path: data })
             const next = projectID(data?.directory ?? directory, g.projects)
             if (next) set({ project: next })
           }),
         ),
         retry(() =>
-          withTimeout(sdk.session.status({ directory }), "session.status").then((x) => {
-            const sessionStatus = unwrapSessionStatusMap(unwrap(x, "session.status"))
+          withTimeout(opencodeClient.getSessionStatusForDirectory(directory), "session.status").then((statuses) => {
+            // The client unwraps the v2 `{data}` envelope; null is a failed
+            // fetch, not an idle map.
+            if (!statuses) throw new Error("session.status failed: host fetch returned no data")
+            const sessionStatus = statuses as unknown as State["session_status"]
             set({ session_status: sessionStatus })
             reconcileTimingFromSnapshot(serverId, directory, sessionStatus, getState)
           }),
@@ -295,14 +326,26 @@ export async function bootstrapDirectory(input: {
   void Promise.allSettled([
     seededProject
       ? Promise.resolve()
-      : retry(() => sdk.project.current({ directory }).then((x) => set({ project: unwrap(x, "project.current").id }))),
-    retry(() => sdk.provider.list({ directory }).then((x) => set({ provider: unwrap(x, "provider.list") }))),
-    retry(() => sdk.config.get({ directory }).then((x) => {
-      const config = unwrap(x, "config.get")
-      set({ config })
-      emitSyncConfigChanged(directory, config)
+      : retry(() => opencodeClient.getCurrentProject(directory).then((project) => set({ project: project.id }))),
+    retry(() =>
+      opencodeClient.getProvidersForConfig(directory).then((catalog) => {
+        const defaults: Record<string, string> = catalog.default
+          ? { [catalog.default.providerID]: catalog.default.id }
+          : {}
+        set({
+          provider: {
+            all: catalog.providers as unknown as State["provider"]["all"],
+            connected: catalog.providers as unknown as State["provider"]["connected"],
+            default: defaults,
+          } as State["provider"],
+        })
+      }),
+    ),
+    retry(() => opencodeClient.getConfig(directory).then((config) => {
+      set({ config: config as unknown as State["config"] })
+      emitSyncConfigChanged(directory, config as unknown as State["config"])
     })),
-    retry(() => sdk.app.agents({ directory }).then((x) => set({ agent: unwrap(x, "app.agents") }))),
+    retry(() => opencodeClient.listAgents(directory).then((agents) => set({ agent: agents as unknown as State["agent"] }))),
     // MCP status and the command list are deliberately not read here. Reading
     // MCP state initializes the directory's whole stdio server fleet as an
     // OpenCode side effect, and listing commands enumerates MCP prompts,

@@ -1,11 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@opencode-ai/sdk/v2/client"
+import type { MessagePage } from "@/lib/opencode/client"
 
-import type {
-  MessageHistoryClient,
-  MessageHistoryRequest,
-  MessageHistoryResponse,
-} from "../message-history-loader"
+import type { MessageHistoryFetchRequest, MessageHistoryFetch } from "../message-history-loader"
 import {
   loadCompleteUserPromptHistory,
   loadMessageHistoryThroughTarget,
@@ -19,50 +16,49 @@ function textPart(id: string, messageID: string, text = id): Part {
   return { id, messageID, sessionID: "ses_1", type: "text", text } as Part
 }
 
-function createClient(
-  responses: readonly MessageHistoryResponse[],
-  requests: MessageHistoryRequest[],
-): MessageHistoryClient {
-  return {
-    session: {
-      messages: async (request) => {
-        requests.push(request)
-        return responses[requests.length - 1] ?? { data: [] }
-      },
-    },
+function createFetch(
+  pages: ReadonlyArray<{ records: Array<{ info: Message; parts: Part[] }>; next?: string }>,
+  requests: MessageHistoryFetchRequest[],
+): MessageHistoryFetch {
+  return async (request) => {
+    requests.push(request)
+    const page = pages[requests.length - 1] ?? { records: [] }
+    return {
+      items: page.records,
+      cursor: { next: page.next },
+    } as MessagePage
   }
 }
 
 describe("loadCompleteUserPromptHistory", () => {
   test("keeps every real user prompt while scanning every raw cursor page", async () => {
-    const requests: MessageHistoryRequest[] = []
+    const requests: MessageHistoryFetchRequest[] = []
     const progress: Array<{ readonly ids: readonly string[]; readonly complete: boolean }> = []
-    const client = createClient([
+    const fetch = createFetch([
       {
-        data: [
+        records: [
           { info: message("msg_005", "user"), parts: [textPart("prt_005", "msg_005", "latest")] },
           { info: message("msg_006", "assistant"), parts: [textPart("prt_006", "msg_006")] },
         ],
-        response: { headers: new Headers({ "x-next-cursor": "cursor-1" }) },
+        next: "cursor-1",
       },
       {
-        data: [
+        records: [
           { info: message("msg_003", "user"), parts: [textPart("prt_003", "msg_003", "middle")] },
           { info: message("msg_004", "assistant"), parts: [textPart("prt_004", "msg_004")] },
         ],
-        response: { headers: new Headers({ "x-next-cursor": "cursor-2" }) },
+        next: "cursor-2",
       },
       {
-        data: [
+        records: [
           { info: message("msg_001", "user"), parts: [textPart("prt_001", "msg_001", "oldest")] },
           { info: message("msg_002", "assistant"), parts: [textPart("prt_002", "msg_002")] },
         ],
-        response: { headers: new Headers() },
       },
     ], requests)
 
     const result = await loadCompleteUserPromptHistory({
-      client,
+      fetch,
       sessionID: "ses_1",
       directory: "/repo/authoritative",
       limit: 100,
@@ -87,26 +83,26 @@ describe("loadCompleteUserPromptHistory", () => {
 
 describe("loadMessageHistoryThroughTarget", () => {
   test("batches older raw pages until the requested user turn is included", async () => {
-    const requests: MessageHistoryRequest[] = []
-    const client = createClient([
+    const requests: MessageHistoryFetchRequest[] = []
+    const fetch = createFetch([
       {
-        data: [
+        records: [
           { info: message("msg_005", "user"), parts: [textPart("prt_005", "msg_005")] },
           { info: message("msg_006", "assistant"), parts: [textPart("prt_006", "msg_006")] },
         ],
-        response: { headers: new Headers({ "x-next-cursor": "cursor-2" }) },
+        next: "cursor-2",
       },
       {
-        data: [
+        records: [
           { info: message("msg_003", "user"), parts: [textPart("prt_003", "msg_003")] },
           { info: message("msg_004", "assistant"), parts: [textPart("prt_004", "msg_004")] },
         ],
-        response: { headers: new Headers({ "x-next-cursor": "cursor-3" }) },
+        next: "cursor-3",
       },
     ], requests)
 
     const result = await loadMessageHistoryThroughTarget({
-      client,
+      fetch,
       sessionID: "ses_1",
       directory: "/repo/authoritative",
       limit: 100,

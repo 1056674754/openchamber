@@ -27,6 +27,13 @@ const mockStorage = {
 mock.module('@/stores/utils/safeStorage', () => ({
   getSafeStorage: () => mockStorage,
   getSafeSessionStorage: () => mockStorage,
+  getDeferredSafeStorage: () => mockStorage,
+  registerSafeStorageRehydrate: () => () => undefined,
+  // Pass-through stubs so modules imported by other test files in the same
+  // process keep finding these named exports on the mocked module.
+  hydrateLocalStore: () => undefined,
+  flushSafeStorage: async () => undefined,
+  createDeferredSafeJSONStorage: () => undefined,
 }));
 
 const updateDesktopSettingsCalls: Array<Record<string, unknown>> = [];
@@ -222,6 +229,116 @@ describe('useSessionPinnedStore', () => {
       );
       expect(haveHostSessionPinsApplied()).toBe(true);
       expect(useSessionPinnedStore.getState().ids).toEqual(new Set());
+    });
+  });
+
+  describe('metadata cache persistence', () => {
+    const META_KEY = 'oc.sessions.pinned.meta';
+
+    test('replaceFromRemote with an empty in-memory cache does not clobber persisted meta', () => {
+      memoryStore.set(STORAGE_KEY, JSON.stringify(['sess-1']));
+      memoryStore.set(META_KEY, JSON.stringify([
+        { id: 'sess-1', title: 'Cached title', updatedAt: 1, cachedAt: 1 },
+      ]));
+      // Fresh client boot: store cache still empty when host pins arrive.
+      useSessionPinnedStore.setState({ ids: new Set(), metadataCache: new Map() });
+
+      useSessionPinnedStore.getState().replaceFromRemote(['sess-1']);
+
+      expect(useSessionPinnedStore.getState().ids).toEqual(new Set(['sess-1']));
+      expect(memoryStore.get(META_KEY)).toBe(JSON.stringify([
+        { id: 'sess-1', title: 'Cached title', updatedAt: 1, cachedAt: 1 },
+      ]));
+    });
+
+    test('rehydrate merges host-file meta under in-memory entries', () => {
+      memoryStore.set(STORAGE_KEY, JSON.stringify(['a', 'b']));
+      memoryStore.set(META_KEY, JSON.stringify([
+        { id: 'b', title: 'Host B', updatedAt: 2, cachedAt: 1 },
+      ]));
+      useSessionPinnedStore.setState({
+        ids: new Set(['a']),
+        metadataCache: new Map([
+          ['a', { id: 'a', title: 'Memory A', updatedAt: 9, cachedAt: 9 }],
+        ]),
+      });
+
+      useSessionPinnedStore.getState().rehydrate();
+
+      const meta = useSessionPinnedStore.getState().metadataCache;
+      expect(meta.get('a')?.title).toBe('Memory A');
+      expect(meta.get('b')?.title).toBe('Host B');
+      expect(useSessionPinnedStore.getState().ids).toEqual(new Set(['a', 'b']));
+    });
+  });
+
+  describe('backfillMissingMetadata', () => {
+    const META_KEY = 'oc.sessions.pinned.meta';
+    const fetchedSessions: Array<Record<string, unknown>> = [];
+    let getSessionCalls: string[] = [];
+
+    mock.module('@/lib/opencode/client', () => ({
+      opencodeClient: {
+        getSdkClient: () => ({
+          session: {
+            get: async ({ sessionID }: { sessionID: string }) => {
+              getSessionCalls.push(sessionID);
+              const match = fetchedSessions.find((s) => s.id === sessionID);
+              return match ? { data: match } : { data: undefined };
+            },
+          },
+        }),
+      },
+    }));
+
+    beforeEach(() => {
+      getSessionCalls = [];
+      fetchedSessions.length = 0;
+    });
+
+    test('fetches uncovered pinned sessions and persists their titles', async () => {
+      memoryStore.set(STORAGE_KEY, JSON.stringify(['pin-1', 'pin-2']));
+      useSessionPinnedStore.setState({
+        ids: new Set(['pin-1', 'pin-2']),
+        metadataCache: new Map(),
+      });
+      fetchedSessions.push(
+        { id: 'pin-1', title: 'Fetched One', location: { directory: '/x' }, time: { created: 1, updated: 2 } },
+      );
+
+      await useSessionPinnedStore.getState().backfillMissingMetadata([
+        { id: 'pin-2', title: 'From Catalog' } as never,
+      ]);
+
+      expect(getSessionCalls).toEqual(['pin-1']);
+      const meta = useSessionPinnedStore.getState().metadataCache;
+      expect(meta.get('pin-1')?.title).toBe('Fetched One');
+      expect(meta.get('pin-1')?.directory).toBe('/x');
+      // pin-2 was covered by the catalog and therefore not fetched
+      expect(meta.has('pin-2')).toBe(false);
+      const persisted = JSON.parse(mockStorage.getItem(META_KEY) ?? '[]');
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].title).toBe('Fetched One');
+    });
+
+    test('skips ids whose cached title is already present', async () => {
+      memoryStore.set(STORAGE_KEY, JSON.stringify(['pin-1']));
+      useSessionPinnedStore.setState({
+        ids: new Set(['pin-1']),
+        metadataCache: new Map([
+          ['pin-1', { id: 'pin-1', title: 'Known', updatedAt: 1, cachedAt: 1 }],
+        ]),
+      });
+
+      await useSessionPinnedStore.getState().backfillMissingMetadata([]);
+
+      expect(getSessionCalls).toEqual([]);
+    });
+
+    test('no-op when there are no pinned ids', async () => {
+      useSessionPinnedStore.setState({ ids: new Set(), metadataCache: new Map() });
+      await useSessionPinnedStore.getState().backfillMissingMetadata([]);
+      expect(getSessionCalls).toEqual([]);
     });
   });
 });

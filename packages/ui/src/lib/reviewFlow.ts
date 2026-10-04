@@ -1,4 +1,7 @@
-import type { Message, Session } from '@opencode-ai/sdk/v2/client';
+import type { Message } from '@opencode-ai/sdk/v2/client';
+import type { Session as LegacySession } from '@opencode-ai/sdk/v2/client';
+import type { Metadata, Session } from '@/lib/opencode/model';
+import type { ReviewMetadataSession } from '@/lib/sessionReviewMetadata';
 import { opencodeClient } from '@/lib/opencode/client';
 import { renderMagicPrompt } from '@/lib/magicPrompts';
 import { flattenAssistantTextParts } from '@/lib/messages/messageText';
@@ -492,7 +495,9 @@ const createOrReuseReviewSession = async (
   const review = await opencodeClient.withDirectory(directory, () =>
     opencodeClient.createSession({
       title: getReviewSessionTitle(original),
-      metadata: withReviewSessionMarker({}, originalSessionID),
+      // The v2 metadata wire is JSON; the marker helper's record shape is the
+      // same JSON the server stores.
+      metadata: withReviewSessionMarker({}, originalSessionID) as unknown as Metadata,
     }),
   );
   registerSessionDirectory(review.id, directory);
@@ -507,7 +512,9 @@ const createOrReuseReviewSession = async (
     });
     throw error;
   }
-  useGlobalSessionsStore.getState().upsertSession(review);
+  // The global store still types records with the legacy wire Session (R2
+  // 残留: sync-bridge batch retypes them); the review flow reads only shared fields.
+  useGlobalSessionsStore.getState().upsertSession(review as unknown as LegacySession);
   return review;
 };
 
@@ -655,10 +662,11 @@ export const sendImplementationResponseToReviewer = async (
 
 export type ReviewTransferDirection = 'review-to-original' | 'original-to-review';
 
-export const getReviewTransferDirection = (session: Session | null | undefined): ReviewTransferDirection | null => {
+// Structural: callers pass either the projected or the legacy wire session.
+export const getReviewTransferDirection = (session: ReviewMetadataSession): ReviewTransferDirection | null => {
   if (isReviewSession(session)) return 'review-to-original';
   if (getReviewSessionID(session)) return 'original-to-review';
   return null;
 };
 
-export const readSessionReviewMetadata = (session: Session | null | undefined) => getSessionMetadata(session);
+export const readSessionReviewMetadata = (session: ReviewMetadataSession) => getSessionMetadata(session);

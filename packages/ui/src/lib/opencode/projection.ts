@@ -494,6 +494,12 @@ export function mergeConfigDocuments(entries: readonly ConfigEntry[]): Config {
   return merged as Config
 }
 
+/** Whether OpenCode's config restricts providers with a `provider.use` deny policy. */
+export function deniesAnyProvider(entries: readonly ConfigEntry[]): boolean {
+  return entries.some((entry) => isDocument(entry)
+    && (entry.info.experimental?.policies ?? []).some((policy) => policy.action === "provider.use" && policy.effect === "deny"))
+}
+
 function isPlainRecord(value: Config[keyof Config]): value is Record<string, JsonValue> {
   return Object.prototype.toString.call(value) === "[object Object]"
 }

@@ -1,4 +1,9 @@
-import type { Session } from '@opencode-ai/sdk/v2';
+/**
+ * Structural session view: only the metadata envelope the review markers read.
+ * Accepts both the legacy wire Session and the projected `@/lib/opencode/model`
+ * Session, so the helpers are shape-agnostic across the R2 client migration.
+ */
+export type ReviewMetadataSession = { metadata?: unknown } | null | undefined;
 
 export type SessionMetadataRecord = Record<string, unknown>;
 
@@ -11,8 +16,8 @@ type OpenChamberMetadata = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
-export const getSessionMetadata = (session: Session | null | undefined): SessionMetadataRecord => {
-  const metadata = (session as (Session & { metadata?: unknown }) | null | undefined)?.metadata;
+export const getSessionMetadata = (session: ReviewMetadataSession): SessionMetadataRecord => {
+  const metadata = session?.metadata;
   return isRecord(metadata) ? metadata : {};
 };
 
@@ -21,17 +26,17 @@ const getOpenChamberMetadata = (metadata: SessionMetadataRecord): OpenChamberMet
   return isRecord(value) ? value as OpenChamberMetadata : {};
 };
 
-export const getReviewSessionID = (session: Session | null | undefined): string | null => {
+export const getReviewSessionID = (session: ReviewMetadataSession): string | null => {
   const value = getOpenChamberMetadata(getSessionMetadata(session)).reviewSessionID;
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 };
 
-export const getOriginalSessionID = (session: Session | null | undefined): string | null => {
+export const getOriginalSessionID = (session: ReviewMetadataSession): string | null => {
   const value = getOpenChamberMetadata(getSessionMetadata(session)).originalSessionID;
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 };
 
-export const isReviewSession = (session: Session | null | undefined): boolean =>
+export const isReviewSession = (session: ReviewMetadataSession): boolean =>
   getOpenChamberMetadata(getSessionMetadata(session)).kind === 'review' && Boolean(getOriginalSessionID(session));
 
 export const withReviewSessionLink = (

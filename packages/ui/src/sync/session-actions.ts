@@ -18,6 +18,7 @@ import { registerSessionDirectory } from "./sync-refs"
 import { recordSendFailure } from "./send-failure-log"
 import { isSyntheticPart } from "@/lib/messages/synthetic"
 import { serverRegistry, DEFAULT_SERVER_ID } from "@/lib/opencode/server-registry"
+import { opencodeClient } from "@/lib/opencode/client"
 import { getSyncStoresForServer, getAllSyncStores } from "./multi-server-registry"
 import { materializeSessionSnapshots } from "./materialization"
 import { persistSteerSideChannelMessage } from "./steer-side-channel"
@@ -704,12 +705,6 @@ function resolveBlockingRequestServerId(sessionId: string, directoryHint?: strin
   return undefined
 }
 
-function hasSuccessfulSdkResult(result: unknown): boolean {
-  if (!result || typeof result !== "object") {
-    return false
-  }
-  return Boolean((result as { data?: unknown }).data)
-}
 
 function getSdkResultStatus(result: unknown): number | undefined {
   if (!result || typeof result !== "object") {
@@ -2101,10 +2096,7 @@ export async function respondToPermission(
   await waitForConnectionOrThrow(serverId)
   const directory = target?.directory?.trim()
     || requireBlockingRequestDirectory("permission", sessionId, requestId)
-  const client = target?.directory
-    ? resolveSdkForDirectory(directory, sessionId, serverId)
-    : undefined
-  await sendPermissionResponse(sessionId, requestId, response, directory, "Permission reply failed", client)
+  await sendPermissionResponse(sessionId, requestId, response, directory, serverId)
 }
 
 export async function dismissPermission(
@@ -2113,7 +2105,7 @@ export async function dismissPermission(
 ): Promise<void> {
   await waitForConnectionOrThrow(serverRegistry.getServerForSession(sessionId))
   const directory = requireBlockingRequestDirectory("permission", sessionId, requestId)
-  await sendPermissionResponse(sessionId, requestId, "reject", directory, "Permission dismissal failed")
+  await sendPermissionResponse(sessionId, requestId, "reject", directory, serverRegistry.getServerForSession(sessionId))
 }
 
 type PermissionDismissalTarget = {
@@ -2218,36 +2210,16 @@ async function sendPermissionResponse(
   requestId: string,
   response: "once" | "always" | "reject",
   directory: string,
-  failureMessage: string,
-  clientOverride?: OpencodeClient,
+  serverId?: string | null,
 ): Promise<void> {
-  const client = clientOverride ?? getRequestReplyClient("permission", sessionId, requestId)
-  const directoryParam = directory ? { directory } : {}
-
-  // Some OpenCode servers still expose only the session-scoped permission
-  // response route. Prefer it when we have the authoritative session ID.
-  const sessionScopedResult = await client.permission.respond({
-    sessionID: sessionId,
-    permissionID: requestId,
-    response,
-    ...directoryParam,
+  // R2 client unification: the v2 permission reply is session-scoped
+  // (`permission.reply` with the session + request ids); the directory (and
+  // lane) resolve through the client wrapper. Errors propagate with their
+  // tagged status so callers surface the raw failure.
+  await opencodeClient.replyToPermission(sessionId, requestId, response, {
+    ...(directory ? { directory } : {}),
+    ...(serverId ? { serverId } : {}),
   })
-  if (hasSuccessfulSdkResult(sessionScopedResult)) {
-    return
-  }
-
-  if (getSdkResultStatus(sessionScopedResult) === 404) {
-    const requestScopedResult = await client.permission.reply({
-      requestID: requestId,
-      reply: response,
-      ...directoryParam,
-    })
-    if (hasSuccessfulSdkResult(requestScopedResult)) {
-      return
-    }
-  }
-
-  throw new Error(failureMessage)
 }
 
 // ---------------------------------------------------------------------------
@@ -2257,10 +2229,10 @@ async function sendPermissionResponse(
 /**
  * Replies to a pending blocking form.
  *
- * The v1 track passes the string-array answers the `question.reply` endpoint
- * takes. The v2 dock components pass the typed-form answer record; that arm
- * is an explicit throw until S6 wires the v2 send path — the components
- * passing it are unmounted on the v1 track, so nothing reachable can hit it.
+ * Typed-form answers (`Record<string, FormValue>`, the v2 dock components'
+ * shape) ride the v2 session-scoped `session.form.reply` through the unified
+ * client. The v1 string-array answers keep the legacy `question.reply` path
+ * for v1-track consumers (LegacyFormCard).
  */
 export async function replyToForm(
   sessionId: string,
@@ -2268,12 +2240,18 @@ export async function replyToForm(
   answers: string[] | string[][] | Record<string, FormValue>,
   directoryHint?: string,
 ): Promise<void> {
-  if (!Array.isArray(answers)) {
-    throw new Error("Typed-form replies require an OpenCode 2.x connection (spine S6 send path)")
-  }
   const serverId = resolveBlockingRequestServerId(sessionId, directoryHint)
   await waitForConnectionOrThrow(serverId)
   const directory = directoryHint ?? requireBlockingRequestDirectory("form", sessionId, requestId)
+
+  if (!Array.isArray(answers)) {
+    // Typed-form answers must carry at least the answered keys; an empty
+    // record would silently settle nothing on the server.
+    await opencodeClient.replyToForm(sessionId, requestId, answers, directory, serverId)
+    optimisticRemoveForm(sessionId, requestId)
+    return
+  }
+
   const client = directoryHint
     ? resolveSdkForDirectory(directoryHint, sessionId, serverId)
     : getRequestReplyClient("form", sessionId, requestId)
@@ -2289,10 +2267,9 @@ export async function replyToForm(
 }
 
 /**
- * Dismisses a pending blocking form. Shapes are identical across protocol
- * tracks (both are ids), so the v2 dock can call this unchanged; the request
- * currently goes to the v1 `question.reject` endpoint, and the v2 arm
- * (`client.form.*`) lands with the S6 send path before any v2 dock mounts.
+ * Dismisses a pending blocking form. R2 client unification: the request goes
+ * to the v2 session-scoped `session.form.cancel` through the unified client;
+ * ids are the only payload on both tracks.
  */
 export async function cancelForm(
   sessionId: string,
@@ -2303,16 +2280,7 @@ export async function cancelForm(
   const serverId = target?.serverId ?? resolveBlockingRequestServerId(sessionId, target?.directory)
   await waitForConnectionOrThrow(serverId)
   const directory = target?.directory?.trim() || requireBlockingRequestDirectory("form", sessionId, requestId)
-  const client = target?.directory || target?.serverId
-    ? resolveSdkForDirectory(directory, sessionId, serverId)
-    : getRequestReplyClient("form", sessionId, requestId)
-  const result = await client.question.reject({
-    requestID: requestId,
-    ...(directory ? { directory } : {}),
-  })
-  if (!result.data) {
-    throw new Error("Form cancellation failed")
-  }
+  await opencodeClient.cancelForm(sessionId, requestId, directory, serverId)
   optimisticRemoveForm(sessionId, requestId)
 }
 
@@ -2536,15 +2504,18 @@ export async function revertToMessage(sessionId: string, messageId: string): Pro
 
   restoreFilePartsToInput(sessionId, submittedFileParts)
 
-  // Call SDK and merge authoritative result into store
+  // Call SDK and merge authoritative result into store. R2 client
+  // unification: v2 splits the revert into stage + commit; staging alone
+  // changes nothing, so both run before the store merges.
   try {
-    const result = await sdkForSession(sessionId, sessionDirectory).session.revert({ sessionID: sessionId, directory: sessionDirectory, messageID: messageId })
-    const revertedSession = unwrapSdkData(result, "session.revert")
+    await opencodeClient.stageRevert(sessionId, messageId, { directory: sessionDirectory })
+    await opencodeClient.commitRevert(sessionId, sessionDirectory)
+    const revertedSession = await opencodeClient.getSession(sessionId, sessionDirectory) as unknown as Session & { revert?: Record<string, unknown> }
     const current = store.getState()
     const updated = [...current.session]
     const idx = updated.findIndex((s) => s.id === sessionId)
     if (idx >= 0) {
-      const returnedRevert = (revertedSession as Session & { revert?: Record<string, unknown> }).revert ?? {}
+      const returnedRevert = revertedSession.revert ?? {}
       updated[idx] = { ...revertedSession, revert: { ...returnedRevert, messageID: messageId } } as Session
       store.setState({ session: updated })
     }
@@ -2613,8 +2584,11 @@ export async function unrevertSession(sessionId: string): Promise<void> {
     }
   }
 
-  const result = await sdkForSession(sessionId, sessionDirectory).session.unrevert({ sessionID: sessionId, directory: sessionDirectory })
-  const restoredSession = unwrapSdkData(result, "session.unrevert")
+  // R2 client unification: v2 has no `unrevert` — `session.revert.clear`
+  // drops the staged revert, which is what unrevert means now; the cleared
+  // session is read back for the store merge.
+  await opencodeClient.clearRevert(sessionId, sessionDirectory)
+  const restoredSession = await opencodeClient.getSession(sessionId, sessionDirectory) as unknown as Session
   const current = store.getState()
   const sessions = [...current.session]
   const idx = sessions.findIndex((s) => s.id === sessionId)

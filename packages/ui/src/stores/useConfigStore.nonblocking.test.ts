@@ -121,6 +121,21 @@ mock.module('@/stores/utils/safeStorage', () => ({
     key: () => null,
     length: 0,
   }),
+  // The R2 client's import graph (session-routing / multi-server-registry)
+  // reaches last-session-cache, which needs this export when tests share a
+  // bun process with this module mock. Backed by a real map so a bleed into
+  // another storage consumer behaves like working storage, not a black hole.
+  getDeferredSafeStorage: () => {
+    const store = new Map<string, string>();
+    return {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+      clear: () => store.clear(),
+      key: (index: number) => Array.from(store.keys())[index] ?? null,
+      length: store.size,
+    };
+  },
 }));
 
 mock.module('@/lib/opencode/client', () => ({
@@ -137,6 +152,19 @@ mock.module('@/lib/opencode/client', () => ({
     }),
     clearConfigCache: mock(() => undefined),
     getSdkClient: mock(() => fakeSdk),
+    // R2 client unification: loadProviders/loadAgents read the v2 catalog
+    // through the client; the fixtures and call counters stay shared.
+    getProvidersForConfig: mock(async () => ({
+      providers: liveProviders,
+      models: liveProviders.flatMap((providerEntry) => (providerEntry as { models?: unknown[] }).models ?? []),
+      default: undefined,
+    })),
+    listAgents: mock(async (directory?: string | null) => {
+      listAgentsCalls += 1;
+      lastAgentsDirectory = directory ?? null;
+      const impl = listAgentsImpl;
+      return impl ? await impl(directory) : liveAgents;
+    }),
   },
 }));
 
@@ -199,12 +227,17 @@ mock.module('@/stores/useDirectoryStore', () => ({
   },
 }));
 
+// A permissive registry stub: the R2 client import graph shares this bun
+// process with protocol-handle.test, whose beforeEach touches registry
+// methods this test never calls.
 mock.module('@/lib/opencode/server-registry', () => ({
   DEFAULT_SERVER_ID: 'default',
-  serverRegistry: {
-    get: () => undefined,
-    getServerForSession: () => undefined,
-  },
+  serverRegistry: new Proxy({}, {
+    get: (_target, prop) => {
+      if (prop === 'get' || prop === 'getDefault' || prop === 'getServerForSession') return () => undefined
+      return () => undefined
+    },
+  }),
 }));
 
 const { useConfigStore } = await import('./useConfigStore');

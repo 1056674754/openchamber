@@ -18,11 +18,11 @@ import { streamDebugEnabled } from "@/stores/utils/streamDebug";
 import { parseModelIdentifier } from "@/lib/modelIdentifier";
 import { resolveApiUrl } from "@/lib/api/serverUrl";
 import { normalizeConfigString, persistOpenChamberSettingsPatch, resolveConfiguredAgentName, type OpenChamberSettingsPatch } from "@/lib/configDefaults";
-import { resolveSdkForDirectory, resolveProjectServerIdForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
+import { resolveProjectServerIdForDirectory, resolveApiUrl as resolveRemoteApiOrigin } from "@/sync/session-actions";
+import { opencodeClient } from "@/lib/opencode/client";
 import { DEFAULT_SERVER_ID, serverRegistry } from "@/lib/opencode/server-registry";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
-import { SdkRequestError } from "@/sync/sdk-error";
 import { resolveModelVariant } from "@/lib/modelVariantResolution";
 import { resolveSettingsProviderSelection, sanitizePersistedProviderSelection } from "./configProviderSelection";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
@@ -1342,38 +1342,35 @@ export const useConfigStore = create<ConfigStore>()(
                                 (metadata) => set({ modelsMetadata: metadata }),
                             );
                             const targetDir = fromDirectoryKey(directoryKey)
-                            const targetSdk = resolveSdkForDirectory(targetDir ?? "", undefined, serverId)
-                            const rawResult = await measureStartupTrace(
+                            // R2 client unification: provider catalog from the
+                            // v2 provider/model/default trio; failures throw
+                            // (retry loop below observes them).
+                            const catalog = await measureStartupTrace(
                                 'loadProviders:api',
-                                () => targetSdk.config.providers(
-                                    targetDir ? { directory: targetDir } : undefined,
-                                ),
+                                () => opencodeClient.getProvidersForConfig(targetDir ?? undefined, { serverId, fresh: attempt > 0 }),
                                 { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory, attempt: attempt + 1 },
                             )
-                            if (rawResult.error || !rawResult.data) {
-                                throw new SdkRequestError({
-                                    operation: 'config.providers',
-                                    endpoint: '/config/providers',
-                                    error: rawResult.error ?? new Error('Response did not include provider data'),
-                                    response: rawResult.response,
-                                    directory: targetDir,
-                                    serverId,
-                                    source,
-                                    attempt: attempt + 1,
-                                });
-                            }
-                            const apiResult = rawResult.data;
-                            const providers = Array.isArray(apiResult?.providers) ? apiResult.providers : [];
-                            const defaults = apiResult?.default || {};
+                            const providers = Array.isArray(catalog.providers) ? catalog.providers as unknown as Provider[] : [];
+                            // v1's per-directory default map collapses to the
+                            // single v2 default model ref.
+                            const defaults: { [key: string]: string } = catalog.default
+                                ? { [catalog.default.providerID]: catalog.default.id }
+                                : {};
 
-                            const processedProviders: ProviderWithModelList[] = providers.map((provider) => {
-                                const modelRecord = provider.models ?? {};
-                                const models: ProviderModel[] = Object.keys(modelRecord).map((modelId) => modelRecord[modelId]);
-                                return {
-                                    ...provider,
-                                    models,
-                                };
-                            });
+                            // v2 lists models on their own route, keyed by
+                            // providerID — regroup them onto the provider
+                            // records the store shape expects (R2 残留:
+                            // sync-bridge batch retypes the store).
+                            const modelsByProvider = new Map<string, ProviderModel[]>();
+                            for (const model of catalog.models) {
+                                const list = modelsByProvider.get(model.providerID) ?? [];
+                                list.push(model as unknown as ProviderModel);
+                                modelsByProvider.set(model.providerID, list);
+                            }
+                            const processedProviders: ProviderWithModelList[] = providers.map((provider) => ({
+                                ...provider,
+                                models: modelsByProvider.get(provider.id) ?? [],
+                            }));
 
                             set((state) => {
                                 const baseSnapshot: DirectoryScopedConfig = state.directoryScoped[directoryKey] ?? {
@@ -1807,7 +1804,6 @@ export const useConfigStore = create<ConfigStore>()(
                         try {
                             // Fetch agents and OpenChamber settings in parallel
                             const targetDir = fromDirectoryKey(directoryKey)
-                            const targetSdk = resolveSdkForDirectory(targetDir ?? "", undefined, serverId)
                             const serverBaseUrl = options?.serverBaseUrl ?? resolveConfigServerBaseUrl(targetDir, serverId)
                             const initialSyncedOpencodeConfig = getSyncConfig(targetDirectory ?? undefined, serverId)
                                 ?? getSyncConfig(targetDir ?? undefined, serverId);
@@ -1818,9 +1814,10 @@ export const useConfigStore = create<ConfigStore>()(
                             const [rawAgents, openChamberDefaults] = await Promise.all([
                                 measureStartupTrace(
                                     'loadAgents:api',
-                                    () => targetSdk.app.agents(
-                                        targetDir ? { directory: targetDir } : undefined,
-                                    ).then(r => r.data ?? []),
+                                    // R2 client unification: agent list from the
+                                    // v2 agent.list route (throws on failure so
+                                    // the retry loop below observes it).
+                                    () => opencodeClient.listAgents(targetDir ?? undefined, serverId ?? undefined),
                                     { directoryKey, serverId, source, requestedDirectory: targetDirectory, effectiveDirectory, attempt: attempt + 1 },
                                 ),
                                 fetchOpenChamberDefaults(serverBaseUrl),
@@ -1834,7 +1831,9 @@ export const useConfigStore = create<ConfigStore>()(
                             const syncedOpencodeDefaultAgent = normalizeOptionalString(latestSyncedOpencodeConfig?.default_agent);
                             const syncedOpencodeDefaultModel = normalizeOptionalString(latestSyncedOpencodeConfig?.model);
 
-                            const safeAgents = Array.isArray(rawAgents) ? rawAgents as Agent[] : [];
+                            // Projected v2 agents; the store still types the
+                            // legacy wire Agent (R2 残留: sync-bridge retype).
+                            const safeAgents = Array.isArray(rawAgents) ? rawAgents as unknown as Agent[] : [];
 
                             const providerLoad = _inFlightProviders.get(directoryKey);
                             if (providerLoad) {

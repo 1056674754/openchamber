@@ -369,8 +369,16 @@ const loadStatusForDirectory = (serverId: string, directory: string): Promise<un
     if (serverId !== DEFAULT_SERVER_ID) {
       return { data: await readRemoteSessionStatuses(serverId, directory) };
     }
-    const client = serverRegistry.getDefault()?.client ?? opencodeClient.getSdkClient();
-    return retry(() => client.session.status({ directory }), { attempts: 2, delay: 300 });
+    // R2 client unification: the host status read rides the client (v2
+    // `{data}` envelope already unwrapped there). Null means the fetch
+    // failed, so retry sees a real failure instead of an empty payload.
+    return {
+      data: await retry(async () => {
+        const statuses = await opencodeClient.getSessionStatusForDirectory(directory);
+        if (!statuses) throw new Error('session.status failed: host fetch returned no data');
+        return statuses;
+      }, { attempts: 2, delay: 300 }),
+    };
   })().finally(() => {
     inflightStatusLoadsByDirectory.delete(key);
   });

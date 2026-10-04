@@ -8,7 +8,7 @@ import {
   markHostSessionPinsApplied,
 } from '@/lib/sessionPinSettings';
 import { serverRegistry } from '@/lib/opencode/server-registry';
-import { getSafeStorage } from './utils/safeStorage';
+import { getSafeStorage, registerSafeStorageRehydrate } from './utils/safeStorage';
 
 export type PinnedSessionMeta = {
   id: string;
@@ -94,12 +94,23 @@ type SessionPinnedStore = {
   replaceFromRemote: (ids: string[]) => void;
   rehydrate: () => void;
   upsertMetadata: (sessions: Session[]) => void;
+  /**
+   * Fetch metadata for pinned IDs the catalogs did not cover (cross-directory
+   * pins on servers without a global session-list endpoint) via per-session
+   * GETs, then feed them through upsertMetadata. No-op while another backfill
+   * is in flight; failures are logged, not thrown — the catalog path remains
+   * the primary source.
+   */
+  backfillMissingMetadata: (coveredSessions: readonly Session[]) => Promise<void>;
 };
 
 const safeStorage = getSafeStorage();
 
 /** When true, local mutations must not PUT back to host settings. */
 let suppressHostSync = false;
+
+let backfillInFlight = false;
+const BACKFILL_MAX_SESSIONS = 50;
 
 const syncPinnedSessionsToHost = (ids: Set<string>): void => {
   if (suppressHostSync) return;
@@ -145,7 +156,11 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
       const meta = pruneStaleMeta(get().metadataCache, next);
       set({ ids: next, metadataCache: meta });
       persistPinned(safeStorage, next);
-      persistMeta(safeStorage, meta);
+      // A fresh client's in-memory cache is empty; writing it back would clobber
+      // titles another client already persisted. Only persist non-empty meta here.
+      if (meta.size > 0) {
+        persistMeta(safeStorage, meta);
+      }
     } finally {
       suppressHostSync = false;
     }
@@ -153,10 +168,20 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
   rehydrate: () => {
     const next = readPinned(safeStorage);
     const current = get().ids;
-    if (areStringSetsEqual(next, current)) return;
+    // Merge host-file meta under anything this client already upserted — the
+    // host snapshot can arrive after catalogs started filling the cache.
+    const currentMeta = get().metadataCache;
+    const storedMeta = readMeta(safeStorage);
+    const storedContributes = [...storedMeta.keys()].some((id) => !currentMeta.has(id));
+    if (areStringSetsEqual(next, current) && !storedContributes) return;
     suppressHostSync = true;
     try {
-      set({ ids: next });
+      if (storedContributes) {
+        const merged = pruneStaleMeta(new Map([...storedMeta, ...currentMeta]), next);
+        set({ ids: next, metadataCache: merged });
+      } else {
+        set({ ids: next });
+      }
     } finally {
       suppressHostSync = false;
     }
@@ -188,12 +213,73 @@ export const useSessionPinnedStore = create<SessionPinnedStore>((set, get) => ({
       persistMeta(safeStorage, next);
     }
   },
+  backfillMissingMetadata: async (coveredSessions) => {
+    const pinnedIds = get().ids;
+    if (pinnedIds.size === 0 || backfillInFlight) return;
+    const covered = new Set(coveredSessions.map((session) => session?.id).filter((id): id is string => Boolean(id)));
+    const missing = [...pinnedIds].filter(
+      (id) => !covered.has(id) && !get().metadataCache.get(id)?.title,
+    );
+    if (missing.length === 0) return;
+
+    backfillInFlight = true;
+    try {
+      // Lazy import keeps the heavyweight opencode client module off this
+      // store's import graph (and off every test that mocks safeStorage).
+      const { opencodeClient } = await import('@/lib/opencode/client');
+      const sdk = opencodeClient.getSdkClient();
+      const results = await Promise.allSettled(
+        missing.slice(0, BACKFILL_MAX_SESSIONS).map(async (id) => {
+          const result = await sdk.session.get({ sessionID: id });
+          return result.data ?? null;
+        }),
+      );
+      const fetched: Session[] = [];
+      let failed = 0;
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value?.id) {
+          const session = result.value;
+          // v2 wire keeps the directory at `location.directory`; upsertMetadata
+          // reads the projected top-level `directory` field.
+          const record = session as Session & {
+            directory?: string | null;
+            location?: { directory?: string | null } | null;
+            project?: { worktree?: string | null } | null;
+          };
+          if (!record.directory && (record.location?.directory ?? record.project?.worktree)) {
+            fetched.push({
+              ...session,
+              directory: record.location?.directory ?? record.project?.worktree ?? undefined,
+            } as Session);
+          } else {
+            fetched.push(session);
+          }
+        } else if (result.status === 'rejected') {
+          failed += 1;
+        }
+      }
+      if (fetched.length > 0) {
+        get().upsertMetadata(fetched);
+      }
+      if (failed > 0) {
+        console.warn(`[SessionPinned] Metadata backfill failed for ${failed}/${missing.length} pinned session(s)`);
+      }
+    } finally {
+      backfillInFlight = false;
+    }
+  },
 }));
 
 // `storage` event fires only in OTHER tabs, so same-tab toggle() stays authoritative.
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {
     if (event.key !== SESSION_PINNED_STORAGE_KEY) return;
+    useSessionPinnedStore.getState().rehydrate();
+  });
+
+  // Host settings can arrive after this store was created from an empty
+  // in-memory map; re-read ids + meta once the host snapshot lands.
+  registerSafeStorageRehydrate(() => {
     useSessionPinnedStore.getState().rehydrate();
   });
 

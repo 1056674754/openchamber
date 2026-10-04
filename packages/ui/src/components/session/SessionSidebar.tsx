@@ -355,6 +355,7 @@ export const SessionSidebar: React.FC<SessionSidebarProps> = ({
   const pinnedSessionIds = useSessionPinnedStore((state) => state.ids);
   const pinnedMetadataCache = useSessionPinnedStore((state) => state.metadataCache);
   const upsertPinnedMetadata = useSessionPinnedStore((state) => state.upsertMetadata);
+  const backfillPinnedMetadata = useSessionPinnedStore((state) => state.backfillMissingMetadata);
   const toggleGlobalPinnedSession = useSessionPinnedStore((state) => state.toggle);
   const setGlobalPinnedIds = useSessionPinnedStore((state) => state.setIds);
   const [pinnedSessionIdsByProject, setPinnedSessionIdsByProject] = React.useState<Map<string, Set<string>>>(() => {
@@ -2085,8 +2086,13 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
   ]);
 
   React.useEffect(() => {
-    upsertPinnedMetadata([...globalActiveSessions, ...globalArchivedSessions, ...liveSessions, ...serverSearchSessions]);
-  }, [globalActiveSessions, globalArchivedSessions, liveSessions, serverSearchSessions, pinnedSessionIds, upsertPinnedMetadata]);
+    const catalogSessions = [...globalActiveSessions, ...globalArchivedSessions, ...liveSessions, ...serverSearchSessions];
+    upsertPinnedMetadata(catalogSessions);
+    // Cross-directory pins never reach these catalogs on servers without a
+    // global session-list endpoint; fetch their metadata directly so stub
+    // titles come from the cache on the next boot.
+    void backfillPinnedMetadata(catalogSessions);
+  }, [globalActiveSessions, globalArchivedSessions, liveSessions, serverSearchSessions, pinnedSessionIds, upsertPinnedMetadata, backfillPinnedMetadata]);
 
   const globalPinnedSection = React.useMemo(() => {
     if (globalPinnedSessions.length === 0) {
@@ -3106,7 +3112,7 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     activityNodes: readonly SessionNode[];
     deleteSessions: readonly Session[];
   }) => {
-    const { folder, scopeKey, scopeDirectory, projectId, groupDirectory, archivedBucket, isCollapsed, depth, droppableRef, isDropTarget, activityNodes, deleteSessions } = args;
+    const { folder, scopeKey, projectId, groupDirectory, archivedBucket, isCollapsed, depth, droppableRef, isDropTarget, activityNodes, deleteSessions } = args;
     return (
       <SessionSidebarFolderItem
         key={folder.id}

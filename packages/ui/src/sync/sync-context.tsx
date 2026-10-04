@@ -237,14 +237,14 @@ function pageRecords(page: MessagePage): Array<{ info: Message; parts: Part[] }>
 }
 
 async function fetchSessionMessagesToUserBoundary(input: {
-  sdkClient: OpencodeClient
+  serverId?: string | null
   sessionID: string
   directory: string
   limit: number
   requestTimeout?: <T>(promise: Promise<T>, label: string) => Promise<T>
 }): Promise<MessagePage> {
   const result = await loadMessageHistoryBatch({
-    client: input.sdkClient,
+    serverId: input.serverId,
     sessionID: input.sessionID,
     directory: input.directory,
     limit: input.limit,
@@ -318,9 +318,8 @@ async function materializeSessionFromServer(
   // [OPENCHAMBER-FORK] 2025-05-18 v1.11.1-dev-merge
   // Use explicit serverId when available (e.g. from SSE event pipeline) instead of
   // reverse-resolving through project store, which misses unregistered worktree dirs.
-  const sdkClient = resolveSdkForDirectory(directory, sessionID, serverId)
   const page = await fetchSessionMessagesToUserBoundary({
-    sdkClient,
+    serverId,
     sessionID,
     directory,
     limit: SESSION_MATERIALIZATION_MESSAGE_LIMIT,
@@ -613,8 +612,10 @@ async function listPendingFormsForServer(
   serverId: string,
   sdk?: OpencodeClient,
 ): Promise<FormRequest[]> {
+  // R2 残留: the pending-request resync still reads the legacy wire; the S6
+  // sync-bridge batch moves it to the v2 `form.list`/nativeForm channel.
   const client = serverId === DEFAULT_SERVER_ID
-    ? opencodeClient.getScopedSdkClient(directory)
+    ? opencodeClient.getLegacyScopedClient(directory)
     : serverRegistry.get(serverId)?.client ?? sdk
   if (!client) throw new Error(`question.list failed: missing client for server ${serverId}`)
 
@@ -634,8 +635,10 @@ async function listPendingPermissionsForServer(
   serverId: string,
   sdk?: OpencodeClient,
 ): Promise<PermissionRequest[]> {
+  // R2 残留: see listPendingFormsForServer — legacy wire until the S6
+  // sync-bridge batch.
   const client = serverId === DEFAULT_SERVER_ID
-    ? opencodeClient.getScopedSdkClient(directory)
+    ? opencodeClient.getLegacyScopedClient(directory)
     : serverRegistry.get(serverId)?.client ?? sdk
   if (!client) throw new Error(`permission.list failed: missing client for server ${serverId}`)
 
@@ -1362,7 +1365,7 @@ async function resyncDirectoryAfterReconnect(
         return null
       }),
       fetchSessionMessagesToUserBoundary({
-        sdkClient: scopedClient,
+        serverId,
         sessionID: sessionId,
         directory,
         limit: RECONNECT_MESSAGE_LIMIT,

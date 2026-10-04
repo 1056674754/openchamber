@@ -17,6 +17,7 @@ import { routeMessage, useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectorySync, useSessionMessageRecords, useEnsureSessionMessages } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { resolveSdkForDirectory } from '@/sync/session-actions';
+import { opencodeClient } from '@/lib/opencode/client';
 import { getSyncChildStores, registerSessionDirectory } from '@/sync/sync-refs';
 import { useUIStore } from '@/stores/useUIStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
@@ -2919,17 +2920,18 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
         const runFinalFetch = async () => {
             try {
-                const scopedClient = resolveSdkForDirectory(currentDirectory);
-                const response = await scopedClient.session.messages({
-                    sessionID: capturedSessionId,
-                    limit: isVSCodeRuntime() ? VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT : TASK_TOOL_INITIAL_FETCH_LIMIT,
-                });
+                // R2 client unification: paged v2 message read (projected records).
+                const page = await opencodeClient.getSessionMessages(
+                    capturedSessionId,
+                    { limit: isVSCodeRuntime() ? VSCODE_TASK_TOOL_INITIAL_FETCH_LIMIT : TASK_TOOL_INITIAL_FETCH_LIMIT },
+                    currentDirectory,
+                );
 
                 if (cancelled) {
                     return;
                 }
 
-                const messages = response.data ?? [];
+                const messages = page.items;
                 if (Array.isArray(messages) && messages.length > 0) {
                     const childStores = getSyncChildStores();
                     childStores.update(currentDirectory, (prev) => {
@@ -3074,12 +3076,13 @@ const ToolPartContent: React.FC<ToolPartProps> = ({
 
         const fetchSessionMessages = async (isInitialFetch: boolean) => {
             try {
-                const scopedClient = resolveSdkForDirectory(currentDirectory);
-                const response = await scopedClient.session.messages({
-                    sessionID: taskDetailsSessionId,
-                    limit: resolveFetchLimit(isInitialFetch),
-                });
-                const messages = response.data ?? [];
+                // R2 client unification: paged v2 message read (projected records).
+                const page = await opencodeClient.getSessionMessages(
+                    taskDetailsSessionId,
+                    { limit: resolveFetchLimit(isInitialFetch) },
+                    currentDirectory,
+                );
+                const messages = page.items;
                 if (cancelled || !Array.isArray(messages) || messages.length === 0) {
                     return;
                 }

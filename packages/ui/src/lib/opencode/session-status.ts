@@ -57,3 +57,7 @@ export const hostSessionStatusSnapshotSchema = z.object({
 export type HostSessionStatusSnapshot = z.infer<typeof hostSessionStatusSnapshotSchema>
 export type HostPermissionRequest = z.infer<typeof hostPermissionRequestSchema>
 export type HostFormRequest = z.infer<typeof hostFormRequestSchema>
+
+// v2 reports active loops globally (session.active). A malformed response
+// cannot prove idle. (Fork port of the upstream session-status schema.)
+export const activeSessionSnapshotSchema = z.record(z.string().min(1), z.object({ type: z.literal("running") }))

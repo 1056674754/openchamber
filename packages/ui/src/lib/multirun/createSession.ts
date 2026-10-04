@@ -4,11 +4,10 @@ import type { Metadata, Session as ModelSession } from '@/lib/opencode/model';
 import { getMultiRunMembership, withMultiRunMembership, type MultiRunIdentity } from './identity';
 
 /**
- * Bridge the fork's two Session shapes at the lane boundary: the client
- * surfaces the SDK v2 Session (`cost` optional, `slug`/`version` present)
- * while the stores and the identity/runs helpers use the fork's model.Session.
- * Lane logic only reads the fields both shapes carry — the same seam
- * createMultiRunSession already relies on.
+ * Bridge the fork's two Session shapes at the lane boundary. R2 client
+ * unification: the client now surfaces the projected model.Session directly,
+ * so this is an identity-level cast kept for the call sites that still type
+ * records with the legacy wire Session.
  */
 export const toModelSession = (session: Session): ModelSession => session as unknown as ModelSession;
 export const toClientSession = (session: ModelSession): Session => session as unknown as Session;
@@ -36,7 +35,7 @@ export async function createMultiRunSession(
   const session = await opencodeClient.withDirectory(input.directory, () =>
     opencodeClient.createSession({
       title: input.title,
-      metadata: withMultiRunMembership({ metadata: {} as Metadata }, membership) as Record<string, unknown>,
+      metadata: withMultiRunMembership({ metadata: {} as Metadata }, membership) as Metadata,
     }),
   );
   try {
@@ -44,7 +43,7 @@ export async function createMultiRunSession(
     const boundMetadata = withMultiRunMembership(
       { metadata: session.metadata } as { metadata: Metadata },
       { ...membership, sessionID: session.id },
-    ) as Record<string, unknown>;
+    ) as Metadata;
     const updated = await opencodeClient.withDirectory(input.directory, () =>
       opencodeClient.updateSession(session.id, undefined, boundMetadata),
     );

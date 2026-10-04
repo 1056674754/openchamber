@@ -53,9 +53,9 @@ export function RegenerateTitleDialog({
     // Manual escape hatch: keep the current title editable when AI fails.
     setEditedTitle(sessionTitle || '');
     try {
-      const messages = await opencodeClient.getSessionMessages(sessionId, 30);
+      const page = await opencodeClient.getSessionMessages(sessionId, { limit: 30 });
       if (signal?.cancelled) return;
-      const text = buildSessionText(messages);
+      const text = buildSessionText(page.items);
       const sessionModel = getSessionLastAssistantModel(sessionId);
       const { currentProviderId, currentModelId } = useConfigStore.getState();
       const directory = getSessionDirectoryFromRoutingIndex(sessionId)

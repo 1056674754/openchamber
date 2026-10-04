@@ -30,8 +30,8 @@ const loadLaneMessagesOldestFirst = async (
   directory: string,
   limit: number,
 ): Promise<Array<{ info: { id: string; role: string; error?: unknown }; parts: Part[] }>> => {
-  const records = await opencodeClient.withDirectory(directory, () => opencodeClient.getSessionMessages(sessionId, limit));
-  return [...records].sort((left, right) => {
+  const page = await opencodeClient.withDirectory(directory, () => opencodeClient.getSessionMessages(sessionId, { limit }));
+  return [...page.items].sort((left, right) => {
     const leftCreated = (left.info as { time?: { created?: number } }).time?.created ?? 0;
     const rightCreated = (right.info as { time?: { created?: number } }).time?.created ?? 0;
     if (leftCreated !== rightCreated) return leftCreated - rightCreated;

@@ -66,7 +66,6 @@ import {
   shareSession as shareSessionAction,
   unshareSession as unshareSessionAction,
   optimisticSend,
-  materializeReturnedMessage,
   refetchSessionMessages,
   relocateSessionFromMissingDirectory,
   type MissingDirectoryRelocation,
@@ -156,8 +155,6 @@ export function expandSlashCommandGoalObjective(content: string, commands: GoalC
 // Send routing — shell mode, slash commands, or normal prompt
 // ---------------------------------------------------------------------------
 
-const USER_SHELL_MARKER_TEXT = "The following tool was executed by the user"
-
 export async function routeMessage(params: {
   sessionId: string
   content: string
@@ -196,68 +193,21 @@ export async function routeMessage(params: {
       throw new Error("Cannot run shell command: agent is not selected")
     }
 
-    // OC2 spine S8: a v2 shell has no user-message echo — `session.shell`
-    // creates a shell record that arrives through the event stream. Sending
-    // through the optimistic user-message path would strand that message
-    // forever (the server never echoes it), so v2 sends directly and the
-    // v2 execution events drive the status. The v1 path below is untouched.
-    let shellProtocolMode: 'v1' | 'v2' = 'v1'
-    try {
-      shellProtocolMode = opencodeClient.resolveSdkHandle(sessionDirectory, params.sessionId, targetServerId ?? undefined).mode
-    } catch {
-      // Unresolvable (e.g. unregistered remote): keep the v1 routing.
-    }
-    if (shellProtocolMode === "v2") {
-      await opencodeClient.sendShell({
-        id: params.sessionId,
-        providerID: params.providerID,
-        modelID: params.modelID,
-        command: params.content,
-        agent: shellAgent,
-        directory: sessionDirectory,
-        serverId: targetServerId,
-      })
-      return
-    }
-
-    return optimisticSend({
-      sessionId: params.sessionId,
-      content: USER_SHELL_MARKER_TEXT,
+    // OC2 spine S8, R2 client unification: a v2 shell has no user-message
+    // echo — `session.shell` creates a shell record that arrives through the
+    // event stream. Sending through the optimistic user-message path would
+    // strand that message forever (the server never echoes it), so the shell
+    // sends directly and the execution events drive the status.
+    await opencodeClient.sendShell({
+      id: params.sessionId,
       providerID: params.providerID,
       modelID: params.modelID,
+      command: params.content,
       agent: shellAgent,
       directory: sessionDirectory,
       serverId: targetServerId,
-      deliveryMode: params.deliveryMode,
-      buildOptimisticParts: ({ createPartID }) => [{
-        id: createPartID(),
-        type: "text",
-        text: "/shell",
-        shellAction: {
-          command: params.content,
-          status: "running",
-        },
-      } as unknown as Part],
-      send: async (messageID) => {
-        const result = await opencodeClient.sendShell({
-          id: params.sessionId,
-          providerID: params.providerID,
-          modelID: params.modelID,
-          command: params.content,
-          agent: shellAgent,
-          messageId: messageID,
-          directory: sessionDirectory,
-          serverId: targetServerId,
-        })
-        materializeReturnedMessage({
-          sessionId: params.sessionId,
-          record: result,
-          directory: sessionDirectory,
-          serverId: targetServerId,
-          setIdle: true,
-        })
-      },
     })
+    return
   }
 
   // Slash commands — fire and forget, SSE delivers messages and status
