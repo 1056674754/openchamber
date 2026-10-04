@@ -662,6 +662,35 @@ const bumpDeletedRevisions = (
 
 const initialManagedChatSessions = readManagedChatSessions();
 
+/** Pinned session ids from the persisted pin stores — hydration targets for
+ *  the catalog walk (pins can sit deeper than the walked window). */
+function readPinnedSessionIds(): string[] {
+    const ids = new Set<string>();
+    try {
+        for (const key of ['oc.sessions.pinned', 'oc.sessions.pinnedOrder']) {
+            const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
+            if (Array.isArray(parsed)) {
+                for (const id of parsed) {
+                    if (typeof id === 'string' && id.startsWith('ses_')) ids.add(id);
+                }
+            }
+        }
+        const byProject: unknown = JSON.parse(localStorage.getItem('oc.sessions.pinnedOrderByProject') ?? 'null');
+        if (byProject && typeof byProject === 'object') {
+            for (const list of Object.values(byProject as Record<string, unknown>)) {
+                if (Array.isArray(list)) {
+                    for (const id of list) {
+                        if (typeof id === 'string' && id.startsWith('ses_')) ids.add(id);
+                    }
+                }
+            }
+        }
+    } catch {
+        // Unreadable storage: no hydration targets, the walk alone fills the catalog.
+    }
+    return [...ids];
+}
+
 export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => ({
   activeSessions: initialManagedChatSessions,
   archivedSessions: [],
@@ -828,9 +857,21 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         const allRoots = await listGlobalSessionPage(sdk, {
           archived: true,
           narrowToArchived: false,
-          roots: true,
           pageSize: PAGE_SIZE,
         });
+        // The v2 page caps at 200 sorted by updated desc, so older pinned
+        // sessions may sit beyond it; hydrate them by id so the pinned zone
+        // never renders title-less stubs.
+        const known = new Set(allRoots.map((session) => session.id));
+        const missingPinned = readPinnedSessionIds().filter((id) => !known.has(id));
+        if (missingPinned.length > 0) {
+          const settled = await Promise.allSettled(
+            missingPinned.slice(0, 50).map((id) => opencodeClient.getSession(id, null)),
+          );
+          for (const result of settled) {
+            if (result.status === 'fulfilled') allRoots.push(result.value as typeof allRoots[number]);
+          }
+        }
         indexDefaultServerSessions(allRoots);
         const { active: activeRoots, archived: archivedRoots } = splitGlobalSessionsByArchived(allRoots);
 
