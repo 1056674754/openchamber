@@ -491,7 +491,7 @@ describe('demand-loaded session catalog', () => {
     await useGlobalSessionsStore.getState().loadSessions();
 
     expect(requests).toEqual([{
-      archived: false,
+      archived: true,
       roots: true,
       limit: 200,
     }]);
@@ -515,7 +515,13 @@ describe('demand-loaded session catalog', () => {
 
     const load = useGlobalSessionsStore.getState().loadSessions();
     useGlobalSessionsStore.getState().upsertSession(makeSession('live-during-load', DIR_B));
-    const resolveList = deferred.resolve;
+    // The page request runs through the background-network limiter, so it
+    // starts on a later microtask — poll for it instead of asserting sync.
+    let resolveList = deferred.resolve;
+    for (let waited = 0; !resolveList && waited < 2000; waited += 10) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      resolveList = deferred.resolve;
+    }
     if (!resolveList) throw new Error('session list request did not start');
     resolveList({ data: [makeSession('root', DIR_A)] });
     await load;

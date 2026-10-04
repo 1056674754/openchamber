@@ -43,6 +43,23 @@ export type SessionListClient = {
     };
 };
 
+/** The @opencode/client 2.x page: /api/session with the string cursor in the body. */
+export type V2SessionListClient = {
+    session: {
+        list: (input: {
+            directory?: string;
+            search?: string;
+            limit: number;
+            cursor?: string;
+        }) => Promise<{ data?: Session[]; cursor?: { previous?: string | null; next?: string | null } }>;
+    };
+};
+
+const isLegacySessionClient = (client: SessionListClient | V2SessionListClient): client is SessionListClient => {
+    const candidate = client as { experimental?: { session?: unknown } };
+    return Boolean(candidate?.experimental?.session);
+};
+
 const toNumber = (value: string | null): number | null => {
     if (!value) {
         return null;
@@ -108,18 +125,51 @@ const unwrapSessionList = (
 };
 
 const requestSessionPage = async (
-    apiClient: SessionListClient,
-    request: SessionListRequest,
+    apiClient: SessionListClient | V2SessionListClient,
+    request: SessionListRequest | {
+        directory?: string;
+        search?: string;
+        limit: number;
+        cursor?: string;
+    },
 ): Promise<{ sessions: GlobalSessionRecord[]; response: unknown }> => {
+    // The legacy SDK client (remote lanes against v1-shaped hosts) keeps the
+    // /experimental/session page with its numeric x-next-cursor cursor. The
+    // @opencode/client 2.0.21 instance has no such namespace — its
+    // session.list is the /api/session page with the string cursor in the
+    // body. Duck-type both so one walker serves the whole matrix.
+    if (isLegacySessionClient(apiClient)) {
+        const result = await runBackgroundNetworkTask(() => retry(
+            () => apiClient.experimental.session.list(request as SessionListRequest),
+            { attempts: 3, delay: 500, retryIf: () => true },
+        ));
+
+        return {
+            sessions: unwrapSessionList(result, "experimental.session.list"),
+            response: result.response,
+        };
+    }
+
     const result = await runBackgroundNetworkTask(() => retry(
-        () => apiClient.experimental.session.list(request),
+        () => apiClient.session.list({
+            ...(request.directory ? { directory: request.directory } : {}),
+            ...(request.search ? { search: request.search } : {}),
+            limit: request.limit,
+            ...(typeof request.cursor === "number" ? { cursor: String(request.cursor) } : {}),
+        }),
         { attempts: 3, delay: 500, retryIf: () => true },
     ));
-
     return {
-        sessions: unwrapSessionList(result, "experimental.session.list"),
-        response: result.response,
+        sessions: (result.data ?? []) as GlobalSessionRecord[],
+        response: result,
     };
+};
+
+/** The v2 page cursor: `cursor.next` from the session page body. */
+const readNextPageCursor = (client: V2SessionListClient | undefined, response: unknown): string | undefined => {
+    if (client === undefined) return undefined;
+    const page = response as { cursor?: { next?: string | null } };
+    return page.cursor?.next ?? undefined;
 };
 
 export const readNextCursor = (response: unknown): number | null => {
@@ -160,7 +210,7 @@ export const splitGlobalSessionsByArchived = <T extends GlobalSessionRecord>(
 };
 
 export async function listGlobalSessionPage(
-    apiClient: SessionListClient,
+    apiClient: SessionListClient | V2SessionListClient,
     options: {
         directory?: string;
         archived: boolean;
@@ -171,14 +221,24 @@ export async function listGlobalSessionPage(
         pageSize: number;
     },
 ): Promise<GlobalSessionRecord[]> {
-    const { sessions } = await requestSessionPage(apiClient, {
-        ...(options.directory ? { directory: options.directory } : {}),
-        archived: options.archived,
-        ...(options.roots !== undefined ? { roots: options.roots } : {}),
-        ...(options.search ? { search: options.search } : {}),
-        ...(options.start !== undefined ? { start: options.start } : {}),
-        limit: options.pageSize,
-    });
+    // `roots` is a v1-only server filter: the v2 /api/session page returns
+    // roots and children together and callers derive the tree client-side.
+    console.log('[dbg] listGlobalSessionPage legacy=', isLegacySessionClient(apiClient), JSON.stringify(options))
+    const { sessions } = isLegacySessionClient(apiClient)
+        ? await requestSessionPage(apiClient, {
+            ...(options.directory ? { directory: options.directory } : {}),
+            archived: options.archived,
+            ...(options.roots !== undefined ? { roots: options.roots } : {}),
+            ...(options.search ? { search: options.search } : {}),
+            ...(options.start !== undefined ? { start: options.start } : {}),
+            limit: options.pageSize,
+        })
+        : await requestSessionPage(apiClient, {
+            ...(options.directory ? { directory: options.directory } : {}),
+            archived: options.archived,
+            ...(options.search ? { search: options.search } : {}),
+            limit: options.pageSize,
+        });
     const narrowToArchived = options.narrowToArchived !== false;
     if (options.archived && narrowToArchived) {
         return sessions.filter((session) => isArchivedSession(session));
@@ -187,7 +247,7 @@ export async function listGlobalSessionPage(
 }
 
 export async function listGlobalSessionPages(
-    apiClient: SessionListClient,
+    apiClient: SessionListClient | V2SessionListClient,
     options: {
         directory?: string;
         archived: boolean;
@@ -201,18 +261,28 @@ export async function listGlobalSessionPages(
 ): Promise<GlobalSessionRecord[]> {
     const all: GlobalSessionRecord[] = [];
     const seenIds = new Set<string>();
-    let cursor: number | undefined;
+    let numericCursor: number | undefined;
+    let stringCursor: string | undefined;
     const narrowToArchived = options.narrowToArchived !== false;
+    const isLegacy = isLegacySessionClient(apiClient as SessionListClient | V2SessionListClient);
 
     while (true) {
-        const page = await requestSessionPage(apiClient, {
+        const page = isLegacySessionClient(apiClient)
+            ? await requestSessionPage(apiClient, {
                 ...(options.directory ? { directory: options.directory } : {}),
                 archived: options.archived,
                 ...(options.roots !== undefined ? { roots: options.roots } : {}),
                 ...(options.search ? { search: options.search } : {}),
                 ...(options.start !== undefined ? { start: options.start } : {}),
                 limit: options.pageSize,
-                ...(cursor !== undefined ? { cursor } : {}),
+                ...(numericCursor !== undefined ? { cursor: numericCursor } : {}),
+        })
+            : await requestSessionPage(apiClient, {
+                ...(options.directory ? { directory: options.directory } : {}),
+                archived: options.archived,
+                ...(options.search ? { search: options.search } : {}),
+                limit: options.pageSize,
+                ...(stringCursor !== undefined ? { cursor: stringCursor } : {}),
         });
 
         const payload = page.sessions;
@@ -235,20 +305,31 @@ export async function listGlobalSessionPages(
         // Stop on partial page — nothing more to fetch.
         if (payload.length < options.pageSize) break;
 
-        // Prefer server header; fall back to last session's `time.updated`
-        // (cursor semantics on server = "updated strictly before this timestamp").
-        const headerCursor = toNumber(readResponseHeader(page.response, "x-next-cursor"));
-        const lastUpdated = payload[payload.length - 1]?.time?.updated;
-        const nextCursor = headerCursor
-            ?? (typeof lastUpdated === "number" && Number.isFinite(lastUpdated) ? lastUpdated : undefined);
+        if (isLegacy) {
+            // Legacy cursor semantics on the server = "updated strictly before
+            // this timestamp"; prefer the server header, fall back to the last
+            // session's `time.updated`.
+            const headerCursor = toNumber(readResponseHeader(page.response, "x-next-cursor"));
+            const lastUpdated = payload[payload.length - 1]?.time?.updated;
+            const nextCursor = headerCursor
+                ?? (typeof lastUpdated === "number" && Number.isFinite(lastUpdated) ? lastUpdated : undefined);
 
-        if (nextCursor === undefined) break;
-        // Loop guard: cursor must move backwards in time.
-        if (cursor !== undefined && nextCursor >= cursor) break;
-        // Every id in this page already seen — stop to avoid spinning.
-        if (appended === 0) break;
+            if (nextCursor === undefined) break;
+            // Loop guard: cursor must move backwards in time.
+            if (numericCursor !== undefined && nextCursor >= numericCursor) break;
+            // Every id in this page already seen — stop to avoid spinning.
+            if (appended === 0) break;
 
-        cursor = nextCursor;
+            numericCursor = nextCursor;
+            continue;
+        }
+
+        // v2: the string cursor rides in the page body; `next` means "more".
+        const nextCursor = readNextPageCursor(apiClient as V2SessionListClient, page.response);
+        if (!nextCursor) break;
+        if (stringCursor !== undefined && nextCursor === stringCursor) break;
+
+        stringCursor = nextCursor;
     }
 
     return all;
