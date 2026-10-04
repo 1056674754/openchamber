@@ -194,6 +194,14 @@ runtime, validates the OpenCode source launcher, checks the server import, and
 atomically switches `runtime/current`. It does not replace or modify
 `/Applications/OpenChamber.app`.
 
+The runtime's OpenCode source root defaults to the current fork sibling
+`../opencode-v2` (logged as `default(opencode-v2)`); override with
+`OPENCHAMBER_OPENCODE_SOURCE_ROOT` when staging a different fork. The build log
+always prints the resolved source and its origin — read it before treating the
+runtime as activated. A bare run must never resolve to the v1 sibling
+`../opencode`: doing so once (2026-10-03) packaged the v1 source and displaced
+an activated v2 runtime.
+
 The runtime builder first verifies every unpacked Mach-O signature, then
 compares it with the installed notarized shell by CodeDirectory hash. If a
 native executable changed or its signature is invalid, the runtime build must

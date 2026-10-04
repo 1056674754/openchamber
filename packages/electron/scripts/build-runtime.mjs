@@ -314,8 +314,14 @@ const buildRuntime = (options) => {
   );
   const outputRoot = path.resolve(options.output || defaultOutputRoot);
   const installRoot = path.resolve(options.installRoot || defaultInstallRoot);
+  // Fork default is opencode-v2 (the current line). The v1 sibling `opencode`
+  // must stay unselected by a bare run: a default-fallback build once packaged
+  // the v1 source and displaced an activated v2 runtime (2026-10-03).
+  const opencodeRootOrigin = options.opencodeRoot
+    ? 'option'
+    : process.env.OPENCHAMBER_OPENCODE_SOURCE_ROOT ? 'env' : 'default(opencode-v2)';
   const opencodeRoot = fs.realpathSync(
-    options.opencodeRoot || process.env.OPENCHAMBER_OPENCODE_SOURCE_ROOT || path.resolve(repoRoot, '..', 'opencode'),
+    options.opencodeRoot || process.env.OPENCHAMBER_OPENCODE_SOURCE_ROOT || path.resolve(repoRoot, '..', 'opencode-v2'),
   );
 
   const resources = path.join(sourceApp, 'Contents', 'Resources');
@@ -409,7 +415,7 @@ const buildRuntime = (options) => {
     const installed = options.install
       ? installRuntime({ builtRoot, manifest, installRoot })
       : null;
-    return { builtRoot, installed, manifest, shellApp, sourceApp };
+    return { builtRoot, installed, manifest, shellApp, sourceApp, opencodeRootOrigin };
   } finally {
     fs.rmSync(temporaryRoot, { recursive: true, force: true });
   }
@@ -420,7 +426,7 @@ try {
   const result = buildRuntime(options);
   console.log(`[electron] runtime built: ${result.builtRoot}`);
   console.log(`[electron] runtime id: ${result.manifest.id}`);
-  console.log(`[electron] OpenCode source: ${result.manifest.opencode.sourceRoot}`);
+  console.log(`[electron] OpenCode source: ${result.manifest.opencode.sourceRoot} (${result.opencodeRootOrigin})`);
   console.log(`[electron] OpenCode version: ${result.manifest.opencode.version}`);
   if (result.installed) {
     console.log(`[electron] runtime activated: ${result.installed}`);
