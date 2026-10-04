@@ -108,10 +108,8 @@ export const useSessionSidebarSections = (args: Args) => {
       left.length === right.length && left.every((session, index) => session === right[index])
     );
 
-    let r2dbgTotal = 0;
     const sections = normalizedProjects.map((project) => {
       const activeSessions = getSessionsForProject(project.id);
-      r2dbgTotal += activeSessions.length;
       const archivedSessions = getArchivedSessionsForProject(project.id);
       const worktreesForProject = availableWorktreesByProject.get(project.normalizedPath) ?? EMPTY_WORKTREES;
       const isRepo = projectRepoStatus.has(project.id)
@@ -175,7 +173,6 @@ export const useSessionSidebarSections = (args: Args) => {
     projectSectionCacheRef.current = nextCache;
     if (reusedSections > 0) streamPerfCount('ui.sidebar.project_section.reused', reusedSections);
     if (rebuiltSections > 0) streamPerfCount('ui.sidebar.project_section.rebuilt', rebuiltSections);
-    console.warn('[R2dbg] sections total sessions=', r2dbgTotal, 'projects=', normalizedProjects.length);
     return sections;
   }, [
     normalizedProjects,
