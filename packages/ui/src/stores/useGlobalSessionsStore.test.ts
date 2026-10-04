@@ -43,10 +43,12 @@ const makeSession = (id: string, directory: string): Session => ({
   slug: id,
   projectID: 'proj',
   directory,
+  // The v2 wire nests the directory under location; the projection reads it.
+  location: { directory },
   title: id,
   version: 'v1',
   time: { created: 1, updated: 2 },
-});
+} as unknown as Session);
 
 const resetCatalog = (): void => {
   useGlobalSessionsStore.setState({

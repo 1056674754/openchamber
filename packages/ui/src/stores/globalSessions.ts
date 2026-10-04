@@ -2,6 +2,8 @@ import type { Session } from "@opencode-ai/sdk/v2";
 import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { retry } from "@/sync/retry";
 import { unwrapSessionListRows } from "@/sync/session-list-bootstrap";
+import { projectSession } from "@/lib/opencode/projection";
+import type { SessionInfo } from "@opencode/client";
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 
 export type GlobalSessionRecord = Session & {
@@ -159,8 +161,10 @@ const requestSessionPage = async (
         }),
         { attempts: 3, delay: 500, retryIf: () => true },
     ));
+    // The v2 wire nests the directory under `location`; project the rows into
+    // the domain Session (top-level directory) or every group match fails.
     return {
-        sessions: (result.data ?? []) as GlobalSessionRecord[],
+        sessions: ((result.data ?? []) as unknown as SessionInfo[]).map(projectSession) as GlobalSessionRecord[],
         response: result,
     };
 };
