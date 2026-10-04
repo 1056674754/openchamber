@@ -638,7 +638,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
       return visible;
     };
 
-    return sidebarSessionCatalog.filter((session) => isVisible(session));
+    const visibleSessions = sidebarSessionCatalog.filter((session) => isVisible(session));
+  console.warn('[R2dbg] sessions memo: catalog=', sidebarSessionCatalog.length, 'visible=', visibleSessions.length, 'scopes=', knownSessionDirectoryScopes.length);
+  return visibleSessions;
   }, [isVSCode, knownSessionDirectoryScopes, sidebarSessionCatalog]);
 
   const managedChatSources = React.useMemo(() => {
@@ -781,7 +783,9 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
 
     const load = async (): Promise<void> => {
       attempt += 1;
+      console.warn('[R2dbg] sidebar ensure effect fired, attempt=', attempt);
       await ensureGlobalSessionsLoaded(syncSessionsSnapshotRef.current);
+      console.warn('[R2dbg] ensure resolved, store status=', useGlobalSessionsStore.getState().status, 'hasLoaded=', useGlobalSessionsStore.getState().hasLoaded, 'isComplete=', useGlobalSessionsStore.getState().isCompleteSnapshot);
       if (
         !cancelled
         && useGlobalSessionsStore.getState().status === 'error'

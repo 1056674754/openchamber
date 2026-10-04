@@ -92,6 +92,7 @@ export const useSessionSidebarSections = (args: Args) => {
         ...getSessionsForProject(project),
         ...getArchivedSessionsForProject(project),
       ]);
+      console.warn('[R2dbg] hook project sessions:', project.id.slice(0, 20), project.label ?? '', '→', projectSessions.length);
       const worktreesForProject = dedupeWorktreesByPath(
         getWorktreesForProject(
           availableWorktreesByProject,

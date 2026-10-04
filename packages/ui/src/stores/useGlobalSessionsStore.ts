@@ -845,7 +845,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   loadSessions: async (fallbackActive) => {
+    console.warn('[R2dbg] loadSessions ENTER, fallback=', Array.isArray(fallbackActive) ? fallbackActive.length : fallbackActive);
     if (inflightLoad) {
+      console.warn('[R2dbg] loadSessions inflight short-circuit');
       return inflightLoad;
     }
 
@@ -853,6 +855,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
 
     inflightLoad = (async () => {
       try {
+        console.warn('[R2dbg] loadSessions walking');
         const sdk = opencodeClient.getApiClient() as unknown as V2SessionListClient;
         // The v2 page caps at 200 sorted by updated desc — walk the full
         // cursor chain or every project group older than the window renders
@@ -874,6 +877,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           }
         }
         indexDefaultServerSessions(allRoots);
+        console.warn('[R2dbg] loadSessions walked, total=', allRoots.length);
         const { active: activeRoots, archived: archivedRoots } = splitGlobalSessionsByArchived(allRoots);
 
         set((state) => {
@@ -886,6 +890,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           });
         });
       } catch (error) {
+        console.warn('[R2dbg] loadSessions FAILED:', String(error).slice(0, 200));
         console.warn('[GlobalSessions] Failed to load sessions, using fallback snapshot:', error);
         set((state) => {
           const nextActiveSessions = mergeSessionLists(state.activeSessions, fallbackActive);
