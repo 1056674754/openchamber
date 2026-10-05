@@ -76,6 +76,7 @@ export const SessionDialogs: React.FC = () => {
     const homeDirectory = useDirectoryStore((s) => s.homeDirectory);
     const isHomeReady = useDirectoryStore((s) => s.isHomeReady);
     const projects = useProjectsStore((s) => s.projects);
+    const hasLoadedSharedSettings = useProjectsStore((s) => s.hasLoadedSharedSettings);
     const activeProjectId = useProjectsStore((s) => s.activeProjectId);
     const { isMobile, isTablet, hasTouchInput } = useDeviceInfo();
     const useMobileOverlay = isMobile || isTablet || hasTouchInput;
@@ -126,7 +127,10 @@ export const SessionDialogs: React.FC = () => {
     // Session loading is handled by sync bootstrap — no manual loadSessions needed.
 
     React.useEffect(() => {
-        if (hasShownInitialDirectoryPrompt || !isHomeReady || projects.length > 0) {
+        // Conclude "no projects" only after the shared settings have actually
+        // loaded — early in startup the store is still empty and this prompt
+        // would fire for users who have dozens of projects.
+        if (hasShownInitialDirectoryPrompt || !isHomeReady || !hasLoadedSharedSettings || projects.length > 0) {
             return;
         }
 
@@ -143,6 +147,7 @@ export const SessionDialogs: React.FC = () => {
     }, [
         hasShownInitialDirectoryPrompt,
         isHomeReady,
+        hasLoadedSharedSettings,
         projects.length,
     ]);
 

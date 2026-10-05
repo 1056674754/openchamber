@@ -1588,11 +1588,7 @@ function handleEvent(
     // but only if not during recent boot
     if (payload.type === "server.connected" || payload.type === "global.disposed") {
       if (payload.type === "server.connected" && serverId === DEFAULT_SERVER_ID) {
-        const globalState = useGlobalSyncStore.getState()
-        if (globalState.error?.type === "init") {
-          globalState.actions.set({ ready: false, error: undefined })
-          void bootstrapGlobal(sdk, globalState.actions.set)
-        }
+        retryGlobalBootstrapUntilClean(sdk)
       }
       fetchAndHydrateUnreadState()
       fetchAndHydrateMarkersState().catch((err) => {
@@ -1962,6 +1958,21 @@ function handleEvent(
 const dispatchOpenCodeUpdateAvailable = (payload: { version: string }) => {
   if (typeof window === "undefined") return
   window.dispatchEvent(new CustomEvent("openchamber:opencode-update-available", { detail: payload }))
+}
+
+  // The OpenCode 2 boot window (lazy location services, tens of seconds on
+  // large configs) makes the first global bootstrap fail with transport
+  // errors. server.connected fires once per SSE connect — a single retry
+  // there loses the race. Bounded backoff until the bootstrap runs clean.
+const retryGlobalBootstrapUntilClean = (client: OpencodeClient, attempts = 5, delayMs = 5000): void => {
+  const globalState = useGlobalSyncStore.getState()
+  if (globalState.error?.type !== "init") return
+  globalState.actions.set({ ready: false, error: undefined })
+  bootstrapGlobal(client, globalState.actions.set).catch(() => {
+    if (attempts > 1) {
+      setTimeout(() => retryGlobalBootstrapUntilClean(client, attempts - 1, delayMs), delayMs)
+    }
+  })
 }
 
 export function SyncProvider(props: {
