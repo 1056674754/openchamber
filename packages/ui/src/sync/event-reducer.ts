@@ -493,7 +493,8 @@ export function applyDirectoryEvent(
     }
 
     case "vcs.branch.updated": {
-      const props = event.properties as { branch: string }
+      // v2 wire frames can reach the reducer without a properties envelope; never crash the dispatch chain.
+      const props = (event.properties ?? {}) as { branch?: string }
       if (draft.vcs?.branch === props.branch) return false
       draft.vcs = { branch: props.branch }
       return true

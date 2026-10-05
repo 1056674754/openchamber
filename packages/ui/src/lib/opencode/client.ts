@@ -1633,7 +1633,9 @@ class OpencodeService {
   ): Promise<Record<string, { type: "idle" | "busy" | "retry"; attempt?: number; message?: string; next?: number }> | null> {
     try {
       const base = this.baseUrl.replace(/\/$/, "")
-      const url = new URL(`${base}/session/status`)
+      // Ride the OpenChamber /api proxy: bare `/session/status` has no route on
+      // this origin (the proxy maps it to the v2 `session.active` upstream).
+      const url = new URL(`${base}/api/session/status`)
 
       const trimmedDirectory = typeof directory === "string" ? directory.trim() : ""
       if (trimmedDirectory.length > 0) {

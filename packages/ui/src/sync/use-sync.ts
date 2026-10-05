@@ -1,5 +1,5 @@
 import { useCallback, useRef, useMemo } from "react"
-import type { Message, OpencodeClient, Part, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
+import type { Message, OpencodeClient, Part, Session, SessionStatus, Todo } from "@opencode-ai/sdk/v2/client"
 import { Binary } from "./binary"
 import { retry } from "./retry"
 import { SESSION_CACHE_LIMIT, type State } from "./types"
@@ -642,6 +642,25 @@ export function useSync() {
               target.store.setState({ session: sessions })
             }
           }).catch((error: unknown) => {
+            // v2 removed session.children (404): derive children from the global catalog by parentID.
+            const catalog = useGlobalSessionsStore.getState()
+            const catalogChildren = [...catalog.activeSessions, ...catalog.archivedSessions].filter(
+              (candidate) => (candidate as Session & { parentID?: string | null }).parentID === sessionID,
+            )
+            if (catalogChildren.length > 0 && !isStale()) {
+              const state = target.store.getState()
+              let sessions = state.session
+              for (const child of catalogChildren) {
+                const index = Binary.search(sessions, child.id, (session) => session.id)
+                if (index.found) continue
+                if (sessions === state.session) sessions = [...sessions]
+                sessions.splice(index.index, 0, child)
+              }
+              if (sessions !== state.session) {
+                target.store.setState({ session: sessions })
+              }
+              return
+            }
             console.warn("[sync] failed to hydrate session children", {
               sessionID,
               directory: target.directory,

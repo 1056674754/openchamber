@@ -639,7 +639,6 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     };
 
     const visibleSessions = sidebarSessionCatalog.filter((session) => isVisible(session));
-    console.warn('[R2dbg] memo catalog=', sidebarSessionCatalog.length, 'visible=', visibleSessions.length, 'scopes=', knownSessionDirectoryScopes.length);
   return visibleSessions;
   }, [isVSCode, knownSessionDirectoryScopes, sidebarSessionCatalog]);
 
@@ -1538,15 +1537,12 @@ const multiRunEnabled = useUIStore((state) => state.multiRunEnabled);
     session: Session,
     isRenderedExpanded: boolean,
   ) => {
-    console.warn('[R2dbg] toggleParent key=', expansionKey, 'isRenderedExpanded=', isRenderedExpanded);
     if (!isRenderedExpanded) {
       void loadSessionChildren(session).then((children) => {
-        console.warn('[R2dbg] loadSessionChildren ->', children.length);
       }).catch(() => undefined);
     }
     setExpandedParents((prev) => {
       const next = getNextSessionExpansionKeys(prev, expansionKey, isRenderedExpanded);
-      console.warn('[R2dbg] expandedParents size', prev, '->', next.size);
       try {
         safeStorage.setItem(SESSION_EXPANDED_STORAGE_KEY, JSON.stringify(Array.from(next)));
       } catch { /* ignored */ }

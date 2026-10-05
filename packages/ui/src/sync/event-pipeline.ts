@@ -105,7 +105,7 @@ export type EventPipelineInput = {
    * v1 mode (the default for every server) never consults anything past this
    * check — the code path below it is byte-identical to pre-S6.
    */
-  wireMode?: (serverId: string | undefined) => boolean
+  wireMode?: (serverId: string | undefined, payload: Event) => boolean
   transport?: "auto" | "ws" | "sse"
   heartbeatTimeoutMs?: number
   reconnectDelayMs?: number
@@ -638,7 +638,9 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     // concat, and directory routing behave exactly as on the v1 track. The
     // bridge's fork-adjacent names ride the queue as opaque events — the
     // same contract as the v2 `form.*` frames already in the stream.
-    if (wireMode && wireMode(serverId)) {
+    // The callback also shape-detects raw v2 frames so an unrecorded v2 mode
+    // still translates them; foreign frames stay raw for their own provider.
+    if (wireMode && wireMode(serverId, payload)) {
       for (const translated of translateV2WireEvent(payload)) {
         enqueueTranslated(directory, translated as Event, serverId)
       }

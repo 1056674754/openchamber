@@ -968,6 +968,19 @@ export function translateV2WireEvent(payload: unknown): BridgeEvent[] {
   }
 }
 
+/**
+ * True when a payload is a raw v2 wire frame (`{type, data}` — no fork
+ * `properties` envelope). Intake translates these even when the server's
+ * protocol mode was never recorded in the UI mode registry, so an unrecorded
+ * v2 server still feeds the reducer translated events instead of raw frames.
+ */
+export function looksLikeRawV2WireEvent(payload: unknown): boolean {
+  if (!isRecord(payload)) return false
+  if (typeof payload.type !== "string" || payload.type.length === 0) return false
+  if ("properties" in payload) return false
+  return "data" in payload || "location" in payload || "created" in payload
+}
+
 /** True when a raw payload is an OpenChamber server frame, not OpenCode wire. */
 export function isOpenchamberFrame(payload: unknown): boolean {
   return isRecord(payload) && typeof payload.type === "string" && payload.type.startsWith("openchamber:")

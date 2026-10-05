@@ -7,7 +7,7 @@ import type { StoreApi } from "zustand"
 import { useStore } from "zustand"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2/client"
 import { createEventPipeline } from "./event-pipeline"
-import { translateV2WireEvent, type CatalogBridgeKind } from "@/lib/opencode/wire-bridge"
+import { translateV2WireEvent, looksLikeRawV2WireEvent, type CatalogBridgeKind } from "@/lib/opencode/wire-bridge"
 import { getProtocolMode } from "@/lib/opencode/protocolMode"
 import { refreshStoresForCatalogKind } from "@/stores/catalogRefresh"
 import { isVSCodeRuntime } from "@/lib/desktop"
@@ -2393,7 +2393,9 @@ export function SyncProvider(props: {
       // OC2 S6: a v2-mode server's fan-in (remote event bus) delivers raw wire
       // payloads; translate into the fork's reducer vocabulary at intake. The
       // pipeline path does the same inside event-pipeline (pre-coalescing).
-      const incomingEvents: Event[] = getProtocolMode(serverId) === "v2"
+      // Shape fallback: a raw v2 frame (no properties envelope) is translated
+      // even when the mode registry was never populated for this server.
+      const incomingEvents: Event[] = getProtocolMode(serverId) === "v2" || looksLikeRawV2WireEvent(payload)
         ? (translateV2WireEvent(payload) as Event[])
         : [payload]
       for (const event of incomingEvents) {
@@ -2462,9 +2464,12 @@ export function SyncProvider(props: {
       // translated here. Frames tagged for another server must stay raw —
       // they are forwarded to that server's provider, whose intake applies
       // that server's own mode. v1 (the default) resolves false and never
-      // touches the bridge.
-      wireMode: (eventServerId) =>
-        (eventServerId === undefined || eventServerId === serverId) && getProtocolMode(serverId) === "v2",
+      // touches the bridge — except raw v2 wire frames, which are translated
+      // by shape even when the mode registry was never populated (their
+      // colliding v1 names would otherwise crash the reducer/coalescer).
+      wireMode: (eventServerId, payload) =>
+        (eventServerId === undefined || eventServerId === serverId)
+        && (getProtocolMode(serverId) === "v2" || looksLikeRawV2WireEvent(payload)),
       onEvent: (directory, payload, meta) => {
         const eventServerId = meta?.serverId
         if (eventServerId && eventServerId !== serverId) {

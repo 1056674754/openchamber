@@ -65,9 +65,12 @@ export async function fetchMessagePageToUserBoundary(input: {
   const seenCursors = new Set<string>()
   let extraPages = 0
   const minimumRealUserMessages = Math.max(1, Math.floor(input.minimumRealUserMessages ?? 1))
+  // The latest real user turn is the hard target; depth beyond it stays best-effort.
+  const interactiveRealUserMessages = 1
   const maxPayloadBytes = input.maxPayloadBytes ?? MESSAGE_USER_BOUNDARY_PAYLOAD_BYTE_LIMIT
 
   while (!page.complete && page.cursor && countUserBoundaries(page) < minimumRealUserMessages) {
+    const boundaryCount = countUserBoundaries(page)
     const payloadBytes = page.payloadBytes
     const hasPayloadBytes = typeof payloadBytes === "number" && Number.isFinite(payloadBytes)
     const maxExtraPages = input.maxExtraPages ?? (
@@ -76,10 +79,13 @@ export async function fetchMessagePageToUserBoundary(input: {
     const maxRecords = input.maxRecords ?? (
       hasPayloadBytes ? MESSAGE_USER_BOUNDARY_BYTE_AWARE_RECORD_LIMIT : MESSAGE_USER_BOUNDARY_RECORD_LIMIT
     )
+    // Below the interactive hard target the page-count cap yields to cursor paging
+    // (record and byte budgets still bound it) so a v2 record-dense tail cannot
+    // stop the load before the latest user turn is in hand.
     if (
       page.session.length >= maxRecords
-      || extraPages >= maxExtraPages
       || (typeof payloadBytes === "number" && Number.isFinite(payloadBytes) && payloadBytes >= maxPayloadBytes)
+      || (boundaryCount >= interactiveRealUserMessages && extraPages >= maxExtraPages)
     ) {
       break
     }
@@ -119,6 +125,7 @@ export async function fetchMessagePageToUserBoundary(input: {
   return {
     page,
     extraPages,
-    stoppedBeforeBoundary: !page.complete && countUserBoundaries(page) < minimumRealUserMessages,
+    // Only a missing interactive turn (not a shorter best-effort depth) counts as stopped-before-boundary.
+    stoppedBeforeBoundary: !page.complete && countUserBoundaries(page) < interactiveRealUserMessages,
   }
 }
