@@ -5,6 +5,7 @@ import { ChatInput } from './ChatInput';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
+import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { DraftPresetChips } from './DraftPresetChips';
 import type { ResolvedStarter } from './useDraftStarters';
 import MessageList, { type MessageListHandle } from './MessageList';
@@ -946,13 +947,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
     }, [requestPresetSubmit]);
 
     const draftWelcome = React.useMemo(() => (
-        <ChatEmptyState isSubmitting={Boolean(newSessionDraft?.submitting)}>
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
+            <OpenChamberLogo width={140} height={140} className="opacity-20" />
             <DraftPresetChips
                 onSubmit={handleDraftStarterSubmit}
-                className="mx-auto max-w-full"
+                className="mt-8 max-w-md"
             />
-        </ChatEmptyState>
-    ), [handleDraftStarterSubmit, newSessionDraft?.submitting]);
+        </div>
+    ), [handleDraftStarterSubmit]);
 
     React.useEffect(() => {
         activeTurnChangeRef.current = timelineController.handleActiveTurnChange;
@@ -1167,19 +1169,14 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
 		return (
 			<div className="relative flex flex-col h-full bg-background transform-gpu">
 				{!isDesktopExpandedInput ? (
-					<div className="flex-1 flex items-center justify-center">
-						{draftWelcome}
-					</div>
+					draftWelcome
 				) : null}
-                <div
-                    className={cn(
-                        'relative z-10',
-						isDesktopExpandedInput
-							? 'flex-1 min-h-0 bg-background'
-							: 'bg-background'
-					)}
-				>
-					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
+				{/* Fork draft layout (1.18.2): the composer follows the centered
+				    welcome in normal flow — not pinned to the viewport bottom. */}
+				<div className={cn('relative z-10', isDesktopExpandedInput && 'flex-1 min-h-0 bg-background')}>
+					<div className={cn(isDesktopExpandedInput ? '' : 'pb-[6vh]')}>
+						{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
+					</div>
 				</div>
 			</div>
         );
@@ -1236,7 +1233,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                         'relative z-10',
 						isDesktopExpandedInput
 							? 'flex-1 min-h-0 bg-background'
-							: 'bg-background'
+							: 'flex-1 flex-col justify-end bg-background px-0 pb-[6vh]'
 					)}
 				>
 					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
@@ -1269,7 +1266,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({ autoOpenDraft = tr
                         'relative z-10',
 						isDesktopExpandedInput
 							? 'flex-1 min-h-0 bg-background'
-							: 'bg-background'
+							: 'flex-1 flex-col justify-end bg-background px-0 pb-[6vh]'
 					)}
 				>
 					{promptReadOnly ? <ReadOnlyPromptBanner /> : <ChatInput scrollToBottom={resumeToLatestInstant} />}
