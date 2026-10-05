@@ -1,4 +1,6 @@
 import React from 'react';
+import { normalizeOpenChamberPluginStatus } from '@/components/update/openChamberPluginStatus';
+import { monitorOpenChamberPluginStatus } from '@/components/update/openChamberPluginStatusMonitor';
 import { BrowserVoiceButton, ComposerDictation } from '@/components/voice';
 import { SessionSuggestionChip } from '@/components/chat/SessionSuggestionChip';
 import { FormDock } from '@/components/chat/FormDock';
@@ -1485,9 +1487,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
 
     const [pluginLoaded, setPluginLoaded] = React.useState<boolean | null>(null);
     React.useEffect(() => {
-      fetch('/api/openchamber/plugin-status').then(r => r.json()).then((data: { loaded?: boolean; reason?: string }) => {
-        setPluginLoaded(data.reason === 'not-checked' ? null : data.loaded === true);
-      }).catch(() => setPluginLoaded(null));
+      return monitorOpenChamberPluginStatus({
+        read: async (signal) => {
+          const response = await fetch('/api/openchamber/plugin-status', { signal });
+          if (response.status === 404) return null;
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const status = normalizeOpenChamberPluginStatus(await response.json());
+          if (!status) throw new Error('Invalid OpenChamber plugin status response');
+          return status;
+        },
+        report: (status) => setPluginLoaded(status.pending || status.reason === 'not-checked' ? null : status.loaded),
+        error: () => setPluginLoaded(null),
+      });
     }, []);
 
     const knownAgentNames = React.useMemo(
@@ -4585,7 +4596,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({ onOpenSettings, scrollTo
         <form
             onSubmit={(e) => { e.preventDefault(); handlePrimaryAction(); }}
             className={cn(
-                "oc-mobile-composer relative pt-0 pb-4",
+                "relative w-full pt-0 pb-4",
+                isMobile && 'bottom-safe-area oc-mobile-composer',
                 isDesktopExpanded && 'flex h-full min-h-0 flex-col pt-4',
                 isMobile && 'bottom-safe-area'
             )}
